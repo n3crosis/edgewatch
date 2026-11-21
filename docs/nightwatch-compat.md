@@ -95,8 +95,10 @@ Source: `agent.phar:src/Ingest.php`, `agent.phar:src/StreamBuffer.php`.
 
 **Not confirmed from source:** the exact status codes Nightwatch cloud returns (e.g. 401 vs 403 for a bad token, 429 for quota),
 and the shape of a successful body. The agent only relies on 2xx vs non-2xx and on the optional `message`/`stop`/`refresh_in` keys, so EdgeWatch returns:
-`200 {"ok":true,"accepted":n}` on success, `401 {"message":"Unauthenticated."}` on bad tokens,
-`422 {"message":"..."}` on invalid payloads, `429 {"message":"...","stop":true,"refresh_in":900}` when over quota.
+`200 {"ok":true,"accepted":n,"rejected":m,"errors":[...]}` on success, `401 {"message":"Unauthenticated."}` on missing, unknown, read-only or expired tokens,
+`413` over `MAX_BODY_BYTES`, `422 {"message":"..."}` when the body is not JSON or has no `records` array, `503` if the queue is unavailable.
+Individually malformed records are dropped and counted in `rejected` rather than failing the batch, because the agent drops the whole batch on any non-2xx.
+Quota signalling (`429` + `stop`) is **not implemented yet**.
 
 ## Record shapes (common to both hops)
 
