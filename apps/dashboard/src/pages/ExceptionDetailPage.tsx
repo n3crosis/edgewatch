@@ -1,8 +1,11 @@
 import { Link, useParams } from 'react-router-dom';
-import { BarChart } from '../components/charts';
-import { Card, Empty, ErrorState, Loading, PageHeader, Stat, Td, Th } from '../components/ui';
-import { api, useAsync } from '../lib/api';
-import { ago } from '../lib/format';
+import { BarChart } from '@/components/charts';
+import { Empty, ErrorState, Loading, PageHeader, Panel, Stat } from '@/components/common';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { api, useAsync } from '@/lib/api';
+import { ago } from '@/lib/format';
 
 export default function ExceptionDetailPage() {
   const { group = '' } = useParams();
@@ -14,7 +17,16 @@ export default function ExceptionDetailPage() {
 
   return (
     <>
-      <PageHeader back={{ to: '/exceptions', label: 'Exceptions' }} title={<span className="font-mono text-rose-300">{data.class}</span>} subtitle={data.message} />
+      <PageHeader
+        back={{ to: '/exceptions', label: 'Exceptions' }}
+        title={<span className="font-mono text-destructive">{data.class}</span>}
+        subtitle={
+          <span className="flex items-center gap-2">
+            <Badge variant={data.handled ? 'secondary' : 'destructive'}>{data.handled ? 'handled' : 'unhandled'}</Badge>
+            {data.message}
+          </span>
+        }
+      />
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Events (24h)" value={data.count} tone="bad" />
         <Stat label="Users affected" value={data.users} />
@@ -22,34 +34,45 @@ export default function ExceptionDetailPage() {
         <Stat label="Last seen" value={ago(data.last_seen)} />
       </div>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Card title="Stack trace">
-          <ol className="divide-y divide-slate-800/70 font-mono text-xs">
+        <Panel title="Stack trace">
+          <ol className="font-mono text-xs">
             {data.stack.map((f, i) => (
-              <li key={i} className={`px-5 py-2.5 ${f.file.startsWith('vendor/') ? 'text-slate-600' : 'text-slate-300'}`}>
-                <div>{f.source}</div>
-                <div className="mt-0.5 text-[11px] text-slate-500">{f.file}</div>
+              <li key={i}>
+                {i > 0 && <Separator />}
+                <div className={`px-5 py-2.5 ${f.file.startsWith('vendor/') ? 'text-muted-foreground/60' : ''}`}>
+                  <div>{f.source}</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">{f.file}</div>
+                </div>
               </li>
             ))}
           </ol>
-        </Card>
+        </Panel>
         <div className="space-y-4">
-          <Card title="Occurrences over 24h">
-            <div className="px-5 pb-3 pt-10"><BarChart height={100} series={data.trend.map((v, i) => ({ label: `${24 - i}h ago`, value: v }))} /></div>
-          </Card>
-          <Card title="Recent occurrences">
-            <table className="w-full text-sm">
-              <thead><tr><Th>When</Th><Th>Trace</Th><Th>User</Th></tr></thead>
-              <tbody>
+          <Panel title="Occurrences over 24h">
+            <div className="px-5 pb-4 pt-6">
+              <BarChart height={100} series={data.trend.map((v, i) => ({ label: `${24 - i}h ago`, value: v }))} />
+            </div>
+          </Panel>
+          <Panel title="Recent occurrences">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="px-5">When</TableHead>
+                  <TableHead>Trace</TableHead>
+                  <TableHead className="px-5">User</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {data.occurrences.slice(0, 8).map((o) => (
-                  <tr key={o.trace_id} className="border-t border-slate-800/70">
-                    <Td className="text-xs text-slate-400">{ago(o.timestamp)}</Td>
-                    <Td><Link to={`/traces/${o.trace_id}`} className="font-mono text-xs text-sky-400 hover:underline">{o.name}</Link></Td>
-                    <Td className="text-xs text-slate-400">{o.user ? `#${o.user}` : '—'}</Td>
-                  </tr>
+                  <TableRow key={o.trace_id}>
+                    <TableCell className="px-5 text-xs text-muted-foreground">{ago(o.timestamp)}</TableCell>
+                    <TableCell><Link to={`/traces/${o.trace_id}`} className="font-mono text-xs text-primary hover:underline">{o.name}</Link></TableCell>
+                    <TableCell className="px-5 text-xs text-muted-foreground">{o.user ? `#${o.user}` : '—'}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </Card>
+              </TableBody>
+            </Table>
+          </Panel>
         </div>
       </div>
     </>

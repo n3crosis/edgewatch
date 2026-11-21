@@ -1,4 +1,4 @@
-import { normalizeSql, shortHash, type IngestMessage, type NightwatchRecord } from '@edgewatch/shared';
+import { normalizeSql, scrubPii, shortHash, type IngestMessage, type NightwatchRecord } from '@edgewatch/shared';
 
 export interface Env {
   DB: D1Database;
@@ -19,8 +19,11 @@ export function traceKey(projectId: string, date: string, traceId: string): stri
   return `traces/${projectId}/${date}/${traceId}.json`;
 }
 
-/** Strip literals from SQL (the official Nightwatch client does not) and attach the EdgeWatch sql_hash. */
+/** Strip SQL literals and attach sql_hash; scrub PII from exception/log messages (the official Nightwatch client does neither). */
 export async function normalizeRecord(record: NightwatchRecord): Promise<NightwatchRecord> {
+  if ((record.t === 'exception' || record.t === 'log') && typeof record.message === 'string') {
+    return { ...record, message: scrubPii(record.message) };
+  }
   if (record.t !== 'query' || typeof record.sql !== 'string') return record;
   const sql = normalizeSql(record.sql);
   return { ...record, sql, sql_hash: await shortHash(sql) };

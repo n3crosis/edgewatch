@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkline } from '../components/charts';
-import { Card, Empty, ErrorState, Loading, PageHeader, Sql, Td, Th } from '../components/ui';
-import { api, useAsync } from '../lib/api';
-import { compact, ms } from '../lib/format';
-import { useRange } from '../lib/range';
-import type { QueryGroup } from '../lib/types';
+import { Sparkline } from '@/components/charts';
+import { Empty, ErrorState, Loading, PageHeader, Panel, Sql } from '@/components/common';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { api, useAsync } from '@/lib/api';
+import { compact, ms } from '@/lib/format';
+import { useRange } from '@/lib/range';
+import type { QueryGroup } from '@/lib/types';
 
 const SORTS: { key: keyof QueryGroup; label: string }[] = [
   { key: 'total_ms', label: 'Total time' },
@@ -26,36 +29,51 @@ export default function QueriesPage() {
         title="Queries"
         subtitle="Grouped by sql_hash — literals are stripped before hashing, so values never leave your app"
         actions={
-          <div className="flex rounded-lg border border-slate-800 bg-slate-900 p-0.5 text-xs">
+          <ToggleGroup type="single" variant="outline" size="sm" value={sort} onValueChange={(v) => v && setSort(v as keyof QueryGroup)} aria-label="Sort by">
             {SORTS.map((s) => (
-              <button key={s.key} onClick={() => setSort(s.key)} className={`rounded-md px-3 py-1.5 ${sort === s.key ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>{s.label}</button>
+              <ToggleGroupItem key={s.key} value={s.key} className="px-3 text-xs">{s.label}</ToggleGroupItem>
             ))}
-          </div>
+          </ToggleGroup>
         }
       />
-      <Card>
+      <Panel>
         {error ? <ErrorState error={error} /> : loading || !data ? <Loading /> : rows.length === 0 ? <Empty>No queries recorded.</Empty> : (
-          <table className="w-full table-fixed text-sm">
-            <thead><tr><Th className="w-[46%]">Query</Th><Th>Calls</Th><Th className="text-right">Total</Th><Th className="text-right">Avg</Th><Th className="text-right">p95</Th><Th className="text-right">Max</Th><Th>Trend</Th></tr></thead>
-            <tbody>
+          <Table className="table-fixed">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[46%] px-5">Query</TableHead>
+                <TableHead>Calls</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-right">Avg</TableHead>
+                <TableHead className="text-right">p95</TableHead>
+                <TableHead className="text-right">Max</TableHead>
+                <TableHead className="px-5">Trend</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.map((q) => (
-                <tr key={q.sql_hash} onClick={() => navigate(`/queries/${q.sql_hash}`)} className="cursor-pointer border-t border-slate-800/70 hover:bg-slate-800/30">
-                  <Td>
-                    <div className="truncate"><Sql sql={q.sql} className="text-slate-300" /></div>
-                    <div className="mt-1 font-mono text-[11px] text-slate-600">{q.connection} · {q.sql_hash.slice(0, 12)}</div>
-                  </Td>
-                  <Td className="tabular-nums">{compact(q.calls)}</Td>
-                  <Td className="text-right tabular-nums">{ms(q.total_ms)}</Td>
-                  <Td className="text-right tabular-nums text-slate-400">{ms(q.avg_ms)}</Td>
-                  <Td className={`text-right tabular-nums ${q.p95_ms > 100 ? 'text-amber-300' : ''}`}>{ms(q.p95_ms)}</Td>
-                  <Td className="text-right tabular-nums text-slate-400">{ms(q.max_ms)}</Td>
-                  <Td><Sparkline values={q.trend} width={90} className="text-amber-300" /></Td>
-                </tr>
+                <TableRow key={q.sql_hash} onClick={() => navigate(`/queries/${q.sql_hash}`)} className="cursor-pointer">
+                  <TableCell className="px-5 py-3">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="truncate"><Sql sql={q.sql} /></div>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xl font-mono">{q.sql}</TooltipContent>
+                    </Tooltip>
+                    <div className="mt-1 font-mono text-[11px] text-muted-foreground">{q.connection} · {q.sql_hash.slice(0, 12)}</div>
+                  </TableCell>
+                  <TableCell className="tabular-nums">{compact(q.calls)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{ms(q.total_ms)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{ms(q.avg_ms)}</TableCell>
+                  <TableCell className={`text-right tabular-nums ${q.p95_ms > 100 ? 'text-amber-300' : ''}`}>{ms(q.p95_ms)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{ms(q.max_ms)}</TableCell>
+                  <TableCell className="px-5"><Sparkline values={q.trend} width={90} className="text-chart-3" /></TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </Card>
+      </Panel>
     </>
   );
 }

@@ -1,9 +1,11 @@
 import { useNavigate } from 'react-router-dom';
-import { Sparkline } from '../components/charts';
-import { Card, Empty, ErrorState, Loading, PageHeader, Td, Th } from '../components/ui';
-import { api, useAsync } from '../lib/api';
-import { ago } from '../lib/format';
-import { useRange } from '../lib/range';
+import { Sparkline } from '@/components/charts';
+import { Empty, ErrorState, Loading, PageHeader, Panel } from '@/components/common';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { api, useAsync } from '@/lib/api';
+import { ago } from '@/lib/format';
+import { useRange } from '@/lib/range';
 
 export default function ExceptionsPage() {
   const { range } = useRange();
@@ -13,32 +15,41 @@ export default function ExceptionsPage() {
   return (
     <>
       <PageHeader title="Exceptions" subtitle="Grouped by class, code and location" />
-      <Card>
-        {error ? <ErrorState error={error} /> : loading || !data ? <Loading /> : data.length === 0 ? <Empty>No exceptions in the last {range}. 🎉</Empty> : (
-          <table className="w-full text-sm">
-            <thead><tr><Th>Exception</Th><Th>Trend</Th><Th className="text-right">Events</Th><Th className="text-right">Users</Th><Th>Last seen</Th><Th>First seen</Th></tr></thead>
-            <tbody>
+      <Panel>
+        {error ? <ErrorState error={error} /> : loading || !data ? <Loading /> : data.length === 0 ? <Empty>No exceptions in the last {range}.</Empty> : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="px-5">Exception</TableHead>
+                <TableHead>Trend</TableHead>
+                <TableHead className="text-right">Events</TableHead>
+                <TableHead className="text-right">Users</TableHead>
+                <TableHead>Last seen</TableHead>
+                <TableHead className="px-5">First seen</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.map((e) => (
-                <tr key={e.group} onClick={() => navigate(`/exceptions/${e.group}`)} className="cursor-pointer border-t border-slate-800/70 hover:bg-slate-800/30">
-                  <Td className="max-w-xl">
+                <TableRow key={e.group} onClick={() => navigate(`/exceptions/${e.group}`)} className="cursor-pointer">
+                  <TableCell className="max-w-xl px-5 py-3 whitespace-normal">
                     <div className="flex items-center gap-2">
-                      <span className="truncate font-mono text-xs text-rose-300">{e.class}</span>
-                      <span className={`rounded px-1.5 text-[10px] ${e.handled ? 'bg-slate-800 text-slate-400' : 'bg-rose-500/15 text-rose-300'}`}>{e.handled ? 'handled' : 'unhandled'}</span>
+                      <span className="truncate font-mono text-xs text-destructive">{e.class}</span>
+                      <Badge variant={e.handled ? 'secondary' : 'destructive'} className="h-4 px-1.5 text-[10px]">{e.handled ? 'handled' : 'unhandled'}</Badge>
                     </div>
-                    <div className="mt-1 truncate text-xs text-slate-400">{e.message}</div>
-                    <div className="mt-0.5 truncate font-mono text-[11px] text-slate-600">{e.file}:{e.line}</div>
-                  </Td>
-                  <Td><Sparkline values={e.trend} className="text-rose-400" /></Td>
-                  <Td className="text-right tabular-nums">{e.count}</Td>
-                  <Td className="text-right tabular-nums text-slate-400">{e.users}</Td>
-                  <Td className="whitespace-nowrap text-xs text-slate-400">{ago(e.last_seen)}</Td>
-                  <Td className="whitespace-nowrap text-xs text-slate-500">{ago(e.first_seen)}</Td>
-                </tr>
+                    <div className="mt-1 truncate text-xs text-muted-foreground">{e.message}</div>
+                    <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground/70">{e.file}:{e.line}</div>
+                  </TableCell>
+                  <TableCell><Sparkline values={e.trend} className="text-chart-2" /></TableCell>
+                  <TableCell className="text-right tabular-nums">{e.count}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{e.users}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{ago(e.last_seen)}</TableCell>
+                  <TableCell className="px-5 text-xs text-muted-foreground">{ago(e.first_seen)}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </Card>
+      </Panel>
     </>
   );
 }

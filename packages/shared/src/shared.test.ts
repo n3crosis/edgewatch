@@ -49,3 +49,11 @@ describe('validateRecords', () => {
     expect(rejected[0].issues.join()).toContain('sql');
   });
 });
+
+describe('scrubPii', () => {
+  it('masks emails, card numbers and bearer tokens like the PHP client', async () => {
+    const { scrubPii } = await import('./index');
+    expect(scrubPii('User jane.doe@example.com paid with 4242 4242 4242 4242 using Bearer sk_live_1234567890'))
+      .toBe('User [email] paid with [card] using Bearer [redacted]');
+  });
+});

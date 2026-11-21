@@ -1,7 +1,9 @@
 import { Link, useParams } from 'react-router-dom';
-import { Card, Empty, ErrorState, Loading, PageHeader, Sql, Stat, Td, Th } from '../components/ui';
-import { api, useAsync } from '../lib/api';
-import { ago, compact, ms } from '../lib/format';
+import { Empty, ErrorState, Loading, PageHeader, Panel, Sql, Stat } from '@/components/common';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { api, useAsync } from '@/lib/api';
+import { ago, compact, ms } from '@/lib/format';
 
 export default function QueryDetailPage() {
   const { sqlHash = '' } = useParams();
@@ -13,8 +15,19 @@ export default function QueryDetailPage() {
 
   return (
     <>
-      <PageHeader back={{ to: '/queries', label: 'Queries' }} title="Query" subtitle={<span className="font-mono">{data.connection} · sql_hash {data.sql_hash}</span>} />
-      <Card className="mb-4"><pre className="whitespace-pre-wrap p-5"><Sql sql={data.sql} className="text-sm text-slate-200" /></pre></Card>
+      <PageHeader
+        back={{ to: '/queries', label: 'Queries' }}
+        title="Query"
+        subtitle={
+          <span className="flex items-center gap-2">
+            <Badge variant="outline">{data.connection}</Badge>
+            <span className="font-mono text-xs">sql_hash {data.sql_hash}</span>
+          </span>
+        }
+      />
+      <Panel className="mb-4">
+        <pre className="whitespace-pre-wrap p-5"><Sql sql={data.sql} className="text-sm" /></pre>
+      </Panel>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <Stat label="Calls (24h)" value={compact(data.calls)} />
         <Stat label="Total time" value={ms(data.total_ms)} />
@@ -22,21 +35,28 @@ export default function QueryDetailPage() {
         <Stat label="p95" value={ms(data.p95_ms)} tone={data.p95_ms > 100 ? 'warn' : 'default'} />
         <Stat label="Max" value={ms(data.max_ms)} />
       </div>
-      <Card title="Slowest executions" className="mt-4">
-        <table className="w-full text-sm">
-          <thead><tr><Th>When</Th><Th>Trace</Th><Th>Location</Th><Th className="text-right">Duration</Th></tr></thead>
-          <tbody>
+      <Panel title="Slowest executions" className="mt-4">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="px-5">When</TableHead>
+              <TableHead>Trace</TableHead>
+              <TableHead>Location</TableHead>
+              <TableHead className="px-5 text-right">Duration</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {data.samples.map((s, i) => (
-              <tr key={`${s.trace_id}-${i}`} className="border-t border-slate-800/70">
-                <Td className="text-xs text-slate-400">{ago(s.timestamp)}</Td>
-                <Td><Link to={`/traces/${s.trace_id}`} className="font-mono text-xs text-sky-400 hover:underline">{s.name}</Link></Td>
-                <Td className="font-mono text-xs text-slate-500">{s.file}:{s.line}</Td>
-                <Td className="text-right tabular-nums">{ms(s.duration_ms)}</Td>
-              </tr>
+              <TableRow key={`${s.trace_id}-${i}`}>
+                <TableCell className="px-5 text-xs text-muted-foreground">{ago(s.timestamp)}</TableCell>
+                <TableCell><Link to={`/traces/${s.trace_id}`} className="font-mono text-xs text-primary hover:underline">{s.name}</Link></TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{s.file}:{s.line}</TableCell>
+                <TableCell className="px-5 text-right tabular-nums">{ms(s.duration_ms)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </Card>
+          </TableBody>
+        </Table>
+      </Panel>
     </>
   );
 }

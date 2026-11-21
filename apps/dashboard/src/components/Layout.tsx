@@ -1,8 +1,12 @@
 import { Activity, Bug, Database, Gauge, Plug, Radio } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { PROJECT_ID, USING_MOCK } from '../lib/api';
-import { RangeProvider, useRange } from '../lib/range';
-import type { Range } from '../lib/types';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { PROJECT_ID, USING_MOCK } from '@/lib/api';
+import { RangeProvider, useRange } from '@/lib/range';
+import type { Range } from '@/lib/types';
 
 const NAV = [
   { to: '/', label: 'Overview', icon: Gauge, end: true },
@@ -15,17 +19,13 @@ const NAV = [
 function RangePicker() {
   const { range, setRange } = useRange();
   return (
-    <div className="flex rounded-lg border border-slate-800 bg-slate-900 p-0.5 text-xs">
+    <ToggleGroup type="single" variant="outline" size="sm" value={range} onValueChange={(v) => v && setRange(v as Range)} aria-label="Time range">
       {(['1h', '6h', '24h'] as Range[]).map((r) => (
-        <button
-          key={r}
-          onClick={() => setRange(r)}
-          className={`rounded-md px-3 py-1.5 font-medium transition ${range === r ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-        >
+        <ToggleGroupItem key={r} value={r} className="px-3 text-xs">
           {r}
-        </button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }
 
@@ -33,43 +33,41 @@ export default function Layout() {
   return (
     <RangeProvider>
       <div className="flex h-full">
-        <aside className="flex w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-950">
+        <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
           <div className="flex items-center gap-2.5 px-5 py-5">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-sky-500/15 text-sky-400">
+            <div className="grid size-8 place-items-center rounded-lg bg-primary/15 text-primary">
               <Radio size={18} />
             </div>
             <div>
-              <div className="text-sm font-semibold text-white">EdgeWatch</div>
-              <div className="text-[11px] text-slate-500">Nightwatch-compatible APM</div>
+              <div className="text-sm font-semibold">EdgeWatch</div>
+              <div className="text-[11px] text-muted-foreground">Nightwatch-compatible APM</div>
             </div>
           </div>
-          <nav className="flex flex-col gap-0.5 px-3">
+          <Separator />
+          <nav className="flex flex-col gap-1 p-3">
             {NAV.map(({ to, label, icon: Icon, end }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${isActive ? 'bg-slate-800/80 text-white' : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'}`
-                }
-              >
-                <Icon size={16} />
-                {label}
+              <NavLink key={to} to={to} end={end}>
+                {({ isActive }) => (
+                  <Button variant={isActive ? 'secondary' : 'ghost'} className={`w-full justify-start gap-3 ${isActive ? '' : 'text-muted-foreground'}`}>
+                    <Icon /> {label}
+                  </Button>
+                )}
               </NavLink>
             ))}
           </nav>
-          <div className="mt-auto space-y-2 p-4 text-xs text-slate-500">
-            <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
-              <div className="text-slate-400">Project</div>
-              <div className="mt-0.5 font-mono text-slate-200">{PROJECT_ID}</div>
+          <div className="mt-auto space-y-3 p-4 text-xs">
+            <Separator />
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Project</span>
+              <span className="font-mono">{PROJECT_ID}</span>
             </div>
-            {USING_MOCK && <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-amber-300">Showing seed data</div>}
+            {USING_MOCK && <Badge variant="outline" className="w-full border-amber-400/30 text-amber-300">Showing seed data</Badge>}
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 px-8">
-            <div className="text-sm text-slate-400">
-              <span className="text-slate-200">shop.example.com</span> · production
+          <header className="flex h-14 shrink-0 items-center justify-between border-b px-8">
+            <div className="text-sm text-muted-foreground">
+              <span className="text-foreground">shop.example.com</span> · production
             </div>
             <RangePicker />
           </header>

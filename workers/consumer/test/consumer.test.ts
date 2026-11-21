@@ -22,7 +22,7 @@ describe('queue consumer', () => {
     const result = await deliver(
       message([
         { v: 1, t: 'query', ...base, sql: "select * from users where email = 'jane@example.com' and id in (1, 2, 3)", file: 'app/A.php', line: 3, duration: 2500, connection: 'mysql' },
-        { v: 3, t: 'exception', ...base, class: 'RuntimeException', file: 'app/B.php', line: 9, message: 'boom', code: '0', trace: '[{"file":"app/B.php:9","source":"x","code":null}]', handled: false },
+        { v: 3, t: 'exception', ...base, class: 'RuntimeException', file: 'app/B.php', line: 9, message: 'boom for jane@example.com', code: '0', trace: '[{"file":"app/B.php:9","source":"x","code":null}]', handled: false },
         { v: 1, t: 'request', ...base, method: 'GET', url: 'https://shop.test/users/1', route_name: 'users.show', route_path: '/users/{id}', status_code: 500, duration: 48_000, queries: 1, exceptions: 1 },
       ]),
     );
@@ -40,7 +40,7 @@ describe('queue consumer', () => {
     expect(query!.sql_hash).toMatch(/^[0-9a-f]{32}$/);
 
     const exception = await env.DB.prepare('SELECT * FROM exceptions WHERE trace_id = ?').bind(TRACE).first<Record<string, unknown>>();
-    expect(exception).toMatchObject({ class: 'RuntimeException', handled: 0, line: 9 });
+    expect(exception).toMatchObject({ class: 'RuntimeException', message: 'boom for [email]', handled: 0, line: 9 });
 
     const raw = (await (await env.TRACES.get(trace!.r2_key as string))!.json()) as { records: { t: string; sql?: string }[] };
     expect(raw.records).toHaveLength(3);
