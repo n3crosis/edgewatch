@@ -1,0 +1,15 @@
+[
+  { "name": "parameterized query is unchanged", "sql": "select * from `users` where `id` = ? limit ?", "normalized": "select * from `users` where `id` = ? limit ?" },
+  { "name": "limit and offset literals", "sql": "select * from posts limit 10 offset 20", "normalized": "select * from posts limit ? offset ?" },
+  { "name": "string literal", "sql": "select * from users where email = 'jane@example.com'", "normalized": "select * from users where email = ?" },
+  { "name": "escaped quotes inside string literal", "sql": "select * from notes where body = 'it''s \\'quoted\\''", "normalized": "select * from notes where body = ?" },
+  { "name": "integer and decimal literals", "sql": "select * from orders where total > 99.95 and user_id = 42", "normalized": "select * from orders where total > ? and user_id = ?" },
+  { "name": "numbers inside identifiers are kept", "sql": "select col1, t2.col_3 from table2 t2 where t2.id = 7", "normalized": "select col1, t2.col_3 from table2 t2 where t2.id = ?" },
+  { "name": "IN list collapses", "sql": "select * from posts where id in (1, 2, 3, 4)", "normalized": "select * from posts where id in (?)" },
+  { "name": "IN list of placeholders collapses", "sql": "select * from posts where id in (?, ?, ?)", "normalized": "select * from posts where id in (?)" },
+  { "name": "multi-row insert collapses", "sql": "insert into tags (name, slug) values ('a', 'a'), ('b', 'b'), (?, ?)", "normalized": "insert into tags (name, slug) values (...)" },
+  { "name": "postgres numbered placeholders", "sql": "select * from users where id = $1 and team_id = $2", "normalized": "select * from users where id = ? and team_id = ?" },
+  { "name": "hex literal", "sql": "select * from blobs where hash = 0xDEADBEEF", "normalized": "select * from blobs where hash = ?" },
+  { "name": "whitespace collapses", "sql": "select   *\n  from users\n\twhere id = 1  ", "normalized": "select * from users where id = ?" },
+  { "name": "negative number", "sql": "update accounts set balance = -10 where id = 3", "normalized": "update accounts set balance = -? where id = ?" }
+]
