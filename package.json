@@ -9,7 +9,7 @@
     "dev:dashboard": "pnpm --filter @edgewatch/dashboard dev",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "test:php": "cd packages/laravel-edgewatch && composer test",
+    "test:php": "cd packages/laravel-edgewatch && composer test && cd ../../examples/laravel-sandbox && ./vendor/bin/pest",
     "typecheck": "pnpm -r typecheck"
   }
 }
