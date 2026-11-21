@@ -22,7 +22,7 @@ export interface Env {
 }
 
 /** Queue messages are capped at 128 KB; anything bigger is parked in R2 and referenced by key. */
-export const MAX_INLINE_MESSAGE_BYTES = 100_000;
+const MAX_INLINE_MESSAGE_BYTES = 100_000;
 const MAX_BATCH_MESSAGES = 100;
 const MAX_BATCH_BYTES = 200_000;
 

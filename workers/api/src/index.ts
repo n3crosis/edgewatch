@@ -112,7 +112,7 @@ app.get('/v1/projects/:projectId/traces/:traceId', async (c) => {
 });
 
 /** Derive a waterfall from raw Nightwatch records (timestamps are unix seconds, durations microseconds). */
-export function spans(trace: TraceRow, records: NightwatchRecord[]) {
+function spans(trace: TraceRow, records: NightwatchRecord[]) {
   const start = trace.timestamp / 1000;
   const at = (r: NightwatchRecord) => Math.max(0, ((r.timestamp ?? start) - start) * 1000);
   const dur = (r: NightwatchRecord) => (typeof r.duration === 'number' ? r.duration / 1000 : 0);
