@@ -1,0 +1,12 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "edgewatch-consumer",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "queues": {
+    "consumers": [{ "queue": "edgewatch-ingest", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 5, "dead_letter_queue": "edgewatch-ingest-dlq" }]
+  },
+  "d1_databases": [{ "binding": "DB", "database_name": "edgewatch", "database_id": "REPLACE_WITH_D1_DATABASE_ID", "migrations_dir": "../migrations" }],
+  "r2_buckets": [{ "binding": "TRACES", "bucket_name": "edgewatch-traces" }]
+}
