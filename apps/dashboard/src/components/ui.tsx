@@ -55,7 +55,7 @@ export function StatusBadge({ status, source }: { status: number | null; source:
 }
 
 export function SourceBadge({ source }: { source: ExecutionSource }) {
-  const cls = { request: 'text-sky-300 bg-sky-500/10', job: 'text-violet-300 bg-violet-500/10', command: 'text-teal-300 bg-teal-500/10' }[source];
+  const cls = { request: 'text-sky-300 bg-sky-500/10', job: 'text-violet-300 bg-violet-500/10', command: 'text-teal-300 bg-teal-500/10', schedule: 'text-orange-300 bg-orange-500/10' }[source];
   return <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide ${cls}`}>{source}</span>;
 }
 

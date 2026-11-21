@@ -6,7 +6,7 @@ import { api, useAsync } from '../lib/api';
 import { ago, ms } from '../lib/format';
 import type { TraceFilters } from '../lib/types';
 
-const SOURCES = ['all', 'request', 'job', 'command'] as const;
+const SOURCES = ['all', 'request', 'job', 'command', 'schedule'] as const;
 const STATUSES = ['all', '2xx', '3xx', '4xx', '5xx'] as const;
 
 export default function TracesPage() {

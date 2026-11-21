@@ -1,4 +1,4 @@
-export type ExecutionSource = 'request' | 'command' | 'job';
+export type ExecutionSource = 'request' | 'command' | 'job' | 'schedule';
 export type Range = '1h' | '6h' | '24h';
 
 export interface TraceSummary {
