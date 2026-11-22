@@ -1,6 +1,8 @@
 <?php
 
+use App\Jobs\SendOrderConfirmation;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
@@ -25,3 +27,11 @@ Route::get('/report', function () {
 Route::post('/checkout', function () {
     throw new RuntimeException('Card was declined for jane@example.com');
 })->name('checkout')->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+
+// Cache events (miss then write, hit on repeat) and a queued job (queued-job now, job-attempt when a worker runs it).
+Route::post('/orders', function () {
+    $stats = Cache::remember('order-stats', 60, fn () => ['users' => User::count()]);
+    SendOrderConfirmation::dispatch(1);
+
+    return response()->json(['queued' => true, 'stats' => $stats], 202);
+})->name('orders.store')->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);

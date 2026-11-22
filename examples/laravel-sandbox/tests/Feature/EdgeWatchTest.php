@@ -63,3 +63,26 @@ it('reports unhandled exceptions with PII scrubbed', function () {
         'handled' => false,
     ])->and($this->records->of('request')[0]['status_code'])->toBe(500);
 });
+
+it('reports cache events and queued jobs for an order, and the job attempt when a worker runs it', function () {
+    User::factory()->create();
+    config(['queue.default' => 'sync']);
+
+    $this->post('/orders')->assertStatus(202);
+    app(EdgeWatch::class)->flush();
+
+    $request = $this->records->of('request')[0];
+    $cache = collect($this->records->of('cache-event'));
+
+    expect($cache->pluck('type')->all())->toContain('miss', 'write')
+        ->and($cache->pluck('key'))->toContain('order-stats')
+        ->and($this->records->of('job-attempt')[0])->toMatchArray(['name' => \App\Jobs\SendOrderConfirmation::class, 'status' => 'processed'])
+        ->and($request['cache_events'])->toBeGreaterThanOrEqual(2);
+});
+
+it('reports artisan commands', function () {
+    app(\Illuminate\Contracts\Console\Kernel::class)->rerouteSymfonyCommandEvents();
+    $this->artisan('report:daily')->assertSuccessful();
+
+    expect($this->records->of('command')[0])->toMatchArray(['name' => 'report:daily', 'exit_code' => 0]);
+});

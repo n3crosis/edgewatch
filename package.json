@@ -10,6 +10,7 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:php": "cd packages/laravel-edgewatch && composer test && cd ../../examples/laravel-sandbox && ./vendor/bin/pest",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "e2e": "bash scripts/e2e.sh"
   }
 }
