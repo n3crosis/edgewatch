@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, useAsync } from '@/lib/api';
+import { useRange } from '@/lib/range';
 import { ago, ms } from '@/lib/format';
 import type { TraceFilters } from '@/lib/types';
 
@@ -31,7 +32,8 @@ export default function TracesPage() {
   const [filters, setFilters] = useState<TraceFilters>({ source: 'all', status: 'all', q: '' });
   const [cursor, setCursor] = useState<string | null>(null);
   const [history, setHistory] = useState<(string | null)[]>([]);
-  const { data, error, loading } = useAsync(() => api.traces(filters, cursor), [filters.source, filters.status, filters.q, cursor]);
+  const { range } = useRange();
+  const { data, error, loading } = useAsync(() => api.traces({ ...filters, range }, cursor), [filters.source, filters.status, filters.q, range, cursor]);
 
   const update = (patch: TraceFilters) => {
     setFilters((f) => ({ ...f, ...patch }));

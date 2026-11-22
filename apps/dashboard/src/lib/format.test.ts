@@ -40,3 +40,12 @@ describe('seed data', () => {
     expect(q.sql).not.toMatch(/'\w+'|\b\d+\b/);
   });
 });
+
+describe('mock traces time range', () => {
+  it('only returns traces inside the selected range', () => {
+    const hour = traces({ range: '1h' }, null, 10_000).data;
+    const day = traces({ range: '24h' }, null, 10_000).data;
+    expect(hour.length).toBeLessThan(day.length);
+    expect(hour.every((t) => Date.now() - Date.parse(t.timestamp) <= 3600e3 + 5_000)).toBe(true);
+  });
+});

@@ -47,6 +47,7 @@ describe('workers/api', () => {
 
     expect((await get('/v1/projects/proj_api/traces?status=5xx')).json.data).toHaveLength(1);
     expect((await get('/v1/projects/proj_api/traces?q=checkout')).json.data[0].trace_id).toBe(T1);
+    expect((await get('/v1/projects/proj_api/traces?range=1h')).json.data.length).toBeLessThanOrEqual((await get('/v1/projects/proj_api/traces')).json.data.length);
 
     const page1 = await get('/v1/projects/proj_api/traces?limit=1');
     expect(page1.json.next_cursor).toBeTruthy();

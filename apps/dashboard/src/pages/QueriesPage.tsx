@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkline } from '@/components/charts';
-import { Empty, ErrorState, Loading, PageHeader, Panel, Sql } from '@/components/common';
+import { Empty, ErrorState, Loading, PageHeader, Panel, SearchBox, Sql } from '@/components/common';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -21,7 +21,11 @@ export default function QueriesPage() {
   const navigate = useNavigate();
   const [sort, setSort] = useState<keyof QueryGroup>('total_ms');
   const { data, error, loading } = useAsync(() => api.queries(range), [range]);
-  const rows = data ? [...data].sort((a, b) => Number(b[sort]) - Number(a[sort])) : [];
+  const [q, setQ] = useState('');
+  const needle = q.toLowerCase().trim();
+  const rows = data
+    ? [...data].filter((g) => !needle || `${g.sql} ${g.connection} ${g.sql_hash}`.toLowerCase().includes(needle)).sort((a, b) => Number(b[sort]) - Number(a[sort]))
+    : [];
 
   return (
     <>
@@ -36,8 +40,8 @@ export default function QueriesPage() {
           </ToggleGroup>
         }
       />
-      <Panel>
-        {error ? <ErrorState error={error} /> : loading || !data ? <Loading /> : rows.length === 0 ? <Empty>No queries recorded.</Empty> : (
+      <Panel title={`${rows.length} query groups`} actions={<SearchBox value={q} onChange={setQ} placeholder="Search SQL, connection or hash…" />}>
+        {error ? <ErrorState error={error} /> : loading || !data ? <Loading /> : rows.length === 0 ? <Empty>{needle ? 'No queries match your search.' : 'No queries recorded.'}</Empty> : (
           <Table className="table-fixed">
             <TableHeader>
               <TableRow>

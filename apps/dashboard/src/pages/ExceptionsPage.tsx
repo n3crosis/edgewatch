@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkline } from '@/components/charts';
-import { Empty, ErrorState, Loading, PageHeader, Panel } from '@/components/common';
+import { Empty, ErrorState, Loading, PageHeader, Panel, SearchBox } from '@/components/common';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, useAsync } from '@/lib/api';
@@ -10,13 +12,31 @@ import { useRange } from '@/lib/range';
 export default function ExceptionsPage() {
   const { range } = useRange();
   const navigate = useNavigate();
-  const { data, error, loading } = useAsync(() => api.exceptions(range), [range]);
+  const { data: all, error, loading } = useAsync(() => api.exceptions(range), [range]);
+  const [q, setQ] = useState('');
+  const [handled, setHandled] = useState<'all' | 'handled' | 'unhandled'>('all');
+  const needle = q.toLowerCase().trim();
+  const data = all?.filter(
+    (e) => (handled === 'all' || e.handled === (handled === 'handled')) && (!needle || `${e.class} ${e.message} ${e.file}`.toLowerCase().includes(needle)),
+  );
 
   return (
     <>
       <PageHeader title="Exceptions" subtitle="Grouped by class, code and location" />
-      <Panel>
-        {error ? <ErrorState error={error} /> : loading || !data ? <Loading /> : data.length === 0 ? <Empty>No exceptions in the last {range}.</Empty> : (
+      <Panel
+        title={`${data?.length ?? 0} groups`}
+        actions={
+          <div className="flex items-center gap-2">
+            <ToggleGroup type="single" variant="outline" size="sm" value={handled} onValueChange={(v) => v && setHandled(v as typeof handled)} aria-label="Handled filter">
+              {(['all', 'unhandled', 'handled'] as const).map((h) => (
+                <ToggleGroupItem key={h} value={h} className="px-3 text-xs capitalize">{h}</ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <SearchBox value={q} onChange={setQ} placeholder="Search class, message or file…" />
+          </div>
+        }
+      >
+        {error ? <ErrorState error={error} /> : loading || !data ? <Loading /> : data.length === 0 ? <Empty>{needle || handled !== 'all' ? 'No exceptions match these filters.' : `No exceptions in the last ${range}.`}</Empty> : (
           <Table>
             <TableHeader>
               <TableRow>

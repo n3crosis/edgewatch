@@ -1,11 +1,12 @@
-import { Activity, Bug, Database, Gauge, Plug, Radio } from 'lucide-react';
+import { Activity, Bug, Cloud, Database, FlaskConical, Gauge, Pause, Play, Plug, Radio } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { PROJECT_ID, USING_MOCK } from '@/lib/api';
-import { RangeProvider, useRange } from '@/lib/range';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { API_URL, PROJECT_ID, USING_MOCK } from '@/lib/api';
+import { POLL_INTERVAL_MS, RangeProvider, useRange } from '@/lib/range';
 import type { Range } from '@/lib/types';
 
 const NAV = [
@@ -26,6 +27,43 @@ function RangePicker() {
         </ToggleGroupItem>
       ))}
     </ToggleGroup>
+  );
+}
+
+function DataSource() {
+  const host = USING_MOCK ? '' : (() => { try { return new URL(API_URL).host; } catch { return API_URL; } })();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant="outline" data-testid="data-source" className={USING_MOCK ? 'gap-1.5 border-amber-400/30 text-amber-300' : 'gap-1.5 border-emerald-400/30 text-emerald-300'}>
+          {USING_MOCK ? <FlaskConical /> : <Cloud />}
+          {USING_MOCK ? 'Seed data' : `API · ${host}`}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>
+        {USING_MOCK ? 'VITE_API_URL is not set: showing generated seed data.' : `Reading live data from workers/api at ${API_URL}`}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function LiveToggle() {
+  const { live, setLive, lastUpdated } = useRange();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant={live ? 'secondary' : 'outline'} size="sm" onClick={() => setLive(!live)} aria-pressed={live} className="gap-1.5 text-xs">
+          {live ? <Pause /> : <Play />}
+          {live ? (
+            <>
+              <span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex size-2 rounded-full bg-emerald-400" /></span>
+              Live · {POLL_INTERVAL_MS / 1000}s
+            </>
+          ) : 'Live'}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{live ? `Refreshing every ${POLL_INTERVAL_MS / 1000}s · last ${new Date(lastUpdated).toLocaleTimeString()}` : `Refresh every ${POLL_INTERVAL_MS / 1000}s`}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -61,7 +99,6 @@ export default function Layout() {
               <span className="text-muted-foreground">Project</span>
               <span className="font-mono">{PROJECT_ID}</span>
             </div>
-            {USING_MOCK && <Badge variant="outline" className="w-full border-amber-400/30 text-amber-300">Showing seed data</Badge>}
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
@@ -69,7 +106,11 @@ export default function Layout() {
             <div className="text-sm text-muted-foreground">
               <span className="text-foreground">shop.example.com</span> · production
             </div>
-            <RangePicker />
+            <div className="flex items-center gap-2">
+              <DataSource />
+              <LiveToggle />
+              <RangePicker />
+            </div>
           </header>
           <main className="min-w-0 flex-1 overflow-y-auto px-8 py-6">
             <Outlet />

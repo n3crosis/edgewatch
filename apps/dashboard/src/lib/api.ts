@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as mock from './mock';
+import { useRange } from './range';
 import type { ExceptionDetail, ExceptionGroup, Overview, Paginated, QueryDetail, QueryGroup, Range, TraceDetail, TraceFilters, TraceSummary } from './types';
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+export const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 const API_KEY = (import.meta.env.VITE_API_KEY as string | undefined) ?? '';
 export const PROJECT_ID = (import.meta.env.VITE_PROJECT_ID as string | undefined) || 'demo';
 export const USING_MOCK = API_URL === '';
@@ -29,12 +30,17 @@ export const api = {
   query: (hash: string) => (USING_MOCK ? delay(mock.query(hash)) : get<QueryDetail | null>(`/queries/${hash}`)),
 };
 
+/** Loads data for `deps`; in live mode it silently re-fetches on every poll tick (keeping the current data on screen). */
 export function useAsync<T>(load: () => Promise<T>, deps: unknown[]): { data: T | undefined; error: Error | null; loading: boolean } {
   const [state, setState] = useState<{ data: T | undefined; error: Error | null; loading: boolean }>({ data: undefined, error: null, loading: true });
+  const { tick } = useRange();
+  const key = JSON.stringify(deps);
+  const loadedKey = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setState((s) => ({ ...s, loading: true }));
+    if (loadedKey.current !== key) setState((s) => ({ ...s, loading: true }));
+    loadedKey.current = key;
     load().then(
       (data) => !cancelled && setState({ data, error: null, loading: false }),
       (error: Error) => !cancelled && setState({ data: undefined, error, loading: false }),
@@ -43,7 +49,7 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[]): { data: T 
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [key, tick]);
 
   return state;
 }

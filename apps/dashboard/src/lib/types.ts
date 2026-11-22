@@ -91,4 +91,5 @@ export interface TraceFilters {
   source?: ExecutionSource | 'all';
   status?: '2xx' | '3xx' | '4xx' | '5xx' | 'all';
   q?: string;
+  range?: Range;
 }

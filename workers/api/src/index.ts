@@ -86,12 +86,13 @@ app.get('/v1/projects/:projectId/overview', async (c) => {
 });
 
 app.get('/v1/projects/:projectId/traces', async (c) => {
-  const { source, status, q, cursor } = c.req.query();
+  const { source, status, q, cursor, range } = c.req.query();
   const limit = Math.min(200, Number(c.req.query('limit') ?? 50));
   const where = ['project_id = ?'];
   const params: (string | number)[] = [c.get('projectId')];
   if (source && source !== 'all') where.push('execution_source = ?') && params.push(source);
   if (status && /^[1-5]xx$/.test(status)) where.push("execution_source = 'request' AND status_code >= ? AND status_code < ?") && params.push(Number(status[0]) * 100, Number(status[0]) * 100 + 100);
+  if (range) where.push('timestamp >= ?') && params.push(window(range).since);
   if (q) where.push("(name LIKE ? OR trace_id LIKE ? OR coalesce(user, '') LIKE ?)") && params.push(`%${q}%`, `%${q}%`, `%${q}%`);
   if (cursor) {
     const [ts, id] = atob(cursor).split('|');

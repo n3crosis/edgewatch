@@ -217,7 +217,9 @@ export function overview(range: Range): Overview {
 
 export function traces(filters: TraceFilters = {}, cursor: string | null = null, limit = 50): Paginated<TraceSummary> {
   const q = filters.q?.toLowerCase().trim();
+  const since = filters.range ? NOW - RANGE_MS[filters.range] : -Infinity;
   const list = TRACES.map((t) => t.summary).filter((t) => {
+    if (Date.parse(t.timestamp) < since) return false;
     if (filters.source && filters.source !== 'all' && t.execution_source !== filters.source) return false;
     if (filters.status && filters.status !== 'all') {
       if (t.status_code === null || t.execution_source !== 'request') return false;
