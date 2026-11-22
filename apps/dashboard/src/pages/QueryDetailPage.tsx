@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { Empty, ErrorState, Loading, PageHeader, Panel, Sql, Stat } from '@/components/common';
-import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@cloudflare/kumo/components/badge';
+import { Table } from '@cloudflare/kumo/components/table';
 import { api, useAsync } from '@/lib/api';
 import { ago, compact, ms } from '@/lib/format';
 
@@ -37,24 +37,24 @@ export default function QueryDetailPage() {
       </div>
       <Panel title="Slowest executions" className="mt-4">
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="px-5">When</TableHead>
-              <TableHead>Trace</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead className="px-5 text-right">Duration</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
+          <Table.Header>
+            <Table.Row>
+              <Table.Head className="px-5">When</Table.Head>
+              <Table.Head>Trace</Table.Head>
+              <Table.Head>Location</Table.Head>
+              <Table.Head className="px-5 text-right">Duration</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
             {data.samples.map((s, i) => (
-              <TableRow key={`${s.trace_id}-${i}`}>
-                <TableCell className="px-5 text-xs text-muted-foreground">{ago(s.timestamp)}</TableCell>
-                <TableCell><Link to={`/traces/${s.trace_id}`} className="font-mono text-xs text-primary hover:underline">{s.name}</Link></TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{s.file}:{s.line}</TableCell>
-                <TableCell className="px-5 text-right tabular-nums">{ms(s.duration_ms)}</TableCell>
-              </TableRow>
+              <Table.Row key={`${s.trace_id}-${i}`}>
+                <Table.Cell className="px-5 text-xs text-kumo-subtle">{ago(s.timestamp)}</Table.Cell>
+                <Table.Cell><Link to={`/traces/${s.trace_id}`} className="font-mono text-xs text-kumo-link hover:underline">{s.name}</Link></Table.Cell>
+                <Table.Cell className="font-mono text-xs text-kumo-subtle">{s.file}:{s.line}</Table.Cell>
+                <Table.Cell className="px-5 text-right tabular-nums">{ms(s.duration_ms)}</Table.Cell>
+              </Table.Row>
             ))}
-          </TableBody>
+          </Table.Body>
         </Table>
       </Panel>
     </>

@@ -1,12 +1,11 @@
-import { ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { Button } from '@cloudflare/kumo/components/button';
+import { Select } from '@cloudflare/kumo/components/select';
+import { CaretLeftIcon, CaretRightIcon } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Empty, ErrorState, Loading, PageHeader, Panel, SourceBadge, StatusBadge } from '@/components/common';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Empty, ErrorState, Loading, PageHeader, Panel, SearchBox, SourceBadge, StatusBadge } from '@/components/common';
+import { Badge } from '@cloudflare/kumo/components/badge';
+import { Table } from '@cloudflare/kumo/components/table';
 import { api, useAsync } from '@/lib/api';
 import { useRange } from '@/lib/range';
 import { ago, ms } from '@/lib/format';
@@ -46,59 +45,64 @@ export default function TracesPage() {
     <>
       <PageHeader title="Traces" subtitle="Every request, queued job and command, newest first" />
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="relative min-w-64 flex-1">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={filters.q} onChange={(e) => update({ q: e.target.value })} placeholder="Search route, trace ID or user…" className="pl-9" />
-        </div>
-        <Select value={filters.source} onValueChange={(v) => update({ source: v as TraceFilters['source'] })}>
-          <SelectTrigger className="w-36" aria-label="Execution type"><SelectValue /></SelectTrigger>
-          <SelectContent>{SOURCES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
-        </Select>
-        <Select value={filters.status} onValueChange={(v) => update({ status: v as TraceFilters['status'] })}>
-          <SelectTrigger className="w-32" aria-label="Status"><SelectValue /></SelectTrigger>
-          <SelectContent>{STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
-        </Select>
+        <SearchBox className="min-w-64 flex-1" value={filters.q ?? ''} onChange={(q) => update({ q })} placeholder="Search route, trace ID or user…" />
+        <Select
+          aria-label="Execution type"
+          size="sm"
+          className="w-36"
+          value={filters.source}
+          onValueChange={(v) => update({ source: (v ?? 'all') as TraceFilters['source'] })}
+          items={SOURCES.map((s) => ({ value: s.value as string, label: s.label }))}
+        />
+        <Select
+          aria-label="Status"
+          size="sm"
+          className="w-32"
+          value={filters.status}
+          onValueChange={(v) => update({ status: (v ?? 'all') as TraceFilters['status'] })}
+          items={STATUSES.map((s) => ({ value: s.value as string, label: s.label }))}
+        />
       </div>
       <Panel>
         {error ? <ErrorState error={error} /> : loading || !data ? <Loading rows={10} /> : data.data.length === 0 ? <Empty>No traces match these filters.</Empty> : (
           <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="px-5">When</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Duration</TableHead>
-                <TableHead className="text-right">Queries</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead className="px-5">Server</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+            <Table.Header>
+              <Table.Row>
+                <Table.Head className="px-5">When</Table.Head>
+                <Table.Head>Type</Table.Head>
+                <Table.Head>Name</Table.Head>
+                <Table.Head>Status</Table.Head>
+                <Table.Head className="text-right">Duration</Table.Head>
+                <Table.Head className="text-right">Queries</Table.Head>
+                <Table.Head>User</Table.Head>
+                <Table.Head className="px-5">Server</Table.Head>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
               {data.data.map((t) => (
-                <TableRow key={t.trace_id} onClick={() => navigate(`/traces/${t.trace_id}`)} className="cursor-pointer">
-                  <TableCell className="px-5 text-xs text-muted-foreground">{ago(t.timestamp)}</TableCell>
-                  <TableCell><SourceBadge source={t.execution_source} /></TableCell>
-                  <TableCell className="max-w-md truncate font-mono text-xs">
+                <Table.Row key={t.trace_id} onClick={() => navigate(`/traces/${t.trace_id}`)} className="cursor-pointer">
+                  <Table.Cell className="px-5 text-xs text-kumo-subtle">{ago(t.timestamp)}</Table.Cell>
+                  <Table.Cell><SourceBadge source={t.execution_source} /></Table.Cell>
+                  <Table.Cell className="max-w-md truncate font-mono text-xs">
                     {t.name}
-                    {t.exception_count > 0 && <Badge variant="destructive" className="ml-2 h-4 px-1.5 text-[10px]">exception</Badge>}
-                  </TableCell>
-                  <TableCell><StatusBadge status={t.status_code} source={t.execution_source} /></TableCell>
-                  <TableCell className={`text-right tabular-nums ${t.duration_ms > 500 ? 'text-amber-300' : ''}`}>{ms(t.duration_ms)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">{t.query_count}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{t.user ? `#${t.user}` : '—'}</TableCell>
-                  <TableCell className="px-5 text-xs text-muted-foreground">{t.server}</TableCell>
-                </TableRow>
+                    {t.exception_count > 0 && <Badge variant="error" className="ml-2 text-[10px]">exception</Badge>}
+                  </Table.Cell>
+                  <Table.Cell><StatusBadge status={t.status_code} source={t.execution_source} /></Table.Cell>
+                  <Table.Cell className={`text-right tabular-nums ${t.duration_ms > 500 ? 'text-kumo-warning' : ''}`}>{ms(t.duration_ms)}</Table.Cell>
+                  <Table.Cell className="text-right tabular-nums text-kumo-subtle">{t.query_count}</Table.Cell>
+                  <Table.Cell className="text-xs text-kumo-subtle">{t.user ? `#${t.user}` : '—'}</Table.Cell>
+                  <Table.Cell className="px-5 text-xs text-kumo-subtle">{t.server}</Table.Cell>
+                </Table.Row>
               ))}
-            </TableBody>
+            </Table.Body>
           </Table>
         )}
-        <div className="flex justify-end gap-2 border-t px-5 py-3">
-          <Button variant="outline" size="sm" disabled={history.length === 0} onClick={() => { setCursor(history[history.length - 1]); setHistory(history.slice(0, -1)); }}>
-            <ChevronLeft /> Previous
+        <div className="flex justify-end gap-2 border-t border-kumo-hairline px-5 py-3">
+          <Button variant="secondary" size="sm" icon={CaretLeftIcon} disabled={history.length === 0} onClick={() => { setCursor(history[history.length - 1]); setHistory(history.slice(0, -1)); }}>
+            Previous
           </Button>
-          <Button variant="outline" size="sm" disabled={!data?.next_cursor} onClick={() => { setHistory([...history, cursor]); setCursor(data!.next_cursor); }}>
-            Next <ChevronRight />
+          <Button variant="secondary" size="sm" disabled={!data?.next_cursor} onClick={() => { setHistory([...history, cursor]); setCursor(data!.next_cursor); }}>
+            Next <CaretRightIcon />
           </Button>
         </div>
       </Panel>

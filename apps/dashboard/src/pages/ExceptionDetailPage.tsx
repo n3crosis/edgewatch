@@ -1,9 +1,8 @@
 import { Link, useParams } from 'react-router-dom';
 import { BarChart } from '@/components/charts';
 import { Empty, ErrorState, Loading, PageHeader, Panel, Stat } from '@/components/common';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@cloudflare/kumo/components/badge';
+import { Table } from '@cloudflare/kumo/components/table';
 import { api, useAsync } from '@/lib/api';
 import { ago } from '@/lib/format';
 
@@ -19,10 +18,10 @@ export default function ExceptionDetailPage() {
     <>
       <PageHeader
         back={{ to: '/exceptions', label: 'Exceptions' }}
-        title={<span className="font-mono text-destructive">{data.class}</span>}
+        title={<span className="font-mono text-kumo-danger">{data.class}</span>}
         subtitle={
           <span className="flex items-center gap-2">
-            <Badge variant={data.handled ? 'secondary' : 'destructive'}>{data.handled ? 'handled' : 'unhandled'}</Badge>
+            <Badge variant={data.handled ? 'secondary' : 'error'}>{data.handled ? 'handled' : 'unhandled'}</Badge>
             {data.message}
           </span>
         }
@@ -38,10 +37,10 @@ export default function ExceptionDetailPage() {
           <ol className="font-mono text-xs">
             {data.stack.map((f, i) => (
               <li key={i}>
-                {i > 0 && <Separator />}
-                <div className={`px-5 py-2.5 ${f.file.startsWith('vendor/') ? 'text-muted-foreground/60' : ''}`}>
+                {i > 0 && <div className="border-t border-kumo-hairline" />}
+                <div className={`px-5 py-2.5 ${f.file.startsWith('vendor/') ? 'text-kumo-inactive' : ''}`}>
                   <div>{f.source}</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">{f.file}</div>
+                  <div className="mt-0.5 text-[11px] text-kumo-subtle">{f.file}</div>
                 </div>
               </li>
             ))}
@@ -55,22 +54,22 @@ export default function ExceptionDetailPage() {
           </Panel>
           <Panel title="Recent occurrences">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="px-5">When</TableHead>
-                  <TableHead>Trace</TableHead>
-                  <TableHead className="px-5">User</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+              <Table.Header>
+                <Table.Row>
+                  <Table.Head className="px-5">When</Table.Head>
+                  <Table.Head>Trace</Table.Head>
+                  <Table.Head className="px-5">User</Table.Head>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
                 {data.occurrences.slice(0, 8).map((o) => (
-                  <TableRow key={o.trace_id}>
-                    <TableCell className="px-5 text-xs text-muted-foreground">{ago(o.timestamp)}</TableCell>
-                    <TableCell><Link to={`/traces/${o.trace_id}`} className="font-mono text-xs text-primary hover:underline">{o.name}</Link></TableCell>
-                    <TableCell className="px-5 text-xs text-muted-foreground">{o.user ? `#${o.user}` : '—'}</TableCell>
-                  </TableRow>
+                  <Table.Row key={o.trace_id}>
+                    <Table.Cell className="px-5 text-xs text-kumo-subtle">{ago(o.timestamp)}</Table.Cell>
+                    <Table.Cell><Link to={`/traces/${o.trace_id}`} className="font-mono text-xs text-kumo-link hover:underline">{o.name}</Link></Table.Cell>
+                    <Table.Cell className="px-5 text-xs text-kumo-subtle">{o.user ? `#${o.user}` : '—'}</Table.Cell>
+                  </Table.Row>
                 ))}
-              </TableBody>
+              </Table.Body>
             </Table>
           </Panel>
         </div>

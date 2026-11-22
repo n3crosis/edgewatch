@@ -1,6 +1,6 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 
-export function Sparkline({ values, className = 'text-chart-1', height = 28, width = 120 }: { values: number[]; className?: string; height?: number; width?: number }) {
+export function Sparkline({ values, className = 'text-kumo-info', height = 28, width = 120 }: { values: number[]; className?: string; height?: number; width?: number }) {
   const max = Math.max(1, ...values);
   const step = width / Math.max(1, values.length - 1);
   const points = values.map((v, i) => `${(i * step).toFixed(1)},${(height - (v / max) * (height - 2) - 1).toFixed(1)}`).join(' ');
@@ -16,25 +16,19 @@ export function BarChart({ series, height = 160 }: { series: { label: string; va
   return (
     <div className="flex items-end gap-1" style={{ height }}>
       {series.map((s, i) => (
-        <Tooltip key={i}>
-          <TooltipTrigger asChild>
-            <div className="group flex h-full flex-1 cursor-default flex-col justify-end">
-              <div className="w-full overflow-hidden rounded-t-sm bg-chart-1/70 transition group-hover:bg-chart-1" style={{ height: `${(s.value / max) * 100}%` }}>
-                {s.highlight ? <div className="w-full bg-chart-2" style={{ height: `${Math.max(6, (s.highlight / Math.max(1, s.value)) * 100)}%` }} /> : null}
-              </div>
+        <Tooltip key={i} asChild content={`${s.label}: ${s.value}${s.highlight ? ` · ${s.highlight} errors` : ''}`}>
+          <div className="group flex h-full flex-1 cursor-default flex-col justify-end">
+            <div className="w-full overflow-hidden rounded-t-sm bg-kumo-brand/70 transition group-hover:bg-kumo-brand" style={{ height: `${(s.value / max) * 100}%` }}>
+              {s.highlight ? <div className="w-full bg-kumo-danger" style={{ height: `${Math.max(6, (s.highlight / Math.max(1, s.value)) * 100)}%` }} /> : null}
             </div>
-          </TooltipTrigger>
-          <TooltipContent>
-            {s.label}: {s.value}
-            {s.highlight ? ` · ${s.highlight} errors` : ''}
-          </TooltipContent>
+          </div>
         </Tooltip>
       ))}
     </div>
   );
 }
 
-export function LineChart({ values, height = 160, className = 'text-chart-3' }: { values: number[]; height?: number; className?: string }) {
+export function LineChart({ values, height = 160, className = 'text-kumo-info' }: { values: number[]; height?: number; className?: string }) {
   const width = 600;
   const max = Math.max(1, ...values);
   const step = width / Math.max(1, values.length - 1);

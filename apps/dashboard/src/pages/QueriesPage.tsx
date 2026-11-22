@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkline } from '@/components/charts';
 import { Empty, ErrorState, Loading, PageHeader, Panel, SearchBox, Sql } from '@/components/common';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Table } from '@cloudflare/kumo/components/table';
+import { Tabs } from '@cloudflare/kumo/components/tabs';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { api, useAsync } from '@/lib/api';
 import { compact, ms } from '@/lib/format';
 import { useRange } from '@/lib/range';
@@ -33,48 +33,41 @@ export default function QueriesPage() {
         title="Queries"
         subtitle="Grouped by sql_hash — literals are stripped before hashing, so values never leave your app"
         actions={
-          <ToggleGroup type="single" variant="outline" size="sm" value={sort} onValueChange={(v) => v && setSort(v as keyof QueryGroup)} aria-label="Sort by">
-            {SORTS.map((s) => (
-              <ToggleGroupItem key={s.key} value={s.key} className="px-3 text-xs">{s.label}</ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+          <Tabs variant="segmented" size="sm" value={sort} onValueChange={(v) => setSort(v as keyof QueryGroup)} tabs={SORTS.map((s) => ({ value: s.key, label: s.label }))} />
         }
       />
       <Panel title={`${rows.length} query groups`} actions={<SearchBox value={q} onChange={setQ} placeholder="Search SQL, connection or hash…" />}>
         {error ? <ErrorState error={error} /> : loading || !data ? <Loading /> : rows.length === 0 ? <Empty>{needle ? 'No queries match your search.' : 'No queries recorded.'}</Empty> : (
-          <Table className="table-fixed">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[46%] px-5">Query</TableHead>
-                <TableHead>Calls</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead className="text-right">Avg</TableHead>
-                <TableHead className="text-right">p95</TableHead>
-                <TableHead className="text-right">Max</TableHead>
-                <TableHead className="px-5">Trend</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <Table layout="fixed">
+            <Table.Header>
+              <Table.Row>
+                <Table.Head className="w-[46%] px-5">Query</Table.Head>
+                <Table.Head>Calls</Table.Head>
+                <Table.Head className="text-right">Total</Table.Head>
+                <Table.Head className="text-right">Avg</Table.Head>
+                <Table.Head className="text-right">p95</Table.Head>
+                <Table.Head className="text-right">Max</Table.Head>
+                <Table.Head className="px-5">Trend</Table.Head>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
               {rows.map((q) => (
-                <TableRow key={q.sql_hash} onClick={() => navigate(`/queries/${q.sql_hash}`)} className="cursor-pointer">
-                  <TableCell className="px-5 py-3">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="truncate"><Sql sql={q.sql} /></div>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xl font-mono">{q.sql}</TooltipContent>
+                <Table.Row key={q.sql_hash} onClick={() => navigate(`/queries/${q.sql_hash}`)} className="cursor-pointer">
+                  <Table.Cell className="px-5 py-3">
+                    <Tooltip asChild content={<span className="block max-w-xl font-mono">{q.sql}</span>}>
+                      <div className="truncate"><Sql sql={q.sql} /></div>
                     </Tooltip>
-                    <div className="mt-1 font-mono text-[11px] text-muted-foreground">{q.connection} · {q.sql_hash.slice(0, 12)}</div>
-                  </TableCell>
-                  <TableCell className="tabular-nums">{compact(q.calls)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{ms(q.total_ms)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">{ms(q.avg_ms)}</TableCell>
-                  <TableCell className={`text-right tabular-nums ${q.p95_ms > 100 ? 'text-amber-300' : ''}`}>{ms(q.p95_ms)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">{ms(q.max_ms)}</TableCell>
-                  <TableCell className="px-5"><Sparkline values={q.trend} width={90} className="text-chart-3" /></TableCell>
-                </TableRow>
+                    <div className="mt-1 font-mono text-[11px] text-kumo-subtle">{q.connection} · {q.sql_hash.slice(0, 12)}</div>
+                  </Table.Cell>
+                  <Table.Cell className="tabular-nums">{compact(q.calls)}</Table.Cell>
+                  <Table.Cell className="text-right tabular-nums">{ms(q.total_ms)}</Table.Cell>
+                  <Table.Cell className="text-right tabular-nums text-kumo-subtle">{ms(q.avg_ms)}</Table.Cell>
+                  <Table.Cell className={`text-right tabular-nums ${q.p95_ms > 100 ? 'text-kumo-warning' : ''}`}>{ms(q.p95_ms)}</Table.Cell>
+                  <Table.Cell className="text-right tabular-nums text-kumo-subtle">{ms(q.max_ms)}</Table.Cell>
+                  <Table.Cell className="px-5"><Sparkline values={q.trend} width={90} className="text-kumo-info" /></Table.Cell>
+                </Table.Row>
               ))}
-            </TableBody>
+            </Table.Body>
           </Table>
         )}
       </Panel>

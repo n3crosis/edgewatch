@@ -22,7 +22,7 @@ Laravel app ──laravel-edgewatch (HTTPS gzip, 500ms timeout)─────�
 | `workers/consumer` | Queue consumer: normalizes SQL, computes `sql_hash`, scrubs PII, writes D1 rows and raw traces to R2 at `traces/{project_id}/{date}/{trace_id}.json`. |
 | `workers/api` | Read API for the dashboard: overview, traces (filters, search, range, cursor), exceptions, queries, trace waterfall. |
 | `workers/migrations` | D1 schema: `projects`, `traces`, `exceptions`, `queries`. |
-| `apps/dashboard` | React + Vite + Tailwind + shadcn/ui. Seed data unless `VITE_API_URL` is set (header badge shows the source); search, filters, 1h/6h/24h, 15 s live polling. |
+| `apps/dashboard` | React + Vite + Tailwind v4 + [Kumo UI](https://kumo-ui.com) (`@cloudflare/kumo`, design system of record). Seed data unless `VITE_API_URL` is set (header badge shows the source); search, filters, 1h/6h/24h, 15 s live polling. |
 | `examples/laravel-sandbox` | Laravel 12 app wired to the local package via a Composer path repository. |
 | `scripts/` | `e2e.sh` (live local pipeline test), `cf-setup.mjs`, `d1-migrate.sh`, `deploy.sh`. |
 | `fixtures/sql-normalization.json` | Shared SQL normalization cases, run by both Pest and Vitest. |

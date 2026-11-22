@@ -15,7 +15,7 @@ Browser ─────(c) @edgewatch/browser ── sendBeacon ──▶ POST /
                                            │                 R2 traces/{project_id}/{date}/{trace_id}.json
                                            │  DLQ edgewatch-ingest-dlq after 5 retries
                                            ▼
-apps/dashboard (React, shadcn/ui) ──▶ workers/api (Hono, read keys) ── D1 + R2
+apps/dashboard (React, Kumo UI) ──▶ workers/api (Hono, read keys) ── D1 + R2
 ```
 
 ## Components
@@ -29,7 +29,7 @@ apps/dashboard (React, shadcn/ui) ──▶ workers/api (Hono, read keys) ──
 | `workers/migrations` | D1 schema (`0001_init.sql`). |
 | `packages/laravel-edgewatch` | Composer client that emits Nightwatch-format records: requests, queries, exceptions, commands, queued jobs / job attempts, cache events (hit/miss/write/delete), users. Transports: TCP to a Nightwatch agent, or direct HTTPS gzip to ingest; buffered, 0.5 s connect/send timeouts, never throws into the app; honors 429/`stop`. |
 | `packages/browser` | `@edgewatch/browser`, dependency-free browser error reporter. |
-| `apps/dashboard` | React + Vite + Tailwind + shadcn/ui. Seed data by default, `workers/api` when `VITE_API_URL` is set. Filters, search, 1h/6h/24h range, 15 s live polling, data-source badge. |
+| `apps/dashboard` | React + Vite + Tailwind v4 + Kumo UI (`@cloudflare/kumo`, the design system of record; Base UI primitives, Phosphor icons). Seed data by default, `workers/api` when `VITE_API_URL` is set. Filters, search, 1h/6h/24h range, 15 s live polling, data-source badge. |
 | `examples/laravel-sandbox` | Laravel 12 app using the local package; demo routes, job, cache and command. |
 | `scripts/` | `e2e.sh` (local live pipeline check), `cf-setup.mjs`, `d1-migrate.sh`, `deploy.sh`. |
 

@@ -1,48 +1,54 @@
-import { Activity, Bug, Cloud, Database, FlaskConical, Gauge, Pause, Play, Plug, Radio } from 'lucide-react';
-import { NavLink, Outlet } from 'react-router-dom';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Badge } from '@cloudflare/kumo/components/badge';
+import { LinkButton } from '@cloudflare/kumo/components/button';
+import { Switch } from '@cloudflare/kumo/components/switch';
+import { Tabs } from '@cloudflare/kumo/components/tabs';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
+import { BroadcastIcon, BugIcon, CloudIcon, DatabaseIcon, FlaskIcon, GaugeIcon, PlugIcon, PulseIcon } from '@phosphor-icons/react';
+import { Outlet, useMatch, useResolvedPath } from 'react-router-dom';
 import { API_URL, PROJECT_ID, USING_MOCK } from '@/lib/api';
 import { POLL_INTERVAL_MS, RangeProvider, useRange } from '@/lib/range';
 import type { Range } from '@/lib/types';
 
 const NAV = [
-  { to: '/', label: 'Overview', icon: Gauge, end: true },
-  { to: '/traces', label: 'Traces', icon: Activity },
-  { to: '/exceptions', label: 'Exceptions', icon: Bug },
-  { to: '/queries', label: 'Queries', icon: Database },
-  { to: '/setup', label: 'Setup', icon: Plug },
+  { to: '/', label: 'Overview', icon: GaugeIcon, end: true },
+  { to: '/traces', label: 'Traces', icon: PulseIcon },
+  { to: '/exceptions', label: 'Exceptions', icon: BugIcon },
+  { to: '/queries', label: 'Queries', icon: DatabaseIcon },
+  { to: '/setup', label: 'Setup', icon: PlugIcon },
 ];
+
+function NavItem({ to, label, icon, end }: (typeof NAV)[number]) {
+  const active = useMatch({ path: useResolvedPath(to).pathname, end: end ?? false }) !== null;
+  return (
+    <LinkButton href={to} variant={active ? 'secondary' : 'ghost'} icon={icon} aria-current={active ? 'page' : undefined} className={`w-full justify-start ${active ? '' : 'text-kumo-subtle'}`}>
+      {label}
+    </LinkButton>
+  );
+}
 
 function RangePicker() {
   const { range, setRange } = useRange();
   return (
-    <ToggleGroup type="single" variant="outline" size="sm" value={range} onValueChange={(v) => v && setRange(v as Range)} aria-label="Time range">
-      {(['1h', '6h', '24h'] as Range[]).map((r) => (
-        <ToggleGroupItem key={r} value={r} className="px-3 text-xs">
-          {r}
-        </ToggleGroupItem>
-      ))}
-    </ToggleGroup>
+    <Tabs
+      variant="segmented"
+      size="sm"
+      value={range}
+      onValueChange={(v) => setRange(v as Range)}
+      tabs={(['1h', '6h', '24h'] as Range[]).map((r) => ({ value: r, label: r }))}
+    />
   );
 }
 
 function DataSource() {
   const host = USING_MOCK ? '' : (() => { try { return new URL(API_URL).host; } catch { return API_URL; } })();
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge variant="outline" data-testid="data-source" className={USING_MOCK ? 'gap-1.5 border-amber-400/30 text-amber-300' : 'gap-1.5 border-emerald-400/30 text-emerald-300'}>
-          {USING_MOCK ? <FlaskConical /> : <Cloud />}
+    <Tooltip asChild content={USING_MOCK ? 'VITE_API_URL is not set: showing generated seed data.' : `Reading live data from workers/api at ${API_URL}`}>
+      <span data-testid="data-source">
+        <Badge variant={USING_MOCK ? 'warning' : 'success'}>
+          {USING_MOCK ? <FlaskIcon /> : <CloudIcon />}
           {USING_MOCK ? 'Seed data' : `API · ${host}`}
         </Badge>
-      </TooltipTrigger>
-      <TooltipContent>
-        {USING_MOCK ? 'VITE_API_URL is not set: showing generated seed data.' : `Reading live data from workers/api at ${API_URL}`}
-      </TooltipContent>
+      </span>
     </Tooltip>
   );
 }
@@ -50,19 +56,10 @@ function DataSource() {
 function LiveToggle() {
   const { live, setLive, lastUpdated } = useRange();
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant={live ? 'secondary' : 'outline'} size="sm" onClick={() => setLive(!live)} aria-pressed={live} className="gap-1.5 text-xs">
-          {live ? <Pause /> : <Play />}
-          {live ? (
-            <>
-              <span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex size-2 rounded-full bg-emerald-400" /></span>
-              Live · {POLL_INTERVAL_MS / 1000}s
-            </>
-          ) : 'Live'}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{live ? `Refreshing every ${POLL_INTERVAL_MS / 1000}s · last ${new Date(lastUpdated).toLocaleTimeString()}` : `Refresh every ${POLL_INTERVAL_MS / 1000}s`}</TooltipContent>
+    <Tooltip asChild content={live ? `Refreshing every ${POLL_INTERVAL_MS / 1000}s · last ${new Date(lastUpdated).toLocaleTimeString()}` : `Refresh every ${POLL_INTERVAL_MS / 1000}s`}>
+      <span className="flex items-center">
+        <Switch size="sm" label={live ? `Live · ${POLL_INTERVAL_MS / 1000}s` : 'Live'} checked={live} onCheckedChange={setLive} />
+      </span>
     </Tooltip>
   );
 }
@@ -71,42 +68,32 @@ export default function Layout() {
   return (
     <RangeProvider>
       <div className="flex h-full">
-        <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
-          <div className="flex items-center gap-2.5 px-5 py-5">
-            <div className="grid size-8 place-items-center rounded-lg bg-primary/15 text-primary">
-              <Radio size={18} />
+        <aside className="flex w-60 shrink-0 flex-col border-r border-kumo-hairline bg-kumo-elevated">
+          <div className="flex items-center gap-2.5 border-b border-kumo-hairline px-5 py-5">
+            <div className="grid size-8 place-items-center rounded-lg bg-kumo-brand text-white">
+              <BroadcastIcon size={18} weight="bold" />
             </div>
             <div>
-              <div className="text-sm font-semibold">EdgeWatch</div>
-              <div className="text-[11px] text-muted-foreground">Nightwatch-compatible APM</div>
+              <div className="text-sm font-semibold text-kumo-strong">EdgeWatch</div>
+              <div className="text-[11px] text-kumo-subtle">Nightwatch-compatible APM</div>
             </div>
           </div>
-          <Separator />
           <nav className="flex flex-col gap-1 p-3">
-            {NAV.map(({ to, label, icon: Icon, end }) => (
-              <NavLink key={to} to={to} end={end}>
-                {({ isActive }) => (
-                  <Button variant={isActive ? 'secondary' : 'ghost'} className={`w-full justify-start gap-3 ${isActive ? '' : 'text-muted-foreground'}`}>
-                    <Icon /> {label}
-                  </Button>
-                )}
-              </NavLink>
-            ))}
+            {NAV.map((item) => <NavItem key={item.to} {...item} />)}
           </nav>
-          <div className="mt-auto space-y-3 p-4 text-xs">
-            <Separator />
+          <div className="mt-auto border-t border-kumo-hairline p-4 text-xs">
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Project</span>
+              <span className="text-kumo-subtle">Project</span>
               <span className="font-mono">{PROJECT_ID}</span>
             </div>
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-14 shrink-0 items-center justify-between border-b px-8">
-            <div className="text-sm text-muted-foreground">
-              <span className="text-foreground">shop.example.com</span> · production
+          <header className="flex h-14 shrink-0 items-center justify-between border-b border-kumo-hairline px-8">
+            <div className="text-sm text-kumo-subtle">
+              <span className="text-kumo-strong">shop.example.com</span> · production
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <DataSource />
               <LiveToggle />
               <RangePicker />
