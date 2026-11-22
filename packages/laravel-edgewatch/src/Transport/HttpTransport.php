@@ -8,13 +8,16 @@ use RuntimeException;
 /**
  * Sends records straight to an EdgeWatch ingest endpoint using the Nightwatch agent -> cloud format
  * (gzip'd {"records": [...]}, Bearer auth), so no local agent process is needed.
+ *
+ * Honors the agent's "stop" contract: a 429 or any response with {"stop": true} pauses sending for
+ * `refresh_in` seconds (or Retry-After, default 60); records produced while paused are dropped, like the agent does.
  */
 final class HttpTransport implements Transport
 {
     public const VERSION = '0.1.0';
 
     /**
-     * @param  (Closure(string $url, array<string, string> $headers, string $body, float $connectionTimeout, float $timeout): int)|null  $sender
+     * @param  (Closure(string $url, array<string, string> $headers, string $body, float $connectionTimeout, float $timeout): (int|array{0: int, 1: string, 2: array<string, string>}))|null  $sender
      */
     public function __construct(
         private string $url,
@@ -23,13 +26,19 @@ final class HttpTransport implements Transport
         private float $connectionTimeout = 0.5,
         private float $timeout = 0.5,
         private ?Closure $sender = null,
+        private Backoff $backoff = new Backoff,
     ) {
         $this->sender ??= self::curlSender(...);
     }
 
+    public function backoff(): Backoff
+    {
+        return $this->backoff;
+    }
+
     public function send(array $records): void
     {
-        if ($records === []) {
+        if ($records === [] || $this->backoff->isPaused()) {
             return;
         }
 
@@ -40,7 +49,7 @@ final class HttpTransport implements Transport
             throw new RuntimeException('Unable to compress EdgeWatch payload.');
         }
 
-        $status = ($this->sender)($this->url, [
+        $result = ($this->sender)($this->url, [
             'accept' => 'application/json',
             'authorization' => 'Bearer '.($this->token ?? ''),
             'content-encoding' => 'gzip',
@@ -49,6 +58,20 @@ final class HttpTransport implements Transport
             'user-agent' => 'EdgeWatchLaravel/'.self::VERSION,
         ], $body, $this->connectionTimeout, $this->timeout);
 
+        [$status, $responseBody, $responseHeaders] = is_int($result) ? [$result, '', []] : $result;
+        $json = json_decode($responseBody, true);
+        $json = is_array($json) ? $json : [];
+
+        if ($status === 429 || ($json['stop'] ?? false) === true) {
+            $retryAfter = $responseHeaders['retry-after'] ?? null;
+            $seconds = (int) ($json['refresh_in'] ?? (is_numeric($retryAfter) ? $retryAfter : 60));
+            $this->backoff->pause($seconds, (string) ($json['message'] ?? "HTTP {$status}"));
+
+            if ($status === 429) {
+                throw new RuntimeException("EdgeWatch ingest asked to stop for {$seconds}s: ".($json['message'] ?? 'HTTP 429'));
+            }
+        }
+
         if ($status < 200 || $status >= 300) {
             throw new RuntimeException("EdgeWatch ingest responded with HTTP {$status}");
         }
@@ -56,10 +79,12 @@ final class HttpTransport implements Transport
 
     /**
      * @param  array<string, string>  $headers
+     * @return array{0: int, 1: string, 2: array<string, string>}
      */
-    private static function curlSender(string $url, array $headers, string $body, float $connectionTimeout, float $timeout): int
+    private static function curlSender(string $url, array $headers, string $body, float $connectionTimeout, float $timeout): array
     {
         $ch = curl_init($url);
+        $responseHeaders = [];
 
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
@@ -69,9 +94,17 @@ final class HttpTransport implements Transport
             CURLOPT_CONNECTTIMEOUT_MS => (int) ($connectionTimeout * 1000),
             CURLOPT_TIMEOUT_MS => (int) ($timeout * 1000),
             CURLOPT_NOSIGNAL => true,
+            CURLOPT_HEADERFUNCTION => static function ($ch, string $line) use (&$responseHeaders): int {
+                if (str_contains($line, ':')) {
+                    [$name, $value] = explode(':', $line, 2);
+                    $responseHeaders[strtolower(trim($name))] = trim($value);
+                }
+
+                return strlen($line);
+            },
         ]);
 
-        curl_exec($ch);
+        $response = curl_exec($ch);
         $error = curl_error($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_close($ch);
@@ -80,6 +113,6 @@ final class HttpTransport implements Transport
             throw new RuntimeException("EdgeWatch ingest request failed: {$error}");
         }
 
-        return $status;
+        return [$status, is_string($response) ? $response : '', $responseHeaders];
     }
 }

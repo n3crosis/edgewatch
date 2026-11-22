@@ -6,7 +6,11 @@ use EdgeWatch\Laravel\Redaction\Redactor;
 use EdgeWatch\Laravel\Sql\SqlNormalizer;
 use EdgeWatch\Laravel\Support\Uuid7;
 use EdgeWatch\Laravel\Transport\BufferedTransport;
+use Illuminate\Cache\Events\CacheEvent;
+use Illuminate\Cache\Events\KeyWritten;
+use Illuminate\Contracts\Queue\Job;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
@@ -31,6 +35,16 @@ class EdgeWatch
     private string $exceptionPreview = '';
 
     private ?string $routeAction = null;
+
+    private int $cacheEvents = 0;
+
+    private int $jobsQueued = 0;
+
+    /** @var array{name: string, command: string, class: string}|null */
+    private ?array $command = null;
+
+    /** @var array{started_at: float, nested: bool}|null */
+    private ?array $job = null;
 
     /**
      * @param  array<string, mixed>  $config
@@ -59,7 +73,154 @@ class EdgeWatch
         $this->exceptions = 0;
         $this->exceptionPreview = '';
         $this->routeAction = null;
-        $this->sampled = $this->roll((float) ($this->config['sampling']['requests'] ?? 1.0));
+        $this->cacheEvents = 0;
+        $this->jobsQueued = 0;
+        $this->command = null;
+        $this->job = null;
+        $this->sampled = $this->roll((float) ($this->config['sampling'][$source === 'command' ? 'commands' : 'requests'] ?? 1.0));
+    }
+
+    public function isIgnoredCommand(?string $name): bool
+    {
+        return $name === null || $name === '' || in_array($name, (array) ($this->config['filtering']['ignore_commands'] ?? []), true);
+    }
+
+    public function commandStarting(string $name, string $command, string $class = ''): void
+    {
+        $this->startExecution('command');
+        $this->command = ['name' => $name, 'command' => $command, 'class' => $class];
+    }
+
+    public function commandFinished(int $exitCode): void
+    {
+        if ($this->command === null) {
+            return;
+        }
+
+        $command = $this->command;
+        $this->command = null;
+
+        if ($this->sampled) {
+            $duration = $this->elapsed($this->startedAt);
+            $this->buffer->write([
+                'v' => 1,
+                't' => 'command',
+                'timestamp' => $this->startedAt,
+                ...$this->common(),
+                '_group' => hash('xxh128', $command['name']),
+                'class' => $command['class'],
+                'name' => $command['name'],
+                'command' => $this->redactor->scrub($command['command']),
+                'exit_code' => $exitCode,
+                'duration' => $duration,
+                'bootstrap' => 0,
+                'action' => $duration,
+                'terminating' => 0,
+                ...$this->counters(),
+            ]);
+        }
+
+        $this->buffer->flush();
+    }
+
+    /**
+     * Jobs on the sync connection run inside the current execution (as Nightwatch does); queued jobs start their own trace.
+     */
+    public function jobStarting(Job $job, string $connection): void
+    {
+        $nested = $connection === 'sync';
+
+        if (! $nested) {
+            $this->startExecution('job');
+        }
+
+        $this->job = ['started_at' => microtime(true), 'nested' => $nested];
+    }
+
+    public function jobFinished(Job $job, string $connection, string $status): void
+    {
+        if ($this->job === null) {
+            return;
+        }
+
+        $state = $this->job;
+        $this->job = null;
+
+        if ($this->sampled) {
+            $name = $job->resolveName();
+            $this->buffer->write([
+                'v' => 1,
+                't' => 'job-attempt',
+                'timestamp' => $state['started_at'],
+                ...$this->common(),
+                '_group' => hash('xxh128', $name),
+                'job_id' => (string) ($job->uuid() ?? $job->getJobId()),
+                'attempt_id' => $this->uuid->generate(),
+                'attempt' => $job->attempts(),
+                'name' => $name,
+                'connection' => $connection,
+                'queue' => (string) $job->getQueue(),
+                'status' => $status,
+                'duration' => $this->elapsed($state['started_at']),
+                ...($state['nested'] ? [] : $this->counters()),
+            ]);
+        }
+
+        if (! $state['nested']) {
+            $this->buffer->flush();
+        }
+    }
+
+    public function jobQueued(JobQueued $event): void
+    {
+        $this->jobsQueued++;
+
+        if (! $this->sampled) {
+            return;
+        }
+
+        $payload = is_string($event->payload ?? null) ? (array) json_decode($event->payload, true) : [];
+        $name = (string) ($payload['displayName'] ?? (is_object($event->job) ? $event->job::class : (string) $event->job));
+
+        $this->buffer->write([
+            'v' => 1,
+            't' => 'queued-job',
+            'timestamp' => microtime(true),
+            ...$this->common(),
+            '_group' => hash('xxh128', $name),
+            'job_id' => (string) ($payload['uuid'] ?? $event->id ?? ''),
+            'name' => $name,
+            'connection' => (string) $event->connectionName,
+            'queue' => (string) ($event->queue ?: (function_exists('config') ? config("queue.connections.{$event->connectionName}.queue", '') : '')),
+            'duration' => 0,
+        ]);
+    }
+
+    /**
+     * @param  'hit'|'miss'|'write'|'delete'  $type
+     */
+    public function cacheEvent(string $type, CacheEvent $event): void
+    {
+        if (! $this->sampled || ($this->config['filtering']['ignore_cache_events'] ?? false)) {
+            return;
+        }
+
+        $this->cacheEvents++;
+        $store = (string) ($event->storeName ?? '');
+        $key = $this->redactor->scrub((string) $event->key);
+
+        $this->buffer->write([
+            'v' => 1,
+            't' => 'cache-event',
+            'timestamp' => microtime(true),
+            ...$this->common(),
+            '_group' => hash('xxh128', "{$store},{$key}"),
+            'store' => $store,
+            'key' => $key,
+            'type' => $type,
+            'duration' => 0,
+            'ttl' => $event instanceof KeyWritten ? (int) ($event->seconds ?? 0) : 0,
+        ]);
     }
 
     public function query(QueryExecuted $event): void
@@ -171,13 +332,13 @@ class EdgeWatch
             'logs' => 0,
             'queries' => $this->queries,
             'lazy_loads' => 0,
-            'jobs_queued' => 0,
+            'jobs_queued' => $this->jobsQueued,
             'mail' => 0,
             'notifications' => 0,
             'outgoing_requests' => 0,
             'files_read' => 0,
             'files_written' => 0,
-            'cache_events' => 0,
+            'cache_events' => $this->cacheEvents,
             'hydrated_models' => 0,
             'peak_memory_usage' => memory_get_peak_usage(true),
             'exception_preview' => $this->exceptionPreview,
@@ -190,6 +351,36 @@ class EdgeWatch
     public function flush(): void
     {
         $this->buffer->flush();
+    }
+
+    /**
+     * Per-execution counters shared by request, command and job-attempt records.
+     *
+     * @return array<string, int|string>
+     */
+    private function counters(): array
+    {
+        return [
+            'exceptions' => $this->exceptions,
+            'logs' => 0,
+            'queries' => $this->queries,
+            'lazy_loads' => 0,
+            'jobs_queued' => $this->jobsQueued,
+            'mail' => 0,
+            'notifications' => 0,
+            'outgoing_requests' => 0,
+            'files_read' => 0,
+            'files_written' => 0,
+            'cache_events' => $this->cacheEvents,
+            'hydrated_models' => 0,
+            'peak_memory_usage' => memory_get_peak_usage(true),
+            'exception_preview' => $this->exceptionPreview,
+        ];
+    }
+
+    private function elapsed(float $since): int
+    {
+        return (int) round((microtime(true) - $since) * 1_000_000);
     }
 
     /**

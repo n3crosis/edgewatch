@@ -20,11 +20,15 @@ return [
 
     'sampling' => [
         'requests' => env('EDGEWATCH_REQUEST_SAMPLE_RATE', env('NIGHTWATCH_REQUEST_SAMPLE_RATE', 1.0)),
+        'commands' => env('EDGEWATCH_COMMAND_SAMPLE_RATE', env('NIGHTWATCH_COMMAND_SAMPLE_RATE', 1.0)),
         'exceptions' => env('EDGEWATCH_EXCEPTION_SAMPLE_RATE', env('NIGHTWATCH_EXCEPTION_SAMPLE_RATE', 1.0)),
     ],
 
     'filtering' => [
         'ignore_queries' => env('EDGEWATCH_IGNORE_QUERIES', env('NIGHTWATCH_IGNORE_QUERIES', false)),
+        'ignore_cache_events' => env('EDGEWATCH_IGNORE_CACHE_EVENTS', env('NIGHTWATCH_IGNORE_CACHE_EVENTS', false)),
+        // Long-running worker/server commands: their jobs/requests are traced individually instead.
+        'ignore_commands' => $csv(env('EDGEWATCH_IGNORE_COMMANDS'), 'queue:work,queue:listen,horizon,horizon:work,horizon:supervisor,schedule:work,octane:start,octane:frankenphp,octane:roadrunner,octane:swoole,reverb:start,serve,nightwatch:agent,pail,tinker'),
     ],
 
     'ingest' => [

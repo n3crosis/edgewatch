@@ -6,18 +6,26 @@ use EdgeWatch\Laravel\Listeners\QueryListener;
 use EdgeWatch\Laravel\Redaction\Redactor;
 use EdgeWatch\Laravel\Support\Uuid7;
 use EdgeWatch\Laravel\Transport\AgentTransport;
+use EdgeWatch\Laravel\Transport\Backoff;
 use EdgeWatch\Laravel\Transport\BufferedTransport;
 use EdgeWatch\Laravel\Transport\HttpTransport;
 use EdgeWatch\Laravel\Transport\NullTransport;
 use EdgeWatch\Laravel\Transport\Transport;
+use Illuminate\Cache\Events\CacheHit;
+use Illuminate\Cache\Events\CacheMissed;
+use Illuminate\Cache\Events\KeyForgotten;
+use Illuminate\Cache\Events\KeyWritten;
 use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Http\Events\RequestHandled;
+use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Queue\Events\JobQueued;
+use Illuminate\Queue\Events\JobReleasedAfterException;
 use Illuminate\Support\ServiceProvider;
 use Throwable;
 
@@ -74,17 +82,42 @@ class EdgeWatchServiceProvider extends ServiceProvider
             rescue(fn () => $this->app->make(EdgeWatch::class)->request($event->request, $event->response), report: false);
         });
 
-        $events->listen(CommandStarting::class, function (): void {
-            if ($this->app->runningInConsole()) {
-                rescue(fn () => $this->app->make(EdgeWatch::class)->startExecution('command'), report: false);
-            }
+        $edgewatch = fn (): EdgeWatch => $this->app->make(EdgeWatch::class);
+
+        $events->listen(CommandStarting::class, function (CommandStarting $event) use ($edgewatch): void {
+            rescue(function () use ($event, $edgewatch): void {
+                $ew = $edgewatch();
+                if ($this->app->runningInConsole() && ! $ew->isIgnoredCommand($event->command)) {
+                    $class = $this->app->bound(\Illuminate\Contracts\Console\Kernel::class) ? (string) rescue(fn () => get_class($this->app->make(\Illuminate\Contracts\Console\Kernel::class)->all()[$event->command] ?? ''), '', false) : '';
+                    $ew->commandStarting((string) $event->command, method_exists($event->input, '__toString') ? (string) $event->input : (string) $event->command, $class);
+                }
+            }, report: false);
         });
-        $events->listen(JobProcessing::class, function (): void {
-            rescue(fn () => $this->app->make(EdgeWatch::class)->startExecution('job'), report: false);
+        $events->listen(CommandFinished::class, function (CommandFinished $event) use ($edgewatch): void {
+            rescue(fn () => $edgewatch()->commandFinished((int) $event->exitCode), report: false);
         });
-        $events->listen([CommandFinished::class, JobProcessed::class], function (): void {
-            rescue(fn () => $this->app->make(EdgeWatch::class)->flush(), report: false);
+
+        $events->listen(JobProcessing::class, function (JobProcessing $event) use ($edgewatch): void {
+            rescue(fn () => $edgewatch()->jobStarting($event->job, (string) $event->connectionName), report: false);
         });
+        $events->listen(JobProcessed::class, function (JobProcessed $event) use ($edgewatch): void {
+            rescue(fn () => $edgewatch()->jobFinished($event->job, (string) $event->connectionName, $event->job->isReleased() ? 'released' : 'processed'), report: false);
+        });
+        $events->listen(JobReleasedAfterException::class, function (JobReleasedAfterException $event) use ($edgewatch): void {
+            rescue(fn () => $edgewatch()->jobFinished($event->job, (string) $event->connectionName, 'released'), report: false);
+        });
+        $events->listen(JobFailed::class, function (JobFailed $event) use ($edgewatch): void {
+            rescue(fn () => $edgewatch()->jobFinished($event->job, (string) $event->connectionName, 'failed'), report: false);
+        });
+        $events->listen(JobQueued::class, function (JobQueued $event) use ($edgewatch): void {
+            rescue(fn () => $edgewatch()->jobQueued($event), report: false);
+        });
+
+        foreach ([CacheHit::class => 'hit', CacheMissed::class => 'miss', KeyWritten::class => 'write', KeyForgotten::class => 'delete'] as $class => $type) {
+            $events->listen($class, function ($event) use ($edgewatch, $type): void {
+                rescue(fn () => $edgewatch()->cacheEvent($type, $event), report: false);
+            });
+        }
 
         $this->callAfterResolving(ExceptionHandler::class, function ($handler): void {
             if (method_exists($handler, 'reportable')) {
@@ -117,6 +150,7 @@ class EdgeWatchServiceProvider extends ServiceProvider
                 server: (string) ($this->app['config']->get('edgewatch.server') ?: gethostname()),
                 connectionTimeout: (float) ($config['connection_timeout'] ?? 0.5),
                 timeout: (float) ($config['timeout'] ?? 0.5),
+                backoff: new Backoff($this->app->storagePath('framework/edgewatch-backoff.json')),
             ),
             'agent' => new AgentTransport(
                 address: $uri,

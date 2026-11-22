@@ -1,5 +1,6 @@
 <?php
 
+use EdgeWatch\Laravel\Transport\Backoff;
 use EdgeWatch\Laravel\Transport\HttpTransport;
 
 it('posts gzip-compressed {"records": [...]} with Nightwatch agent headers and a 500ms timeout', function () {
@@ -46,3 +47,51 @@ it('gives up within the timeout when the endpoint hangs', function () {
 
     fclose($server);
 })->skip(! function_exists('curl_init'), 'ext-curl not installed');
+
+it('honors 429 + stop/refresh_in by pausing all sends until the window passes', function () {
+    $calls = 0;
+    $path = tempnam(sys_get_temp_dir(), 'ew');
+    $transport = new HttpTransport('https://ingest.test', 't', 's', sender: function () use (&$calls) {
+        $calls++;
+
+        return [429, '{"message":"Over quota.","stop":true,"refresh_in":120}', ['retry-after' => '120']];
+    }, backoff: new Backoff($path));
+
+    expect(fn () => $transport->send([['t' => 'query']]))->toThrow(RuntimeException::class, 'stop for 120s');
+
+    $transport->send([['t' => 'query']]);
+    $transport->send([['t' => 'query']]);
+
+    expect($calls)->toBe(1)
+        ->and($transport->backoff()->pausedUntil())->toBeGreaterThan(microtime(true) + 110);
+
+    // A fresh process (new Backoff on the same file) also stays paused.
+    $other = new HttpTransport('https://ingest.test', 't', 's', sender: function () use (&$calls) { $calls++; return 200; }, backoff: new Backoff($path));
+    $other->send([['t' => 'query']]);
+    expect($calls)->toBe(1);
+
+    @unlink($path);
+});
+
+it('falls back to Retry-After and resumes once the window has passed', function () {
+    $backoff = new Backoff;
+    $responses = [[429, '', ['retry-after' => '1']], 200];
+    $calls = 0;
+    $transport = new HttpTransport('https://ingest.test', 't', 's', sender: function () use (&$responses, &$calls) { $calls++; return array_shift($responses); }, backoff: $backoff);
+
+    expect(fn () => $transport->send([['t' => 'query']]))->toThrow(RuntimeException::class);
+    expect($backoff->isPaused())->toBeTrue();
+
+    (fn () => $this->until = microtime(true) - 1)->call($backoff);
+    $transport->send([['t' => 'query']]);
+
+    expect($calls)->toBe(2);
+});
+
+it('pauses on a 2xx response that carries stop: true without throwing', function () {
+    $transport = new HttpTransport('https://ingest.test', 't', 's', sender: fn () => [200, '{"stop":true,"refresh_in":30}', []]);
+
+    $transport->send([['t' => 'query']]);
+
+    expect($transport->backoff()->isPaused())->toBeTrue();
+});
