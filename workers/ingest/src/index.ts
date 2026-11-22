@@ -19,6 +19,15 @@ export interface Env {
   TOKEN_TTL?: string;
   MAX_BODY_BYTES?: string;
   INGEST_URL?: string;
+  /** Optional Workers Rate Limiting binding, keyed by project id. */
+  RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  RATE_LIMIT_PERIOD?: string;
+}
+
+/** Stored in KV under project:<id> by billing/ops to cut a project off until a given time. */
+export interface ProjectQuota {
+  over_quota_until?: number;
+  message?: string;
 }
 
 /** Queue messages are capped at 128 KB; anything bigger is parked in R2 and referenced by key. */
@@ -42,6 +51,29 @@ async function lookupKey(env: Env, raw: string, scope: Scope): Promise<ApiKeyRec
 app.get('/health', (c) => c.json({ ok: true }));
 
 /**
+ * Nightwatch "stop" instruction: the agent pauses (and drops buffered data) until refresh_in seconds pass,
+ * on both agent-auth and ingest responses. laravel-edgewatch honors the same body and Retry-After header.
+ */
+function stop(c: Context, message: string, refreshIn: number) {
+  const seconds = Math.max(1, Math.ceil(refreshIn));
+  c.header('Retry-After', String(seconds));
+  c.header('X-EdgeWatch-Stop', '1');
+  return c.json({ message, stop: true, refresh_in: seconds }, 429);
+}
+
+async function quotaStop(c: Context<{ Bindings: Env }>, projectId: string, rateLimit: boolean) {
+  const quota = await c.env.API_KEYS.get<ProjectQuota>(`project:${projectId}`, { type: 'json', cacheTtl: 60 });
+  const now = Date.now() / 1000;
+  if (quota?.over_quota_until && quota.over_quota_until > now) {
+    return stop(c, quota.message ?? 'Project is over its quota.', quota.over_quota_until - now);
+  }
+  if (rateLimit && c.env.RATE_LIMITER && !(await c.env.RATE_LIMITER.limit({ key: projectId })).success) {
+    return stop(c, 'Rate limit exceeded.', Number(c.env.RATE_LIMIT_PERIOD ?? 60));
+  }
+  return null;
+}
+
+/**
  * Nightwatch agent authentication. The agent sends `Authorization: Bearer <NIGHTWATCH_TOKEN>` with body `{}` and
  * requires all four keys back (expires_in / refresh_in as integers).
  */
@@ -49,6 +81,8 @@ app.post('/api/agent-auth', async (c) => {
   const token = bearer(c);
   const key = token ? await lookupKey(c.env, token, 'ingest') : null;
   if (!key) return unauthenticated(c);
+  const stopped = await quotaStop(c, key.project_id, false);
+  if (stopped) return stopped;
 
   const ttl = Number(c.env.TOKEN_TTL ?? 3600);
   return c.json({
@@ -68,6 +102,8 @@ app.post('/api/ingest', async (c) => {
   if (!token) return unauthenticated(c);
   const projectId = (await verifyIngestToken(token, c.env.TOKEN_SIGNING_SECRET))?.p ?? (await lookupKey(c.env, token, 'ingest'))?.project_id;
   if (!projectId) return unauthenticated(c);
+  const stopped = await quotaStop(c, projectId, true);
+  if (stopped) return stopped;
 
   const maxBytes = Number(c.env.MAX_BODY_BYTES ?? 20_000_000);
   let text: string;

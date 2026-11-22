@@ -147,3 +147,49 @@ describe('POST /api/ingest', () => {
     expect(res.status).toBe(413);
   });
 });
+
+describe('over quota / rate limited (Nightwatch stop instruction)', () => {
+  it('answers ingest with 429, stop, refresh_in and Retry-After while the project is over quota', async () => {
+    await env.API_KEYS.put('project:proj_1', JSON.stringify({ over_quota_until: Math.floor(Date.now() / 1000) + 300, message: 'Monthly event quota exceeded.' }));
+    try {
+      const res = await call('/api/ingest', { method: 'POST', headers: { authorization: `Bearer ${INGEST_KEY}` }, body: JSON.stringify({ records: [query(TRACE_A)] }) });
+      const body = (await res.json()) as { message: string; stop: boolean; refresh_in: number };
+
+      expect(res.status).toBe(429);
+      expect(body).toMatchObject({ message: 'Monthly event quota exceeded.', stop: true });
+      expect(body.refresh_in).toBeGreaterThan(290);
+      expect(Number(res.headers.get('retry-after'))).toBe(body.refresh_in);
+      expect(res.headers.get('x-edgewatch-stop')).toBe('1');
+      expect(sent).toHaveLength(0);
+
+      const auth = await call('/api/agent-auth', { method: 'POST', headers: { ...agentHeaders, authorization: `Bearer ${INGEST_KEY}` }, body: '{}' });
+      expect(auth.status).toBe(429);
+      expect(await auth.json()).toMatchObject({ stop: true });
+    } finally {
+      await env.API_KEYS.delete('project:proj_1');
+    }
+  });
+
+  it('ignores an expired quota block', async () => {
+    await env.API_KEYS.put('project:proj_1', JSON.stringify({ over_quota_until: Math.floor(Date.now() / 1000) - 5 }));
+    try {
+      const res = await call('/api/ingest', { method: 'POST', headers: { authorization: `Bearer ${INGEST_KEY}` }, body: JSON.stringify({ records: [query(TRACE_A)] }) });
+      expect(res.status).toBe(200);
+    } finally {
+      await env.API_KEYS.delete('project:proj_1');
+    }
+  });
+
+  it('answers 429 with refresh_in = RATE_LIMIT_PERIOD when the rate limiter rejects', async () => {
+    const keys: string[] = [];
+    testEnv.RATE_LIMITER = { limit: async ({ key }) => (keys.push(key), { success: keys.length <= 1 }) };
+    testEnv.RATE_LIMIT_PERIOD = '60';
+    const req = () => call('/api/ingest', { method: 'POST', headers: { authorization: `Bearer ${INGEST_KEY}` }, body: JSON.stringify({ records: [query(TRACE_A)] }) });
+
+    expect((await req()).status).toBe(200);
+    const limited = await req();
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ message: 'Rate limit exceeded.', stop: true, refresh_in: 60 });
+    expect(keys).toEqual(['proj_1', 'proj_1']);
+  });
+});

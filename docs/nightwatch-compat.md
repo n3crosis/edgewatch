@@ -98,7 +98,11 @@ and the shape of a successful body. The agent only relies on 2xx vs non-2xx and 
 `200 {"ok":true,"accepted":n,"rejected":m,"errors":[...]}` on success, `401 {"message":"Unauthenticated."}` on missing, unknown, read-only or expired tokens,
 `413` over `MAX_BODY_BYTES`, `422 {"message":"..."}` when the body is not JSON or has no `records` array, `503` if the queue is unavailable.
 Individually malformed records are dropped and counted in `rejected` rather than failing the batch, because the agent drops the whole batch on any non-2xx.
-Quota signalling (`429` + `stop`) is **not implemented yet**.
+Quota / rate limiting: when KV `project:<id>` holds `{"over_quota_until": <unix s>, "message": "..."}` in the future (checked on
+`/api/agent-auth` and `/api/ingest`), or the optional `RATE_LIMITER` binding rejects the project (ingest only), EdgeWatch answers
+`429 {"message":"...","stop":true,"refresh_in":<s>}` with `Retry-After: <s>` and `X-EdgeWatch-Stop: 1`. The official agent pauses on `stop`;
+`laravel-edgewatch`'s HTTP transport pauses on `429` or `stop` (using `refresh_in`, then `Retry-After`, then 60 s), shared across PHP
+processes via `storage/framework/edgewatch-backoff.json`. Setting `over_quota_until` is manual/ops-driven: there is no usage metering yet.
 
 ## Record shapes (common to both hops)
 

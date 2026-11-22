@@ -7,6 +7,8 @@
   "kv_namespaces": [{ "binding": "API_KEYS", "id": "REPLACE_WITH_KV_NAMESPACE_ID" }],
   "queues": { "producers": [{ "binding": "INGEST_QUEUE", "queue": "edgewatch-ingest" }] },
   "r2_buckets": [{ "binding": "TRACES", "bucket_name": "edgewatch-traces" }],
-  "vars": { "TOKEN_TTL": "3600", "MAX_BODY_BYTES": "20000000" }
+  // Per-project ingest requests per period; over the limit, ingest answers 429 {"stop": true, "refresh_in": RATE_LIMIT_PERIOD}.
+  "ratelimits": [{ "name": "RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 600, "period": 60 } }],
+  "vars": { "TOKEN_TTL": "3600", "MAX_BODY_BYTES": "20000000", "RATE_LIMIT_PERIOD": "60" }
   // Secret: wrangler secret put TOKEN_SIGNING_SECRET
 }
