@@ -1,5 +1,8 @@
 import {
   apiKeyKvKey,
+  BrowserBody,
+  BrowserEvent,
+  browserEventToRecord,
   IngestBody,
   signIngestToken,
   validateRecords,
@@ -151,6 +154,71 @@ async function readBody(request: Request, maxBytes: number): Promise<string> {
   if (bytes.byteLength > maxBytes) throw new PayloadTooLarge();
   return new TextDecoder().decode(bytes);
 }
+
+/**
+ * Browser error telemetry (EdgeWatch extension; the Nightwatch wire format has no browser record type).
+ * Auth is a public `browser`-scope key in ?key= (navigator.sendBeacon cannot set headers) or a Bearer header,
+ * optionally restricted to allowed_origins. Events become Nightwatch-shaped exception records on the normal queue.
+ */
+function browserCors(c: Context, origin: string | undefined) {
+  if (!origin) return;
+  c.header('Access-Control-Allow-Origin', origin);
+  c.header('Vary', 'Origin');
+  c.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  c.header('Access-Control-Allow-Headers', 'content-type, authorization');
+  c.header('Access-Control-Max-Age', '86400');
+}
+
+app.options('/api/browser', (c) => {
+  browserCors(c, c.req.header('origin'));
+  return c.body(null, 204);
+});
+
+app.post('/api/browser', async (c) => {
+  const origin = c.req.header('origin');
+  const raw = c.req.query('key') ?? bearer(c);
+  const key = raw ? await lookupKey(c.env, raw, 'browser') : null;
+  if (!key) return unauthenticated(c);
+  if (key.allowed_origins?.length && (!origin || !key.allowed_origins.includes(origin))) {
+    return c.json({ message: 'Origin not allowed for this key.' }, 403);
+  }
+  browserCors(c, origin);
+
+  const stopped = await quotaStop(c, key.project_id, true);
+  if (stopped) return stopped;
+
+  let text: string;
+  try {
+    text = await readBody(c.req.raw, 256_000);
+  } catch (e) {
+    if (e instanceof PayloadTooLarge) return c.json({ message: 'Payload too large.' }, 413);
+    throw e;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return c.json({ message: 'Body must be JSON.' }, 422);
+  }
+  const body = BrowserBody.safeParse(parsed);
+  if (!body.success) return c.json({ message: 'Body must be {"events": [...]} with 1-50 events.' }, 422);
+
+  const records: NightwatchRecord[] = [];
+  let rejected = 0;
+  for (const event of body.data.events) {
+    const ok = BrowserEvent.safeParse(event);
+    if (ok.success) records.push(await browserEventToRecord(ok.data));
+    else rejected++;
+  }
+  if (records.length) {
+    try {
+      await enqueue(c.env, key.project_id, 'browser', records);
+    } catch {
+      return c.json({ message: 'Queue unavailable.' }, 503);
+    }
+  }
+  return c.json({ ok: true, accepted: records.length, rejected });
+});
 
 async function enqueue(env: Env, projectId: string, server: string, records: NightwatchRecord[]): Promise<number> {
   const byTrace = new Map<string | null, NightwatchRecord[]>();

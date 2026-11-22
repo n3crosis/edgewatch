@@ -73,6 +73,7 @@ const SOURCE_STYLES: Record<ExecutionSource, string> = {
   job: 'bg-violet-500/15 text-violet-300',
   command: 'bg-teal-500/15 text-teal-300',
   schedule: 'bg-orange-500/15 text-orange-300',
+  browser: 'bg-pink-500/15 text-pink-300',
 };
 
 export function SourceBadge({ source }: { source: ExecutionSource }) {

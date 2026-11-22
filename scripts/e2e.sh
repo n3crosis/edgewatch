@@ -27,7 +27,9 @@ step() { echo; echo "==> $*"; }
 pids=()
 cleanup() {
   if [ "${E2E_KEEP:-0}" = "1" ] && [ "$fail" = "0" ]; then echo "E2E_KEEP=1: leaving processes running (${pids[*]})"; return; fi
-  for p in "${pids[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
+  # wrangler spawns workerd and artisan serve spawns php; kill whole process trees so ports are freed.
+  killtree() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do killtree "$c"; done; kill "$1" 2>/dev/null || true; }
+  for p in "${pids[@]:-}"; do [ -n "$p" ] && killtree "$p"; done
   wait 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -51,9 +53,11 @@ step "Applying D1 migrations (local)"
 
 step "Creating API keys in local KV"
 INGEST_KEY="ew_live_e2e_$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+BROWSER_KEY="ew_pub_e2e_$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 READ_KEY="ew_read_e2e_$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 (cd "$ROOT/workers/ingest" &&
   $WRANGLER kv key put --binding API_KEYS "apikey:$(sha256 "$INGEST_KEY")" "{\"project_id\":\"$PROJECT\",\"name\":\"e2e\",\"scopes\":[\"ingest\"]}" --local --persist-to "$STATE" >>"$LOGS/kv.log" 2>&1 &&
+  $WRANGLER kv key put --binding API_KEYS "apikey:$(sha256 "$BROWSER_KEY")" "{\"project_id\":\"$PROJECT\",\"name\":\"e2e-browser\",\"scopes\":[\"browser\"]}" --local --persist-to "$STATE" >>"$LOGS/kv.log" 2>&1 &&
   $WRANGLER kv key put --binding API_KEYS "apikey:$(sha256 "$READ_KEY")" "{\"project_id\":\"$PROJECT\",\"name\":\"e2e-read\",\"scopes\":[\"read\"]}" --local --persist-to "$STATE" >>"$LOGS/kv.log" 2>&1)
 
 step "Starting workers: ingest+consumer on :$INGEST_PORT (one process, shared local queue), api on :$API_PORT"
@@ -71,7 +75,7 @@ export EDGEWATCH_ENABLED=true EDGEWATCH_TOKEN="$INGEST_KEY" EDGEWATCH_INGEST_URI
 cd "$SANDBOX"
 [ -f .env ] || { cp .env.example .env; php artisan key:generate -q; }
 rm -f database/e2e.sqlite && touch database/e2e.sqlite
-php artisan migrate --force -q && php artisan db:seed --force -q
+EDGEWATCH_ENABLED=false php artisan migrate --force -q && EDGEWATCH_ENABLED=false php artisan db:seed --force -q
 php artisan serve --host 127.0.0.1 --port "$APP_PORT" >"$LOGS/sandbox.log" 2>&1 & pids+=($!)
 wait_for "http://127.0.0.1:$APP_PORT/up" sandbox
 
@@ -82,6 +86,9 @@ curl -fsS -o /dev/null "$APP/report" && ok "GET /report" || bad "GET /report"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$APP/checkout"); [ "$code" = 500 ] && ok "POST /checkout -> 500 (exception)" || bad "POST /checkout returned $code"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$APP/orders"); [ "$code" = 202 ] && ok "POST /orders -> 202 (cache + queued job)" || bad "POST /orders returned $code"
 php artisan queue:work --once --stop-when-empty -q && ok "queue:work ran SendOrderConfirmation (job-attempt)" || bad "queue:work"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$INGEST_PORT/api/browser?key=$BROWSER_KEY" -H 'content-type: text/plain' \
+  -d "{\"events\":[{\"type\":\"error\",\"timestamp\":$(date +%s),\"class\":\"TypeError\",\"message\":\"e2e browser error\",\"file\":\"https://shop.test/app.js\",\"line\":3,\"url\":\"https://shop.test/cart\"}]}")
+[ "$code" = 200 ] && ok "POST /api/browser (browser error, EdgeWatch extension)" || bad "POST /api/browser returned $code"
 php artisan report:daily -q && ok "artisan report:daily (command)" || bad "artisan report:daily"
 
 step "Waiting for the consumer to write D1/R2, then querying workers/api"
@@ -90,14 +97,15 @@ auth=(-H "authorization: Bearer $READ_KEY")
 traces=""
 for _ in $(seq 1 45); do
   traces=$(curl -fsS "${auth[@]}" "$API/traces?limit=50" 2>/dev/null || true)
-  n=$(printf '%s' "$traces" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).data.length)}catch{console.log(0)}})')
-  [ "$n" -ge 6 ] && break; sleep 1
+  n=$(printf '%s' "$traces" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const d=JSON.parse(s).data;const has=x=>d.some(t=>t.execution_source===x);console.log(has("job")&&has("command")&&has("browser")?d.length:0)}catch{console.log(0)}})')
+  [ "$n" -ge 7 ] && break; sleep 1
 done
 check() { # description, node expression over `d` (parsed JSON)
   printf '%s' "$2" | node -e "let s='';process.stdin.on('data',x=>s+=x).on('end',()=>{let d;try{d=JSON.parse(s)}catch{process.exit(1)}try{process.exit(($3)?0:1)}catch{process.exit(1)}})" && ok "$1" || bad "$1"
 }
-check "api: >= 6 traces (4 requests, 1 job, 1 command) from server sandbox-e2e" "$traces" \
-  "d.data.length>=6 && d.data.every(t=>t.server==='sandbox-e2e') && ['request','job','command'].every(s=>d.data.some(t=>t.execution_source===s))"
+printf "%s" "$traces" > "$LOGS/traces.json"
+check "api: >= 6 server traces (4 requests, 1 job, 1 command) from sandbox-e2e, plus 1 browser trace" "$traces" \
+  "d.data.filter(t=>t.server==='sandbox-e2e').length>=6 && d.data.some(t=>t.execution_source==='browser') && d.data.every(t=>['sandbox-e2e','browser'].includes(t.server)) && ['request','job','command'].every(s=>d.data.some(t=>t.execution_source===s))"
 check "api: POST /checkout trace has status 500 and 1 exception" "$traces" "d.data.some(t=>t.name.includes('/checkout')&&t.status_code===500&&t.exception_count>=1)"
 
 TRACE_ID=$(printf '%s' "$traces" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).data.find(t=>t.name.includes("/users/")).trace_id))')
@@ -112,6 +120,7 @@ check "api: /orders trace holds cache-event and queued-job records" "$odetail" "
 
 check "api: exceptions grouped, message PII scrubbed" "$(curl -fsS "${auth[@]}" "$API/exceptions")" \
   "d.data.some(e=>e.class==='RuntimeException' && e.message.includes('[email]') && !e.message.includes('jane@'))"
+check "api: browser error stored as an exception (execution_source browser)" "$(curl -fsS "${auth[@]}" "$API/exceptions")" "d.data.some(e=>e.class==='TypeError' && e.message==='e2e browser error')"
 check "api: queries grouped by sql_hash" "$(curl -fsS "${auth[@]}" "$API/queries")" "d.data.length>=2 && d.data.every(q=>/^[0-9a-f]{32}$/.test(q.sql_hash))"
 check "api: overview counts requests" "$(curl -fsS "${auth[@]}" "$API/overview?range=1h")" "d.requests>=4"
 

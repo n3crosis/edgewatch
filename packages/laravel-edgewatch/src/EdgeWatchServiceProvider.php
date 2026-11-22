@@ -90,6 +90,8 @@ class EdgeWatchServiceProvider extends ServiceProvider
                 if ($this->app->runningInConsole() && ! $ew->isIgnoredCommand($event->command)) {
                     $class = $this->app->bound(\Illuminate\Contracts\Console\Kernel::class) ? (string) rescue(fn () => get_class($this->app->make(\Illuminate\Contracts\Console\Kernel::class)->all()[$event->command] ?? ''), '', false) : '';
                     $ew->commandStarting((string) $event->command, method_exists($event->input, '__toString') ? (string) $event->input : (string) $event->command, $class);
+                } elseif ($this->app->runningInConsole()) {
+                    $ew->idle();
                 }
             }, report: false);
         });

@@ -193,3 +193,59 @@ describe('over quota / rate limited (Nightwatch stop instruction)', () => {
     expect(keys).toEqual(['proj_1', 'proj_1']);
   });
 });
+
+describe('POST /api/browser (EdgeWatch browser error extension)', () => {
+  const BROWSER_KEY = 'ew_pub_browser_key';
+  const LOCKED_KEY = 'ew_pub_locked_key';
+  const event = (extra: Record<string, unknown> = {}) => ({
+    type: 'error', timestamp: 1763750000.5, class: 'TypeError', message: "Cannot read properties of undefined (reading 'id') for jane@example.com",
+    stack: 'TypeError: ...\n    at app.js:10:5', file: 'https://shop.example.com/assets/app.js', line: 10, column: 5,
+    url: 'https://shop.example.com/checkout?step=2', user_agent: 'Mozilla/5.0', release: 'v42', ...extra,
+  });
+
+  beforeAll(async () => {
+    await env.API_KEYS.put(await apiKeyKvKey(BROWSER_KEY), JSON.stringify({ project_id: 'proj_1', name: 'browser', scopes: ['browser'] }));
+    await env.API_KEYS.put(await apiKeyKvKey(LOCKED_KEY), JSON.stringify({ project_id: 'proj_1', name: 'locked', scopes: ['browser'], allowed_origins: ['https://shop.example.com'] }));
+  });
+
+  it('accepts sendBeacon-style text/plain posts with ?key= and queues Nightwatch-shaped exception records', async () => {
+    const res = await call(`/api/browser?key=${BROWSER_KEY}`, {
+      method: 'POST', headers: { 'content-type': 'text/plain;charset=UTF-8', origin: 'https://shop.example.com' },
+      body: JSON.stringify({ events: [event(), event({ trace_id: TRACE_A, handled: true }), { nope: true }] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, accepted: 2, rejected: 1 });
+    expect(res.headers.get('access-control-allow-origin')).toBe('https://shop.example.com');
+
+    const records = sent.flatMap((m) => m.records ?? []);
+    expect(sent.every((m) => m.project_id === 'proj_1' && m.server === 'browser')).toBe(true);
+    expect(records[0]).toMatchObject({
+      v: 3, t: 'exception', server: 'browser', execution_source: 'browser', execution_preview: '/checkout', deploy: 'v42',
+      class: 'TypeError', file: 'https://shop.example.com/assets/app.js', line: 10, code: '0', handled: false,
+      browser: { type: 'error', column: 5, url: 'https://shop.example.com/checkout?step=2' },
+    });
+    expect(records[0]._group).toMatch(/^[0-9a-f]{32}$/);
+    expect(records[1].trace_id).toBe(TRACE_A);
+  });
+
+  it('answers CORS preflight', async () => {
+    const res = await call('/api/browser', { method: 'OPTIONS', headers: { origin: 'https://a.test', 'access-control-request-method': 'POST' } });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-methods')).toContain('POST');
+  });
+
+  it('rejects ingest keys, unknown keys and disallowed origins', async () => {
+    const body = JSON.stringify({ events: [event()] });
+    expect((await call(`/api/browser?key=${INGEST_KEY}`, { method: 'POST', body })).status).toBe(401);
+    expect((await call('/api/browser?key=nope', { method: 'POST', body })).status).toBe(401);
+    expect((await call(`/api/browser?key=${LOCKED_KEY}`, { method: 'POST', headers: { origin: 'https://evil.test' }, body })).status).toBe(403);
+    expect((await call(`/api/browser?key=${LOCKED_KEY}`, { method: 'POST', headers: { origin: 'https://shop.example.com' }, body })).status).toBe(200);
+  });
+
+  it('rejects malformed bodies and browser keys cannot use the agent endpoints', async () => {
+    expect((await call(`/api/browser?key=${BROWSER_KEY}`, { method: 'POST', body: 'nope' })).status).toBe(422);
+    expect((await call(`/api/browser?key=${BROWSER_KEY}`, { method: 'POST', body: '{"events":[]}' })).status).toBe(422);
+    expect((await call('/api/ingest', { method: 'POST', headers: { authorization: `Bearer ${BROWSER_KEY}` }, body: '{"records":[]}' })).status).toBe(401);
+  });
+});

@@ -160,3 +160,27 @@ it('can ignore cache events', function () {
 
     expect($this->transport->records('cache-event'))->toBeEmpty();
 });
+
+it('exposes the current trace id for linking browser errors', function () {
+    Route::get('/meta', fn () => app(EdgeWatch::class)->traceId());
+
+    $body = $this->get('/meta')->assertOk()->getContent();
+
+    expect($body)->toBe($this->transport->records('request')[0]['trace_id']);
+});
+
+it('records nothing from ignored worker commands outside of jobs', function () {
+    databaseQueue();
+    app(\Illuminate\Contracts\Console\Kernel::class)->rerouteSymfonyCommandEvents();
+    EdgeWatchTestJob::dispatch();
+    app(EdgeWatch::class)->flush();
+    $this->transport->batches = [];
+
+    $this->artisan('queue:work', ['--once' => true, '--stop-when-empty' => true]);
+    Cache::get('after-the-job');
+    app(EdgeWatch::class)->flush();
+
+    expect(collect($this->transport->records())->pluck('t')->unique()->sort()->values()->all())->toBe(['job-attempt', 'query'])
+        ->and(collect($this->transport->records())->pluck('trace_id')->unique())->toHaveCount(1)
+        ->and($this->transport->records('command'))->toBeEmpty();
+});

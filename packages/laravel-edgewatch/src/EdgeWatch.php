@@ -85,6 +85,22 @@ class EdgeWatch
         return $name === null || $name === '' || in_array($name, (array) ($this->config['filtering']['ignore_commands'] ?? []), true);
     }
 
+    /** Current trace ID, e.g. for <meta name="edgewatch-trace-id"> so @edgewatch/browser links browser errors to it. */
+    public function traceId(): ?string
+    {
+        return $this->traceId ?? null;
+    }
+
+    /**
+     * Stop recording until the next execution starts: used for ignored long-running commands (queue:work, horizon, ...)
+     * and between queue jobs, so worker-loop cache/queries are not attached to a stale trace.
+     */
+    public function idle(): void
+    {
+        $this->buffer->flush();
+        $this->sampled = false;
+    }
+
     public function commandStarting(string $name, string $command, string $class = ''): void
     {
         $this->startExecution('command');
@@ -167,7 +183,7 @@ class EdgeWatch
         }
 
         if (! $state['nested']) {
-            $this->buffer->flush();
+            $this->idle();
         }
     }
 

@@ -4,3 +4,4 @@ export * from './records';
 export * from './sql';
 export * from './token';
 export * from './types';
+export * from './browser';

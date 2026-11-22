@@ -1,6 +1,7 @@
 import type { NightwatchRecord } from './records';
 
-export type Scope = 'ingest' | 'read';
+/** `browser` keys are public (shipped in JS bundles) and may only POST /api/browser. */
+export type Scope = 'ingest' | 'read' | 'browser';
 
 /** Value stored in KV under apikey:<sha256(raw key)>. */
 export interface ApiKeyRecord {
@@ -8,6 +9,8 @@ export interface ApiKeyRecord {
   name: string;
   scopes: Scope[];
   disabled?: boolean;
+  /** For browser keys: exact origins allowed to send (e.g. https://shop.example.com). Empty/missing allows any origin. */
+  allowed_origins?: string[];
 }
 
 /** Message placed on the ingest queue: one trace's worth of records from one ingest request. */
@@ -21,4 +24,4 @@ export interface IngestMessage {
   r2_key?: string;
 }
 
-export type ExecutionSource = 'request' | 'command' | 'job' | 'schedule';
+export type ExecutionSource = 'request' | 'command' | 'job' | 'schedule' | 'browser';
