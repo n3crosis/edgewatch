@@ -30,7 +30,7 @@ COPY workers/api/src workers/api/src
 COPY workers/consumer/src workers/consumer/src
 COPY workers/ingest/src workers/ingest/src
 COPY workers/migrations workers/migrations
-COPY scripts/keys.ts scripts/pg-migrate.ts scripts/mysql-migrate.ts scripts/libsql-migrate.ts scripts/
+COPY scripts/accounts.ts scripts/keys.ts scripts/pg-migrate.ts scripts/mysql-migrate.ts scripts/libsql-migrate.ts scripts/
 COPY apps/server/src apps/server/src
 COPY --from=dashboard /app/apps/dashboard/dist /app/dashboard
 ENV PORT=8080 EDGEWATCH_DATA_DIR=/data DASHBOARD_DIR=/app/dashboard NODE_ENV=production
