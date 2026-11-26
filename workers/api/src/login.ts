@@ -146,7 +146,7 @@ login.post('/setup', async (c) => {
 login.post('/invitations', async (c) => {
   const accounts = new Accounts(c.env.DB);
   const actor = await accounts.session(sessionToken(c));
-  if (!actor || actor.role !== 'owner') return c.json({ error: 'Only the owner can invite users.' }, 403);
+  if (actor?.role !== 'owner') return c.json({ error: 'Only the owner can invite users.' }, 403);
   const body = await c.req.json().catch(() => null);
   const email = normalizeEmail(body?.email);
   if (!email || !['admin', 'viewer'].includes(body?.role)) return c.json({ error: 'Enter an email and choose a role.' }, 422);

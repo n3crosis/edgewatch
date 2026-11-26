@@ -267,7 +267,7 @@ async function readBody(request: Request, maxBytes: number): Promise<string> {
         for (;;) {
           const { done, value } = await input.read();
           if (done) break;
-          await writer.write(value);
+          await writer.write(value as Uint8Array<ArrayBuffer>);
         }
         await writer.close();
       } catch (e) {
