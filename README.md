@@ -29,6 +29,7 @@ Laravel app + laravel/nightwatch --TCP--> php artisan nightwatch:agent --HTTPS g
 | `apps/server` | One Bun process (or the root `Dockerfile`) running the ingest, consumer and API code plus the dashboard, on SQLite, Postgres, MySQL or libSQL and local files or S3, for running without Cloudflare ([self-hosting](docs/self-hosting.md#single-process--docker)). |
 | `apps/dashboard` | React + Vite + Tailwind v4 + [Kumo UI](https://kumo-ui.com) (`@cloudflare/kumo`, design system of record). Seed data unless `VITE_API_URL` is set (header badge shows the source); search, filters, 1h/6h/24h, 15 s live polling. |
 | `scripts/` | `e2e.sh` + `e2e-records.mjs` (live local pipeline test), `nightwatch-agent.sh` (fresh Laravel 12 app with the official `laravel/nightwatch` agent), `setup-cloudflare.ts` (+ tests), `d1-migrate.sh`, `deploy.sh`. |
+| `examples/acme-storefront` | Laravel 12 demo storefront that reports through the official `laravel/nightwatch` agent (`NIGHTWATCH_BASE_URL` + `NIGHTWATCH_TOKEN`); see its [README](examples/acme-storefront/README.md). |
 | `fixtures/sql-normalization.json` | SQL normalization cases, run by Vitest. |
 
 Docs: [changelog](CHANGELOG.md) | [release checklist](docs/release-checklist.md) | [Nightwatch parity](docs/nightwatch-parity.md) | [architecture](docs/architecture.md) | [deployment](docs/deployment.md) | [self-hosting / local](docs/self-hosting.md) |

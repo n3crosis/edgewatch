@@ -13,6 +13,10 @@ All notable changes to EdgeWatch are recorded here. Versions follow [Semantic Ve
   their origin allow-list, browser breadcrumbs, Core Web Vitals, `/v1/web-vitals` and the dashboard's Web vitals view and
   Browser trace filter). EdgeWatch only ingests what the official `laravel/nightwatch` agent sends. Migration `0015`
   stays (migrations are forward-only); retention still prunes old `web_vitals` rows.
+- `examples/acme-storefront` now uses the official `laravel/nightwatch` agent (`NIGHTWATCH_BASE_URL` + `NIGHTWATCH_TOKEN`)
+  instead of posting records to `/api/ingest` with `EDGEWATCH_INGEST_URL`/`EDGEWATCH_TOKEN`/`EDGEWATCH_PROJECT`.
+  `demo:generate` now sends live storefront traffic to the app (no 3-day backfill); verified with Laravel 12.74.0 and
+  `laravel/nightwatch` v1.30.6.
 - Dashboard command palette (Cmd+K / Ctrl+K): fuzzy page navigation, trace search, open by trace ID, full keyboard
   and focus handling. On phones the header keeps search, theme and sign-out on the first row.
 - Docs explain why the dashboard has no query EXPLAIN view (the wire format carries no bindings or plans).
