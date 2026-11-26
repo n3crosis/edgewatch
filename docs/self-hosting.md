@@ -27,7 +27,7 @@ docker run -d -p 8080:8080 -v edgewatch-data:/data --name edgewatch edgewatch
 # docker exec edgewatch bun apps/server/src/main.ts accounts reset-password --owner --password 'new-password'
 docker exec edgewatch bun apps/server/src/main.ts keys create my-app --scopes ingest   # shown once
 curl -s http://localhost:8080/healthz                                                  # {"status":"ok",...}
-# Laravel: NIGHTWATCH_BASE_URL=http://host:8080 (official agent) or EDGEWATCH_INGEST_URI=http://host:8080/api/ingest
+# Laravel: NIGHTWATCH_BASE_URL=http://host:8080 NIGHTWATCH_TOKEN=<ingest key> php artisan nightwatch:agent
 # Dashboard: http://host:8080/
 ```
 
@@ -67,18 +67,18 @@ Limits of the single process:
   including when using Postgres and S3. Rate limits and key caches are also per process.
 - SQLite takes one writer at a time; above the D1 sizing in [capacity.md](capacity.md#sizing-d1), use Postgres.
 - Back up the data volume (or Postgres and the bucket) yourself; `backup:d1` is for D1 only.
-- Checked with `bun run fresh-laravel:server` (fresh Laravel 12 app, EdgeWatch client and official agent) and the
+- Checked with `bun run nightwatch-agent:server` (fresh Laravel 12 app with the official agent) and the
   `apps/server` tests; not load tested.
 
 ## Local setup
 
 ```bash
 bun install
-(cd packages/laravel-edgewatch && composer install)
-(cd examples/laravel-sandbox && composer install && cp -n .env.example .env && php artisan key:generate && php artisan migrate --seed)
 ```
 
-Requirements: Bun 1.4.5+, Node 22.12+ (Wrangler and Vitest run on Node), PHP 8.2+ (8.3 tested) with sqlite, curl, mbstring, zlib; Composer 2.
+Requirements: Bun 1.4.5+, Node 22.12+ (Wrangler and Vitest run on Node). Only `bun run nightwatch-agent` also needs
+PHP 8.2+ with sqlite, curl, mbstring, zlib, pcntl, posix and sockets, Composer 2 and network access (it installs
+`laravel/laravel` and `laravel/nightwatch` into a temp dir).
 
 ## One-command live pipeline check
 
@@ -87,15 +87,14 @@ bun run e2e     # = scripts/e2e.sh
 ```
 
 Starts `wrangler dev` for ingest + consumer (one process, so they share the local queue) on :8787 and the API on :8788 with
-fresh state in `.wrangler/e2e-state`, applies migrations, creates ingest/read/browser keys in local KV, serves the sandbox on
-:8010 with the HTTPS transport pointed at local ingest, generates a request, queries, an exception, a cache-backed order with a
-queued job, a queue worker run, an artisan command and a browser error, then asserts the results through `workers/api`
-(D1 rows, R2 raw records, exception grouping/PII scrubbing, `sql_hash` groups), the agent-auth handshake and the 429 `stop`
-response. Exits non-zero on any failure; logs in `.wrangler/e2e-logs`. `E2E_KEEP=1` leaves everything running.
+fresh state in `.wrangler/e2e-state`, applies migrations, creates ingest/read/browser/admin keys in local KV, posts browser
+events, an agent-format gzip batch tagged for a second project, and agent-format batches with all 13 record types for two
+more projects, then asserts the results through `workers/api` (D1 rows, R2 raw records, exception grouping/PII scrubbing,
+`sql_hash` groups, project isolation), the agent-auth handshake and the 429 `stop` response. Exits non-zero on any failure; logs in `.wrangler/e2e-logs`. `E2E_KEEP=1` leaves everything running.
 
-The script uses the agentless HTTPS path. The official agent path was verified manually (not scripted, because the sandbox
-does not depend on `laravel/nightwatch`): `composer require laravel/nightwatch`, then
-`NIGHTWATCH_TOKEN=<ingest key> NIGHTWATCH_BASE_URL=http://127.0.0.1:8787 php artisan nightwatch:agent`.
+`bun run nightwatch-agent` (= `scripts/nightwatch-agent.sh`) checks the official agent end to end: a fresh Laravel 12
+app with `laravel/nightwatch`, its unmodified `php artisan nightwatch:agent` pointed at local ingest with
+`NIGHTWATCH_BASE_URL`, and every record type read back through `workers/api`. `RUNTIME=server` runs it against `apps/server`.
 
 ## Running pieces by hand
 
@@ -112,8 +111,7 @@ Without `VITE_API_URL` the dashboard shows generated seed data, and its header b
 ## Tests
 
 ```bash
-bun run test     # Vitest: shared, browser, ingest, consumer, api (workerd pool), dashboard
-bun run test:php # Pest: packages/laravel-edgewatch and examples/laravel-sandbox
+bun run test     # Vitest: shared, browser, ingest, consumer, api (workerd pool), dashboard, server; then bun test scripts
 ```
 
 ## Limits of local mode

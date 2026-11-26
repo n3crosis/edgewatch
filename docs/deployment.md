@@ -80,12 +80,15 @@ not rate limit and `/healthz` reports `rate_limiter: not_configured`.
 
 ### Environment variables
 
+The first two rows are set in the Laravel app that runs the official agent; the rest configure EdgeWatch.
 Worker vars live in `vars` in `workers/<name>/wrangler.jsonc`; secrets are set with
 `bunx wrangler secret put <NAME>` in that Worker's directory. The single-process server (`apps/server`, Docker) reads all
 of them from its environment. Scripts read theirs from the shell.
 
 | Variable | Used by | Kind | Default | Meaning |
 |---|---|---|---|---|
+| `NIGHTWATCH_BASE_URL` | Laravel app's `php artisan nightwatch:agent` | agent env | `https://nightwatch.laravel.com` | Ingest contract: the EdgeWatch ingest origin (e.g. `https://edgewatch-ingest.<subdomain>.workers.dev`). Set on the agent, not on EdgeWatch. |
+| `NIGHTWATCH_TOKEN` | Laravel app and agent | app/agent env | unset | Ingest contract: an EdgeWatch ingest key (`create-key <project> ingest`); its default project receives the data. |
 | `TOKEN_SIGNING_SECRET` | ingest, server | secret, required | server: generated in `EDGEWATCH_DATA_DIR` | Signs short-lived agent ingest tokens. Set by `setup:cloudflare` (pending until ingest is deployed). |
 | `TOKEN_TTL` | ingest | var | `3600` | Agent ingest token lifetime, seconds. |
 | `MAX_BODY_BYTES` | ingest, server | var | `20000000` | Ingest body ceiling in decoded bytes; larger bodies get 413. Malformed values use the default. |
@@ -149,7 +152,7 @@ API var: `CORS_ORIGIN` (default `*`; set it to the dashboard origin).
 ## 4. Create API keys
 
 ```bash
-bun run --filter @edgewatch/ingest create-key my-app ingest server --remote    # NIGHTWATCH_TOKEN / EDGEWATCH_TOKEN
+bun run --filter @edgewatch/ingest create-key my-app ingest server --remote    # NIGHTWATCH_TOKEN for the official agent
 bun run --filter @edgewatch/ingest create-key my-app read dashboard --remote   # optional credential for API integrations
 bun run --filter @edgewatch/ingest create-key my-app browser web --remote      # @edgewatch/browser key (public)
 ```

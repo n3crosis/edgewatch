@@ -100,9 +100,8 @@ and the shape of a successful body. The agent only relies on 2xx vs non-2xx and 
 Individually malformed records are dropped and counted in `rejected` rather than failing the batch, because the agent drops the whole batch on any non-2xx.
 Quota / rate limiting: when KV `project:<id>` holds `{"over_quota_until": <unix s>, "message": "..."}` in the future (checked on
 `/api/agent-auth` and `/api/ingest`), or the optional `RATE_LIMITER` binding rejects the project (ingest only), EdgeWatch answers
-`429 {"message":"...","stop":true,"refresh_in":<s>}` with `Retry-After: <s>` and `X-EdgeWatch-Stop: 1`. The official agent pauses on `stop`;
-`laravel-edgewatch`'s HTTP transport pauses on `429` or `stop` (using `refresh_in`, then `Retry-After`, then 60 s), shared across PHP
-processes via `storage/framework/edgewatch-backoff.json`. Setting `over_quota_until` is manual/ops-driven: there is no usage metering yet.
+`429 {"message":"...","stop":true,"refresh_in":<s>}` with `Retry-After: <s>` and `X-EdgeWatch-Stop: 1`. The official agent pauses on `stop`.
+Setting `over_quota_until` is manual/ops-driven: there is no usage metering yet.
 
 ## Record shapes (common to both hops)
 
@@ -150,7 +149,7 @@ Agent-only: `NIGHTWATCH_AGENT_LOG_LEVEL` (documented), `NIGHTWATCH_BASE_URL` (**
 | `POST /api/agent-auth` | `workers/ingest` - same path, headers and response shape; `NIGHTWATCH_TOKEN` is looked up in KV (`apikey:<sha256(token)>`) |
 | `POST {ingest_url}` | `workers/ingest` `POST /api/ingest`; accepts gzip or plain JSON; validates `{records: [...]}` with Zod (known `t` types strictly, unknown types passed through) and enqueues to a Queue |
 | short-lived ingest token | HMAC-signed token minted by `/api/agent-auth` (project id + expiry) |
-| `laravel/nightwatch` package | `edgewatch/laravel-edgewatch` emits the same record shapes; transport `agent` speaks hop 1 to an official agent, transport `http` speaks hop 2b directly (no agent needed) |
+| `laravel/nightwatch` package | used unchanged; EdgeWatch only implements hop 2 (agent -> cloud) |
 
 Drop-in usage with the **official** Nightwatch client:
 
@@ -163,6 +162,5 @@ NIGHTWATCH_BASE_URL=https://ingest.<your-edgewatch-domain>
 
 ### Deliberate differences
 
-* `laravel-edgewatch` generates UUIDv7 `trace_id`s (time-ordered, good for D1/R2 keys); Nightwatch uses UUIDv4. Both are valid UUID strings, so the backend accepts either.
-* `laravel-edgewatch` strips literals from SQL before sending (PII protection) and the consumer computes `sql_hash` = first 32 hex chars of SHA-256 of the normalized SQL. EdgeWatch stores the client's `_group` as-is but does not depend on it, because xxh128 is not available in Workers' WebCrypto.
-* Because `NIGHTWATCH_BASE_URL` is undocumented, Laravel could rename or remove it in a future agent release. The `http` transport in `laravel-edgewatch` exists as a fallback that does not depend on the agent.
+* The consumer strips literals from SQL (PII protection) and computes `sql_hash` = first 32 hex chars of SHA-256 of the normalized SQL. EdgeWatch stores the agent's `_group` as-is but does not depend on it, because xxh128 is not available in Workers' WebCrypto.
+* Because `NIGHTWATCH_BASE_URL` is undocumented, Laravel could rename or remove it in a future agent release; EdgeWatch then needs a matching change, as there is no alternative client.

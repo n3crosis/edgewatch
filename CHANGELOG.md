@@ -4,11 +4,11 @@ All notable changes to EdgeWatch are recorded here. Versions follow [Semantic Ve
 
 ## [1.0.0] - Unreleased
 
-- Laravel: `php artisan edgewatch:test` checks the configured ingest endpoint with an empty batch (no telemetry) and
-  prints the exact HTTP status and latency, or checks the agent over TCP. Zero-config detection now treats a bare
-  hostname or a URL without a path as HTTP (adding `/api/ingest`) and turns HTTP off when no token is set. Queue
-  telemetry records jobs that fail before they start, closes attempts left open by a stopping or restarted worker as
-  `released`, and survives payloads that cannot be decoded.
+- Removed before release: the agentless PHP client `edgewatch/laravel-edgewatch` (with its Pest suite), the
+  `examples/laravel-sandbox` app and the `fresh-laravel` scripts that exercised it, the `test:php` script and the
+  Composer/Pest CI steps. EdgeWatch now receives Laravel telemetry only from the official `laravel/nightwatch` agent
+  (`NIGHTWATCH_BASE_URL` + `NIGHTWATCH_TOKEN`); `bun run nightwatch-agent` checks that path in a fresh Laravel app, and
+  `bun run e2e` sends agent-format batches directly.
 - Dashboard command palette (Cmd+K / Ctrl+K): fuzzy page navigation, trace search, open by trace ID, full keyboard
   and focus handling. On phones the header keeps search, theme and sign-out on the first row.
 - Docs explain why the dashboard has no query EXPLAIN view (the wire format carries no bindings or plans).
@@ -25,7 +25,7 @@ All notable changes to EdgeWatch are recorded here. Versions follow [Semantic Ve
 
 - Fixed standalone/Docker dashboard requests with `VITE_API_URL=/`: API URLs now resolve against the browser origin. Regression tests exercise authenticated reads, mutations, remote API prefixes and rejected-key sign-out.
 
-- CI now checks fresh Laravel installs with both clients. The fresh-install harness bounds health probes and initializes shared Worker storage before starting the API.
+- CI now checks a fresh Laravel install with the official agent. The fresh-install harness bounds health probes and initializes shared Worker storage before starting the API.
 
 - Mixed handled/unhandled exception groups remain in the Unhandled view. Groups are handled only when all scoped occurrences were handled; API responses include both counts and the dashboard labels mixed groups.
 
@@ -79,14 +79,16 @@ replays, idempotent usage receipts (migration `0017_usage_receipts.sql`), recove
 writes, and Docker startup verification in CI. Apply migrations before deploying the updated consumer.
 
 First stable release of the self-hosted, single-tenant EdgeWatch stack: Cloudflare Workers (ingest, consumer, API),
-D1 + R2 storage, the React/Kumo dashboard, `edgewatch/laravel-edgewatch` (Composer) and `@edgewatch/browser` (npm).
-Only those two client packages are versioned and published; the Workers, dashboard and `@edgewatch/shared` are private.
+D1 + R2 storage, the React/Kumo dashboard, and `@edgewatch/browser` (npm). Laravel apps send telemetry with the official
+`laravel/nightwatch` agent. Only `@edgewatch/browser` is a versioned client package; the Workers, dashboard and
+`@edgewatch/shared` are private.
 
 ### Nightwatch compatibility
 
 - `POST /api/agent-auth` returns `{token, expires_in, refresh_in, ingest_url}`, and `POST /api/ingest` accepts the official
   agent's gzip batches, so the unmodified `laravel/nightwatch` package and `php artisan nightwatch:agent` work with
-  `NIGHTWATCH_BASE_URL` pointed at EdgeWatch (checked by `bun run fresh-laravel:nightwatch`).
+  `NIGHTWATCH_BASE_URL` pointed at EdgeWatch (checked by `bun run nightwatch-agent` with Laravel 12.74 and `laravel/nightwatch` v1.30.6). Supported Laravel versions
+  are those `laravel/nightwatch` supports; no other combination has been verified.
 - 429 responses carry `stop` / `refresh_in` and `Retry-After` for rate limits and manual over-quota blocks.
 - Official job attempts are stored as their own trace keyed by `attempt_id`; the dispatching trace is kept in
   `origin_trace_id` and both directions are returned under `related` on `/v1/traces/:id`.
@@ -109,14 +111,6 @@ Unknown record types with an integer `v` and a string `t` are accepted and kept 
 - Mutations require an admin key. Issues: `PUT /v1/projects/:projectId/issues/:group` (`status`, `reason`, `expected_revision`, optional `expected_status`).
 - Pipeline: `GET /v1/pipeline`, `GET /v1/dead-letters`, `POST /v1/dead-letters/replay`.
 - Usage and settings: `GET /v1/usage`, `PUT /v1/projects/:id/settings` (`daily_record_quota`, `retention_days`); `/v1/projects` includes both settings.
-
-### Laravel client (`edgewatch/laravel-edgewatch`)
-
-- Sends every record type above over HTTPS (gzip, 500 ms timeouts, 500-record buffer) or through the Nightwatch agent
-  framing, honours 429 / `stop`, strips SQL literals and redacts PII before sending.
-- `edgewatch` log channel, plus a `nightwatch` alias so existing `LOG_STACK` settings keep working.
-- Supports Laravel 11 and 12 on PHP 8.2+ (Laravel 12 tested in CI; Laravel 11 allowed by the constraints and checked
-  with the package suite, not in CI). Laravel 10 is not supported.
 
 ### Browser SDK (`@edgewatch/browser`)
 
@@ -155,16 +149,15 @@ Unknown record types with an integer `v` and a string `t` are accepted and kept 
 
 ### Known differences and caveats
 
-- **Lazy loads are a heuristic in the EdgeWatch client.** A query counts as a lazy load when Eloquent's
-  `Model::getRelationshipFromMethod()` is on its call stack. This is EdgeWatch's own detection, not Nightwatch's.
-  `laravel/nightwatch` 1.30.6 declares `lazy_loads` but never increments it, so with the official agent it is always 0.
-- **N+1 is a heuristic.** The same `sql_hash` 5 or more times in one trace is listed as a repeated query; together with
-  `lazy_loads > 0` it raises the "Possible N+1 queries" warning. It can flag legitimate repeated queries and miss N+1
+- **Lazy loads are always 0.** `laravel/nightwatch` 1.30.6 declares `lazy_loads` but never increments it.
+- **N+1 is a heuristic.** The same `sql_hash` 5 or more times in one trace is listed as a repeated query and
+  raises the "Possible N+1 queries" warning. It can flag legitimate repeated queries and miss N+1
   loops with fewer than 5 iterations.
-- `hydrated_models`, `files_read` and `files_written` are always 0 (both clients).
+- `hydrated_models`, `files_read` and `files_written` are always 0 (the agent never increments them).
 - `mail.failed` and `notification.failed` are always false: Laravel has no failure event.
 - Scheduled tasks run with `runInBackground()` report a duration of about 0.
 - Outgoing request URLs are stored without query string or fragment (Nightwatch keeps the full URL).
 - Usage is metered per project per UTC day in the consumer, so a daily quota stops ingest within one batch of the limit, not exactly at it. There is no billing (EdgeWatch is single-tenant).
-- Hosted CI has passed. Not yet verified: a deploy to a real Cloudflare account. See
-  [docs/release-checklist.md](docs/release-checklist.md).
+- Verified locally on the release candidate: typecheck, lint, Vitest + script tests, `e2e` and `nightwatch-agent`
+  (see [docs/release-checklist.md](docs/release-checklist.md) for the commit and counts). Pending: hosted CI on the final
+  commit, a deploy to a real Cloudflare account (gates 2-4), the tag and the npm publish decision.

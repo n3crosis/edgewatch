@@ -5,8 +5,7 @@ on `main`; see "Not implemented" at the end.
 
 ```
 Laravel app --(a) laravel/nightwatch --TCP--> nightwatch:agent --HTTPS (NIGHTWATCH_BASE_URL)--+
-            +-(b) edgewatch/laravel-edgewatch --HTTPS gzip, or TCP to the agent -------------+
-Browser -----(c) @edgewatch/browser -- sendBeacon --> POST /api/browser (EdgeWatch extension) -+
+Browser -----(b) @edgewatch/browser -- sendBeacon --> POST /api/browser (EdgeWatch extension) -+
                                                                                               v
                                          workers/ingest (Hono)  -- KV API_KEYS (hashed keys, quota blocks)
                                            |  Queue edgewatch-ingest (one message per trace; >100 KB parked in R2 incoming/, in parts of at most 1 MB)
@@ -27,12 +26,10 @@ apps/dashboard (React, Kumo UI) --> workers/api (Hono, read keys) -- D1 + R2
 | `workers/consumer` | Queue consumer. Normalizes SQL (literals stripped, `sql_hash`), scrubs PII from exception/log messages, merges records per trace, writes raw JSON to R2 and summary rows to D1. Retries are idempotent: exact duplicate records are skipped in R2 and a trace's child rows are rebuilt from the merged records. D1 writes go in batches of 50 statements; a stored trace keeps at most 5000 records / 8 MB (root records always kept, the rest counted in `dropped_records`). |
 | `workers/api` | Read API for the dashboard: `/v1/projects/:id/{overview,traces,traces/:traceId,traces/:traceId/raw,exceptions,exceptions/:group,queries,queries/:sqlHash}` plus `jobs`, `commands`, `cache`, `outgoing-requests`, `mail`, `notifications`, `scheduled-tasks`, `logs`, `users` (each with `/:key`). Optional project filter (`/v1/projects/:id/...` or `/v1/...?project_id=`), read-scope keys, CORS. Waterfall spans derived from raw R2 records. |
 | `workers/migrations` | D1 schema (`0001_init.sql` ... `0020_issue_revisions.sql`); representative API reads and consumer write/retention queries are checked for index use by `scripts/d1-indexes.test.ts`. |
-| `packages/laravel-edgewatch` | Composer client that emits all 13 Nightwatch-format record types: requests, queries, exceptions, commands, queued jobs / job attempts, scheduled tasks, cache events, outgoing HTTP, mail, notifications, logs, users. Transports: TCP to a Nightwatch agent, or direct HTTPS gzip to ingest; buffered, 0.5 s connect/send timeouts, never throws into the app; honors 429/`stop`. |
 | `packages/browser` | `@edgewatch/browser`, dependency-free browser error reporter. |
 | `apps/dashboard` | React + Vite + Tailwind v4 + Kumo UI (`@cloudflare/kumo`, the design system of record; Base UI primitives, Phosphor icons). Seed data by default, `workers/api` when `VITE_API_URL` is set. Filters, search, 1h/6h/24h range, 15 s live polling, data-source badge. |
 | `apps/server` | The three Workers' fetch, queue and scheduled handlers composed in one Bun process: SQLite (`bun:sqlite`) or Postgres, files or S3, `kv_store` keys, a SQLite-journaled queue with the Workers' retry/DLQ policy, an in-memory rate limiter, timers for the crons, and the built dashboard. Root `Dockerfile`. |
-| `examples/laravel-sandbox` | Laravel 12 app using the local package; demo routes, job, cache and command. |
-| `scripts/` | `e2e.sh` (local live pipeline check), `setup-cloudflare.ts`, `d1-migrate.sh`, `deploy.sh`. |
+| `scripts/` | `e2e.sh` (local live pipeline check), `nightwatch-agent.sh` (official agent in a fresh Laravel app), `setup-cloudflare.ts`, `d1-migrate.sh`, `deploy.sh`. |
 
 ## Storage interfaces
 
@@ -163,15 +160,14 @@ so the Worker code is shared unchanged; see [self-hosting.md](self-hosting.md#si
 ## Not implemented
 
 - Billing: usage is counted per project per day and can trigger a daily quota block, but nothing is billed.
-- Dashboard users: the owner enters a read key, which stays in that browser (sessionStorage, or localStorage when remembered)
-  and is cleared on a 401. There are no users, sessions or SSO; use Cloudflare Access for that.
+- SSO: dashboard accounts use email and password with HttpOnly session cookies; use Cloudflare Access for SSO. A read key
+  entered for API access stays in that tab's sessionStorage and is cleared on sign-out and on a 401.
 - Key management UI or API: keys are managed with the `scripts/keys.ts` CLI only.
 - Alerts for ingest-side errors (only pipeline alerts exist), source maps for browser errors.
 
 ## Projects (single-tenant)
 
-- **Tag, not tenant:** `project_id` groups data by app. Ingest takes it from `X-EdgeWatch-Project` (laravel-edgewatch sends
-  `EDGEWATCH_PROJECT_ID`) or `?project=` (1-64 of `A-Z a-z 0-9 . _ -`, else `422`); without a tag the key's default project is used.
+- **Tag, not tenant:** `project_id` groups data by app. Ingest takes it from `X-EdgeWatch-Project` or `?project=` (1-64 of `A-Z a-z 0-9 . _ -`, else `422`); without a tag (the official agent never sends one) the key's default project is used, so give each app its own ingest key.
   `/api/agent-auth` with a tag mints an agent token for that project. Any ingest key may write to any project.
 - **Storage:** D1 `traces`, `exceptions` and `queries` carry `project_id` (part of the trace primary key) with `(project_id, timestamp)`
   indexes (`0001_init.sql`, `0002_project_indexes.sql`). R2 objects live at `traces/{project_id}/{date}/{trace_id}.json`, so the same

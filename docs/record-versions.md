@@ -4,7 +4,7 @@ EdgeWatch stores data in five formats. Each has its own compatibility rule for 1
 
 | Format | Where | Rule within 1.x |
 | --- | --- | --- |
-| Wire records (`v`, `t`) | Ingest body from `laravel/nightwatch` and `edgewatch/laravel-edgewatch` | Accept every `v` the supported clients send; additive handling only |
+| Wire records (`v`, `t`) | Ingest body from the official `laravel/nightwatch` agent | Accept every `v` the supported clients send; additive handling only |
 | EdgeWatch extensions (`web-vital`, `browser` field on exceptions, `execution_source: "browser"`) | `/api/browser`, `packages/shared/src/browser.ts` | `v: 1`; fields are only added, never renamed or removed |
 | D1 schema | `workers/migrations/NNNN_*.sql` | Forward-only, additive migrations |
 | Stored trace JSON | R2 `traces/<project>/<trace>.json` (`StoredTrace`: `project_id`, `trace_id`, `records`, optional `dropped_records`) | New optional fields only; readers ignore unknown fields |
@@ -45,5 +45,5 @@ EdgeWatch stores data in five formats. Each has its own compatibility rule for 1
 
 ## Packages
 
-- `edgewatch/laravel-edgewatch` and `@edgewatch/browser` follow semver. A minor release may add record fields or options; a
+- `@edgewatch/browser` follows semver. A minor release may add record fields or options; a
   removal or rename is a major release.

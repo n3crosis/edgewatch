@@ -52,8 +52,6 @@ are below what one consumer batch uses.
 | D1 statements per batch | 50 | `workers/consumer` |
 | Stored trace | 5,000 records or 8 MB; root records always kept | `workers/consumer` |
 | Retention | 30 days, hourly cron; each run deletes in chunks (1,000 traces, 5,000 child rows) until caught up or out of budget (900 D1 queries, 10 minutes) | `workers/consumer` |
-| Client buffer | Flush at the end of each request/command/job, or every 500 records | `packages/laravel-edgewatch` |
-| Client sampling | Request, command and exception rates, default 1.0 | `packages/laravel-edgewatch` config |
 
 ## Sizing (D1)
 
@@ -85,7 +83,7 @@ largest share; storing per-minute query aggregates instead would cut the per-req
 | D1 reaches 10 GB | Inserts fail, consumer retries for about 2.3 hours, messages go to the DLQ | Not lost: the dead-letter handler writes each payload to R2 `dead/` before D1, so payloads survive even when D1 is full; they are missing from the dashboard until replayed after space is freed | Size alerts; sampling; query aggregates; Postgres backend |
 | Retention falls behind | Fixed: each hourly run deletes until caught up, up to about 450,000 traces or 4.5 million child rows per run. Before, a daily run stopped at 50,000 traces and 250,000 rows per table | No | Done |
 | D1 overloaded by concurrent consumers | Mitigated: at most 5 consumer invocations write at once, and failed messages back off for up to 10 minutes over about 2.3 hours. Before, up to 250 invocations and about 1 minute of retries | Only until replayed: dead letters are kept and can be replayed | Done |
-| Ingest over the rate limit | `429` stop; the client pauses for `refresh_in` (60 s) and drops what it produces meanwhile. The agentless client sends one request per PHP execution, so it stops at about 10 executions/s per project | Yes, by design | Use the official agent (it batches) or raise `RATE_LIMIT`; consider limiting by records instead of requests |
+| Ingest over the rate limit | `429` stop; the agent pauses for `refresh_in` (60 s) and drops what it produces meanwhile. The agent batches, so the limit counts batches, not executions | Yes, by design | Raise `RATE_LIMIT`; consider limiting by records instead of requests |
 | Queue over 5,000 messages/s | `sendBatch` throws, ingest returns `503` with `Retry-After: 5` | Client-side only, if it does not retry | None needed below D1's ceiling |
 | Consumer down longer than queue retention | Setup raises queue retention from 4 to 14 days; older messages are deleted | Only after 14 days | Done |
 | Large decoded bodies in one isolate | Several concurrent 20 MB batches can pass the 128 MB isolate memory | Request fails (`1102`), client retries | Load-test; lower `MAX_BODY_BYTES` if needed |

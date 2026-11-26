@@ -4,8 +4,8 @@ Version 1.0.0 remains a release candidate. Re-run the checks against the final r
 are not evidence for later changes. The protocol matrix in [nightwatch-parity.md](nightwatch-parity.md) does not
 establish parity with the current Nightwatch web interface.
 
-Local gates: `bun run typecheck`, `lint`, `test`, `test:php`, `build`, `e2e`, `fresh-laravel`, and
-`fresh-laravel:nightwatch`. Database adapters also require `test:postgres`, `test:mysql`, and `test:libsql`.
+Local gates: `bun run typecheck`, `lint`, `test`, `build`, `e2e`, and `nightwatch-agent` (the official
+`laravel/nightwatch` agent in a fresh Laravel app). Database adapters also require `test:postgres`, `test:mysql`, and `test:libsql`.
 Migrations through `0021_trace_environment.sql` must be applied before deploying the updated consumer and API.
 Create an `admin` key for issue updates, settings changes, and dead-letter replay; `read` keys now reject writes.
 Upgrade the API and dashboard together after migration 0020. Issue API clients must read the current issue revision
@@ -16,15 +16,16 @@ Follow the deployment gates below and stop if any check fails.
 ## 1. Turn on CI
 
 The workflow is configured in `.github/workflows/ci.yml`. Push it with credentials that can update workflows.
-It includes fresh Laravel application checks for both the EdgeWatch and official Nightwatch clients, in addition to
-the core CI and database-adapter jobs. All jobs must pass on the release commit.
+It includes the official Nightwatch agent check in a fresh Laravel application, in addition to the core CI and
+database-adapter jobs. All jobs must pass on the release commit.
 
-- [x] The [first successful hosted run](https://github.com/n3crosis/edgewatch/actions/runs/45364773853) on `main` is green (install, composer install for both PHP projects, typecheck, lint, Vitest, Pest, build, e2e).
+- [x] The [first successful hosted run](https://github.com/n3crosis/edgewatch/actions/runs/45364773853) on `main` is green (at that time: install, Composer, typecheck, lint, Vitest, Pest, build, e2e; the PHP client and its Pest steps were removed since).
 
 Verification snapshot (2026-11-24): implementation commit `6e02443` passed
 [hosted core CI and all database jobs](https://github.com/n3crosis/edgewatch/actions/runs/45390925087).
-Local fresh-install runs using the updated harness passed 25 checks for EdgeWatch and 27 for the official Nightwatch
-client. These are local Workers/Miniflare checks, not evidence of a live Cloudflare deployment.
+Local snapshot after the PHP client removal (2026-11-26): typecheck and lint clean; Vitest 350 passed (ingest 50,
+consumer 55, api 79, shared 76, browser 9, dashboard 81); `bun test` 20 (server) + 158 (scripts) passed; `e2e` 71 passed;
+`nightwatch-agent` 27 passed; 0 failed. Hosted CI for the final commit is pending. These are local Workers/Miniflare checks, not evidence of a live Cloudflare deployment.
 Wrangler authentication was rechecked and is expired; resource placeholders remain. Gates 2-4 are still unverified.
 
 ## 2. Create the Cloudflare resources
@@ -46,7 +47,7 @@ bun run setup:cloudflare          # KV, D1, R2, ingest queue + DLQ; writes IDs o
 ```bash
 scripts/deploy.sh workers
 bun run setup:cloudflare          # second run sets TOKEN_SIGNING_SECRET on edgewatch-ingest now that it exists
-bun run --filter @edgewatch/ingest create-key <project> ingest server --remote     # NIGHTWATCH_TOKEN / EDGEWATCH_TOKEN
+bun run --filter @edgewatch/ingest create-key <project> ingest server --remote     # NIGHTWATCH_TOKEN
 bun run --filter @edgewatch/ingest create-key <project> read dashboard --remote    # entered in the dashboard's sign-in prompt
 VITE_API_URL=https://edgewatch-api.<subdomain>.workers.dev scripts/deploy.sh dashboard
 ```
@@ -59,7 +60,6 @@ VITE_API_URL=https://edgewatch-api.<subdomain>.workers.dev scripts/deploy.sh das
 - [ ] `GET https://edgewatch-ingest.<subdomain>.workers.dev/health` and the API `/health` return `{"ok":true}`.
 - [ ] Point a Laravel app with the official agent at it (`NIGHTWATCH_BASE_URL=https://edgewatch-ingest...`, `NIGHTWATCH_TOKEN=<ingest key>`,
   `php artisan nightwatch:agent`); the agent authenticates and a request, a job and a command appear in the dashboard.
-- [ ] Same with `edgewatch/laravel-edgewatch` (`EDGEWATCH_INGEST_URI=https://edgewatch-ingest.../api/ingest`).
 - [ ] The consumer's hourly retention cron and 5-minute pipeline cron run without errors (Workers Logs), and the Pipeline page shows no dead letters.
 - [ ] Optional: `ALERT_WEBHOOK_URL` is set on `edgewatch-consumer` and a test alert arrives.
 
@@ -67,9 +67,7 @@ VITE_API_URL=https://edgewatch-api.<subdomain>.workers.dev scripts/deploy.sh das
 
 - [x] Include MIT license files at the root and in both client packages, and npm license/repository metadata.
 - [ ] Change `## [1.0.0] - Unreleased` in `CHANGELOG.md` to the release date and remove the "not yet verified" line.
-- [ ] Tag: `git tag -a 1.0.0 -m "EdgeWatch 1.0.0" && git push origin 1.0.0`. The tag must be `1.0.0` because
-  `packages/laravel-edgewatch/composer.json` has `"version": "1.0.0"` (or delete that field and let Packagist read the tag).
-- [ ] Packagist: the package lives in a subdirectory of a monorepo, so publish it from a read-only split repository
-  (e.g. `splitsh-lite` or a subtree split of `packages/laravel-edgewatch`) and submit that repository to Packagist.
+- [ ] Tag: `git tag -a 1.0.0 -m "EdgeWatch 1.0.0" && git push origin 1.0.0`, matching `"version": "1.0.0"` in
+  `packages/browser/package.json`.
 - [ ] npm: `cd packages/browser && bun run build && npm publish --access public` (needs an npm account that owns the `@edgewatch` scope).
 - [ ] GitHub release from the `1.0.0` tag with the CHANGELOG entry.
