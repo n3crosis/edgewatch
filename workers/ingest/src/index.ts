@@ -178,7 +178,7 @@ app.post('/api/ingest', async (c) => {
   const stopped = await quotaStop(c, projectId, true);
   if (stopped) return stopped;
 
-  const maxBytes = Number(c.env.MAX_BODY_BYTES ?? 20_000_000);
+  const maxBytes = maxBodyBytes(c.env.MAX_BODY_BYTES);
   let text: string;
   try {
     text = await readBody(c.req.raw, maxBytes);
@@ -215,12 +215,23 @@ app.post('/api/ingest', async (c) => {
 
 class PayloadTooLarge extends Error {}
 
+/** Default ingest body ceiling (decoded bytes): 20 MB, well under the Workers request limit and the agent's batch size. */
+const DEFAULT_MAX_BODY_BYTES = 20_000_000;
+
+/** MAX_BODY_BYTES as a positive integer; a missing, empty or malformed value falls back to the default instead of disabling the limit. */
+function maxBodyBytes(raw: string | undefined): number {
+  const n = Number(raw);
+  return raw?.trim() && Number.isSafeInteger(n) && n > 0 ? n : DEFAULT_MAX_BODY_BYTES;
+}
+
 /**
  * Streams the body (gunzipping on the fly when Content-Encoding says gzip or the gzip magic bytes are present) and stops
  * as soon as the decoded size passes maxBytes, so a small gzip bomb can never be inflated into memory.
  */
 async function readBody(request: Request, maxBytes: number): Promise<string> {
-  if (Number(request.headers.get('content-length') ?? 0) > maxBytes) throw new PayloadTooLarge();
+  // Content-Length (when sent) rejects before any byte is read; otherwise the streamed count below enforces the limit.
+  const declared = request.headers.get('content-length');
+  if (declared !== null && /^\d+$/.test(declared.trim()) && Number(declared) > maxBytes) throw new PayloadTooLarge();
   if (!request.body) return '';
 
   const source = request.body.getReader();

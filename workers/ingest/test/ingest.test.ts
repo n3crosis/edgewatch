@@ -162,6 +162,40 @@ describe('POST /api/ingest', () => {
     const res = await call('/api/ingest', { method: 'POST', headers: { authorization: `Bearer ${INGEST_KEY}` }, body: JSON.stringify({ records: [query(TRACE_A)] }) });
     expect(res.status).toBe(413);
   });
+
+  const sized = (bytes: number) => {
+    const base = JSON.stringify({ records: [] });
+    return base.slice(0, -1) + ' '.repeat(bytes - base.length) + '}';
+  };
+  const streamed = (text: string) => new ReadableStream<Uint8Array>({
+    start(controller) {
+      const bytes = new TextEncoder().encode(text);
+      for (let i = 0; i < bytes.length; i += 64) controller.enqueue(bytes.slice(i, i + 64));
+      controller.close();
+    },
+  });
+
+  it('accepts a body exactly at MAX_BODY_BYTES and rejects one byte more with 413, by Content-Length', async () => {
+    testEnv.MAX_BODY_BYTES = '1000';
+    const headers = { authorization: `Bearer ${INGEST_KEY}`, 'content-type': 'application/json' };
+    const atLimit = await call('/api/ingest', { method: 'POST', headers: { ...headers, 'content-length': '1000' }, body: sized(1000) });
+    expect(atLimit.status).toBe(200);
+    const over = await call('/api/ingest', { method: 'POST', headers: { ...headers, 'content-length': '1001' }, body: sized(1001) });
+    expect(over.status).toBe(413);
+    expect(await over.json()).toMatchObject({ error: { code: 'payload_too_large' } });
+  });
+
+  it('enforces MAX_BODY_BYTES on a streamed body without Content-Length', async () => {
+    testEnv.MAX_BODY_BYTES = '1000';
+    const send = (body: string) => {
+      const request = new Request('https://ingest.test/api/ingest', { method: 'POST', headers: { authorization: `Bearer ${INGEST_KEY}` }, body: streamed(body), duplex: 'half' } as RequestInit);
+      expect(request.headers.get('content-length')).toBeNull();
+      return app.fetch(request, testEnv);
+    };
+    expect((await send(sized(1000))).status).toBe(200);
+    expect((await send(sized(1001))).status).toBe(413);
+  });
+
 });
 
 describe('over quota / rate limited (Nightwatch stop instruction)', () => {

@@ -61,6 +61,12 @@ scripts/deploy.sh workers         # consumer, then ingest, then api (wrangler de
 
 Each Worker can also be deployed alone: `cd workers/<name> && bunx wrangler deploy`.
 Optional ingest vars: `TOKEN_TTL`, `MAX_BODY_BYTES`, `RATE_LIMIT_PERIOD`, `INGEST_URL` (public ingest URL if behind a custom domain).
+
+**Ingest payload ceiling (`MAX_BODY_BYTES`, default `20000000` = 20 MB).** `POST /api/ingest` rejects a body larger
+than this with `413 payload_too_large` before buffering it: a `Content-Length` above the limit is refused before any
+byte is read, and a body without `Content-Length` (chunked) is counted while it streams and cut off at the first byte
+over the limit. The limit applies to the decoded size, so a gzip body cannot inflate past it. A missing, empty or
+malformed value uses the default; it is never treated as "no limit". `POST /api/browser` has a fixed 256 KB limit.
 API var: `CORS_ORIGIN` (default `*`; set it to the dashboard origin).
 
 ## 4. Create API keys
