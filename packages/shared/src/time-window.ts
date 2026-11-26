@@ -1,4 +1,11 @@
-export const RELATIVE_WINDOWS = { '1h': 3600e3, '6h': 6 * 3600e3, '24h': 24 * 3600e3, '7d': 7 * 24 * 3600e3 };
+export const RELATIVE_WINDOWS = {
+  '1h': 3600e3,
+  '6h': 6 * 3600e3,
+  '24h': 24 * 3600e3,
+  '7d': 7 * 24 * 3600e3,
+  '14d': 14 * 24 * 3600e3,
+  '30d': 30 * 24 * 3600e3,
+};
 export type TimeRange = keyof typeof RELATIVE_WINDOWS | `custom:${number}:${number}`;
 
 /** Absolute windows use inclusive Unix millisecond bounds, independent of client timezone. */

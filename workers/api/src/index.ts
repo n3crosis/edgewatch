@@ -129,8 +129,11 @@ function environmentScope(value: string | undefined, table: string, alias = tabl
 }
 
 function userScope(value: string | undefined, alias = '', parameter = '?') {
-  return value === undefined ? { sql: '', values: [] as string[] }
-    : { sql: ` AND ${alias ? `${alias}.` : ''}user = ${parameter}`, values: [value] };
+  if (value === undefined) return { sql: '', values: [] as string[] };
+  const col = `${alias ? `${alias}.` : ''}user`;
+  if (value === 'type:authenticated') return { sql: ` AND ${col} IS NOT NULL AND ${col} != ''`, values: [] as string[] };
+  if (value === 'type:guest') return { sql: ` AND (${col} IS NULL OR ${col} = '')`, values: [] as string[] };
+  return { sql: ` AND ${col} = ${parameter}`, values: [value] };
 }
 
 /** Registers a data route both as /v1/projects/:projectId<path> and /v1<path>?project_id=. */
@@ -139,12 +142,140 @@ function route(path: string, handler: Handler<AppEnv>) {
   app.get(`/v1${path}`, handler);
 }
 
-/** Every project that has sent data, for the dashboard's project selector. */
+const PROJECT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const ENV_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
+const ENV_COLORS = ['emerald', 'blue', 'amber', 'rose', 'violet', 'cyan', 'orange', 'pink', 'neutral'] as const;
+type EnvColor = (typeof ENV_COLORS)[number];
+
+function slugifyProjectId(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[^a-z0-9]+|[-._]+$/g, '')
+    .slice(0, 64);
+  return slug || 'app';
+}
+
+function randomBase64Url(byteLength = 24): string {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function validateEnvUrl(raw: unknown): { ok: true; value: string | null } | { ok: false; message: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: null };
+  if (typeof raw !== 'string') return { ok: false, message: 'Environment URL must be a string.' };
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: true, value: null };
+  if (trimmed.length > 256) return { ok: false, message: 'Environment URL must be at most 256 characters.' };
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { ok: false, message: 'Environment URL must start with http:// or https://.' };
+    }
+  } catch {
+    return { ok: false, message: 'Environment URL must be a valid http:// or https:// URL.' };
+  }
+  return { ok: true, value: trimmed };
+}
+
+/** Every project that has been added or sent data, for the dashboard's project selector and Accounts page. */
 app.get('/v1/projects', async (c) => {
   const { results } = await c.env.DB.prepare(
     'SELECT p.id, p.name, p.daily_record_quota, p.retention_days, (SELECT max(timestamp) FROM traces t WHERE t.project_id = p.id) AS last_seen FROM projects p ORDER BY p.id',
   ).all<{ id: string; name: string; daily_record_quota: number | null; retention_days: number | null; last_seen: number | null }>();
   return c.json({ data: results.map((r) => ({ ...r, last_seen: r.last_seen ? iso(r.last_seen) : null })) });
+});
+
+/** Create a new application and optionally mint an initial ingest API key. Requires admin access. */
+app.post('/v1/projects', async (c) => {
+  const body = await c.req.json<{ id?: unknown; name?: unknown; mint_ingest_key?: unknown }>().catch(() => null);
+  if (!body || typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 100) {
+    return fail(c, 422, 'unprocessable', 'Application name must be between 1 and 100 characters.');
+  }
+  const name = body.name.trim();
+  const id = typeof body.id === 'string' && body.id.trim() ? body.id.trim() : slugifyProjectId(name);
+  if (!PROJECT_ID_RE.test(id)) {
+    return fail(c, 422, 'unprocessable', 'Application ID must start with a letter or digit and use only letters, digits, ".", "_", or "-" (max 64 characters).');
+  }
+  const existing = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(id).first<{ id: string }>();
+  if (existing) return fail(c, 409, 'conflict', `An application with ID "${id}" already exists.`);
+  await c.env.DB.prepare('INSERT INTO projects (id, name) VALUES (?, ?)').bind(id, name).run();
+
+  let ingestKey: string | undefined;
+  if (body.mint_ingest_key !== false) {
+    ingestKey = `ew_live_${randomBase64Url(24)}`;
+    const kvKey = await apiKeyKvKey(ingestKey);
+    const record: ApiKeyRecord = {
+      project_id: id,
+      name: `${name} ingest`,
+      scopes: ['ingest'],
+      created_at: Math.floor(Date.now() / 1000),
+    };
+    await storage('kv', () => c.env.API_KEYS.put(kvKey, JSON.stringify(record)));
+  }
+
+  return c.json({
+    id,
+    name,
+    daily_record_quota: null,
+    retention_days: null,
+    last_seen: null,
+    ...(ingestKey ? { ingest_key: ingestKey } : {}),
+  }, 201);
+});
+
+/** Rename an application. Requires admin access. */
+app.patch('/v1/projects/:projectId', async (c) => {
+  const id = c.req.param('projectId');
+  const body = await c.req.json<{ name?: unknown }>().catch(() => null);
+  if (!body || typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 100) {
+    return fail(c, 422, 'unprocessable', 'Application name must be between 1 and 100 characters.');
+  }
+  const name = body.name.trim();
+  const [, read] = await c.env.DB.batch<{ id: string; name: string; daily_record_quota: number | null; retention_days: number | null }>([
+    c.env.DB.prepare('UPDATE projects SET name = ? WHERE id = ?').bind(name, id),
+    c.env.DB.prepare('SELECT id, name, daily_record_quota, retention_days FROM projects WHERE id = ?').bind(id),
+  ]);
+  const row = read?.results[0];
+  if (!row) return fail(c, 404, 'not_found', 'Application not found.');
+  return c.json(row);
+});
+
+/** Delete an application and its metadata rows. Requires admin access. */
+app.delete('/v1/projects/:projectId', async (c) => {
+  const id = c.req.param('projectId');
+  const existing = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(id).first<{ id: string }>();
+  if (!existing) return fail(c, 404, 'not_found', 'Application not found.');
+  const tables = [
+    'project_environments',
+    'issue_changes',
+    'issues',
+    'traces',
+    'exceptions',
+    'queries',
+    'users',
+    'job_attempts',
+    'commands',
+    'cache_events',
+    'outgoing_requests',
+    'mail',
+    'notifications',
+    'scheduled_tasks',
+    'logs',
+    'dead_letters',
+    'usage_daily',
+    'usage_receipts',
+    'web_vitals',
+  ];
+  await c.env.DB.batch([
+    ...tables.map((table) => c.env.DB.prepare(`DELETE FROM ${table} WHERE project_id = ?`).bind(id)),
+    c.env.DB.prepare('DELETE FROM projects WHERE id = ?').bind(id),
+  ]);
+  await storage('kv', () => c.env.API_KEYS.delete(`project:${id}`)).catch(() => {});
+  return c.json({ ok: true, id });
 });
 
 /** Stored in KV under project:<id>; `reason: 'daily_quota'` marks a block written by the consumer's usage metering. */
@@ -209,12 +340,13 @@ route('/overview', async (c) => {
   const scope = environmentScope(c.req.query('environment'), 'traces');
   const exceptionScope = environmentScope(c.req.query('environment'), 'exceptions');
   const queryScope = environmentScope(c.req.query('environment'), 'queries');
+  const user = userScope(c.req.query('user'));
   // At most 45 aggregate rows cross into the Worker: one total, 24 buckets, 20 routes.
   const [aggregates, exceptions, slow] = await Promise.all([
     c.env.DB.prepare(`WITH scoped AS (
       SELECT name, duration_ms, CASE WHEN status_code >= 500 THEN 1 ELSE 0 END AS errors,
         min(${BUCKETS - 1}, CAST((timestamp - ?) * ${BUCKETS} / ? AS INTEGER)) AS bucket
-      FROM traces WHERE ${pf(pid)} AND timestamp >= ? AND timestamp <= ? AND execution_source = 'request'${scope.sql}
+      FROM traces WHERE ${pf(pid)} AND timestamp >= ? AND timestamp <= ? AND execution_source = 'request'${scope.sql}${user.sql}
     ), ranked AS (
       SELECT *, row_number() OVER (ORDER BY duration_ms) AS total_rank, count(*) OVER () AS total_count,
         row_number() OVER (PARTITION BY bucket ORDER BY duration_ms) AS bucket_rank, count(*) OVER (PARTITION BY bucket) AS bucket_count,
@@ -232,8 +364,8 @@ route('/overview', async (c) => {
         max(CASE WHEN bucket_rank = CAST((bucket_count * 95 + 99) / 100 AS INTEGER) THEN duration_ms ELSE NULL END) AS p95_ms
       FROM ranked GROUP BY bucket
     UNION ALL SELECT kind, group_key, requests, errors, p95_ms FROM route_stats`)
-      .bind(since, now - since, pid, since, now, ...scope.values).all<{ kind: string; group_key: string; requests: number; errors: number; p95_ms: number }>(),
-    c.env.DB.prepare(`SELECT count(*) AS n FROM exceptions WHERE ${pf(pid)} AND timestamp >= ? AND timestamp <= ?${exceptionScope.sql}`).bind(pid, since, now, ...exceptionScope.values).first<number>('n'),
+      .bind(since, now - since, pid, since, now, ...scope.values, ...user.values).all<{ kind: string; group_key: string; requests: number; errors: number; p95_ms: number }>(),
+    c.env.DB.prepare(`SELECT count(*) AS n FROM exceptions WHERE ${pf(pid)} AND timestamp >= ? AND timestamp <= ?${exceptionScope.sql}${user.sql}`).bind(pid, since, now, ...exceptionScope.values, ...user.values).first<number>('n'),
     c.env.DB.prepare(`SELECT count(*) AS n FROM queries WHERE ${pf(pid)} AND timestamp >= ? AND timestamp <= ? AND duration_ms > 100${queryScope.sql}`).bind(pid, since, now, ...queryScope.values).first<number>('n'),
   ]);
   const total = aggregates.results.find((row) => row.kind === 'total')!;
@@ -253,8 +385,98 @@ route('/overview', async (c) => {
 
 route('/environments', async (c) => {
   const pid = c.get('project');
-  const { results } = await c.env.DB.prepare(`SELECT environment AS name, count(*) AS traces FROM traces WHERE ${pf(pid)} AND environment IS NOT NULL AND environment != '' GROUP BY environment ORDER BY environment LIMIT 200`).bind(pid).all();
-  return c.json({ data: results });
+  const [discovered, configured] = await Promise.all([
+    c.env.DB.prepare(`SELECT environment AS name, count(*) AS traces FROM traces WHERE ${pf(pid)} AND environment IS NOT NULL AND environment != '' GROUP BY environment ORDER BY environment LIMIT 200`)
+      .bind(pid)
+      .all<{ name: string; traces: number }>(),
+    c.env.DB.prepare(`SELECT name, color, url FROM project_environments WHERE ${pf(pid)} ORDER BY name LIMIT 200`)
+      .bind(pid)
+      .all<{ name: string; color: string; url: string | null }>(),
+  ]);
+  const merged = new Map<string, { name: string; traces: number; color: string | null; url: string | null; configured: boolean }>();
+  for (const row of configured.results) {
+    merged.set(row.name, { name: row.name, traces: 0, color: row.color, url: row.url, configured: true });
+  }
+  for (const row of discovered.results) {
+    const existing = merged.get(row.name);
+    if (existing) existing.traces += row.traces;
+    else merged.set(row.name, { name: row.name, traces: row.traces, color: null, url: null, configured: false });
+  }
+  const data = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return c.json({ data });
+});
+
+app.post('/v1/projects/:projectId/environments', async (c) => {
+  const pid = c.req.param('projectId');
+  const project = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(pid).first<{ id: string }>();
+  if (!project) return fail(c, 404, 'not_found', 'Application not found.');
+  const body = await c.req.json<{ name?: unknown; color?: unknown; url?: unknown }>().catch(() => null);
+  if (!body || typeof body.name !== 'string' || !ENV_NAME_RE.test(body.name.trim())) {
+    return fail(c, 422, 'unprocessable', 'Environment name must start with a letter or digit and be at most 64 characters.');
+  }
+  const name = body.name.trim();
+  const color: EnvColor = typeof body.color === 'string' && (ENV_COLORS as readonly string[]).includes(body.color)
+    ? (body.color as EnvColor)
+    : 'blue';
+  const urlCheck = validateEnvUrl(body.url);
+  if (!urlCheck.ok) return fail(c, 422, 'unprocessable', urlCheck.message);
+
+  const existing = await c.env.DB.prepare('SELECT name FROM project_environments WHERE project_id = ? AND name = ?').bind(pid, name).first();
+  if (existing) return fail(c, 409, 'conflict', `Environment "${name}" already exists.`);
+
+  await c.env.DB.prepare('INSERT INTO project_environments (project_id, name, color, url, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(pid, name, color, urlCheck.value, Date.now())
+    .run();
+  const traces = (await c.env.DB.prepare('SELECT count(*) AS n FROM traces WHERE project_id = ? AND environment = ?').bind(pid, name).first<number>('n')) ?? 0;
+  return c.json({ name, traces, color, url: urlCheck.value, configured: true }, 201);
+});
+
+app.patch('/v1/projects/:projectId/environments/:envName', async (c) => {
+  const pid = c.req.param('projectId');
+  const name = c.req.param('envName').trim();
+  if (!ENV_NAME_RE.test(name)) return fail(c, 400, 'invalid_request', 'Invalid environment name.');
+  const project = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(pid).first<{ id: string }>();
+  if (!project) return fail(c, 404, 'not_found', 'Application not found.');
+  const body = await c.req.json<{ color?: unknown; url?: unknown }>().catch(() => null);
+  if (!body || typeof body !== 'object') return fail(c, 422, 'unprocessable', 'Body must be a JSON object.');
+
+  const current = await c.env.DB.prepare('SELECT color, url FROM project_environments WHERE project_id = ? AND name = ?')
+    .bind(pid, name)
+    .first<{ color: string; url: string | null }>();
+  let color = current?.color ?? 'blue';
+  if (body.color !== undefined) {
+    if (typeof body.color !== 'string' || !(ENV_COLORS as readonly string[]).includes(body.color)) {
+      return fail(c, 422, 'unprocessable', `Invalid color. Allowed: ${ENV_COLORS.join(', ')}.`);
+    }
+    color = body.color;
+  }
+  let url = current?.url ?? null;
+  if (body.url !== undefined) {
+    const urlCheck = validateEnvUrl(body.url);
+    if (!urlCheck.ok) return fail(c, 422, 'unprocessable', urlCheck.message);
+    url = urlCheck.value;
+  }
+
+  await c.env.DB.prepare(
+    `INSERT INTO project_environments (project_id, name, color, url, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(project_id, name) DO UPDATE SET color = excluded.color, url = excluded.url`,
+  ).bind(pid, name, color, url, Date.now()).run();
+  const traces = (await c.env.DB.prepare('SELECT count(*) AS n FROM traces WHERE project_id = ? AND environment = ?').bind(pid, name).first<number>('n')) ?? 0;
+  return c.json({ name, traces, color, url, configured: true });
+});
+
+app.delete('/v1/projects/:projectId/environments/:envName', async (c) => {
+  const pid = c.req.param('projectId');
+  const name = c.req.param('envName').trim();
+  if (!name) return fail(c, 400, 'invalid_request', 'Invalid environment name.');
+  const [deletedCfg, clearedTraces] = await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM project_environments WHERE project_id = ? AND name = ?').bind(pid, name),
+    c.env.DB.prepare('UPDATE traces SET environment = NULL WHERE project_id = ? AND environment = ?').bind(pid, name),
+  ]);
+  if (!deletedCfg.meta.changes && !clearedTraces.meta.changes) {
+    return fail(c, 404, 'not_found', 'Environment not found.');
+  }
+  return c.json({ ok: true, name });
 });
 
 route('/issues', async (c) => {
@@ -322,17 +544,17 @@ route('/log-entries', async (c) => {
   const scope = environmentScope(c.req.query('environment'), 'logs');
   const where = [pf(pid), 'timestamp >= ?', 'timestamp <= ?'];
   const params: (string | number | null)[] = [pid, since, now];
+  const capturedUser = userScope(user);
   if (level && level !== 'all') { where.push('level = ?'); params.push(level); }
   if (q) { where.push('message LIKE ?'); params.push(`%${q}%`); }
-  if (user !== undefined) { where.push('user = ?'); params.push(user); }
   if (cursor) {
     const decoded = decodeCursor(cursor);
     if (!decoded || !/^\d+$/.test(decoded[1])) return fail(c, 400, 'invalid_request', 'Invalid cursor.');
     const [ts, id] = decoded;
     where.push('(timestamp < ? OR (timestamp = ? AND id < ?))'); params.push(ts, ts, Number(id));
   }
-  const { results } = await c.env.DB.prepare(`SELECT id, project_id, trace_id, timestamp, level, message, context, user, server FROM logs WHERE ${where.join(' AND ')}${scope.sql} ORDER BY timestamp DESC, id DESC LIMIT 51`)
-    .bind(...params, ...scope.values).all<{ id: number; timestamp: number }>();
+  const { results } = await c.env.DB.prepare(`SELECT id, project_id, trace_id, timestamp, level, message, context, user, server FROM logs WHERE ${where.join(' AND ')}${scope.sql}${capturedUser.sql} ORDER BY timestamp DESC, id DESC LIMIT 51`)
+    .bind(...params, ...scope.values, ...capturedUser.values).all<{ id: number; timestamp: number }>();
   const page = results.slice(0, 50);
   const last = page.at(-1);
   return c.json({ data: page.map((r) => ({ ...r, timestamp: iso(r.timestamp) })), next_cursor: results.length > 50 && last ? btoa(`${last.timestamp}|${last.id}`) : null });
@@ -394,7 +616,8 @@ route('/requests/trend', async (c) => {
   const params: (string | number | null)[] = [since, now - since, pid, since, now, name, kind];
   const environment = c.req.query('environment');
   if (environment !== undefined) { where.push('environment = ?'); params.push(environment); }
-  if (c.req.query('user') !== undefined) { where.push('user = ?'); params.push(c.req.query('user')!); }
+  const trendUser = userScope(c.req.query('user'));
+  if (trendUser.sql) { where.push(trendUser.sql.slice(5)); params.push(...trendUser.values); }
   if (method) { where.push("coalesce(method, 'UNKNOWN') = ?"); params.push(method); }
   if (status && status !== 'all') {
     if (!/^[1-5]xx$/.test(status)) return fail(c, 400, 'invalid_request', 'Invalid HTTP status family.');
@@ -437,7 +660,9 @@ route('/traces', async (c) => {
     if (routeKind) { where.push(`(${requestRouteKind}) = ?`); params.push(routeKind); }
   }
   if (method) where.push("coalesce(method, 'UNKNOWN') = ?") && params.push(method);
-  for (const field of ['user', 'server', 'environment'] as const) {
+  const traceUser = userScope(c.req.query('user'));
+  if (traceUser.sql) { where.push(traceUser.sql.slice(5)); params.push(...traceUser.values); }
+  for (const field of ['server', 'environment'] as const) {
     const value = c.req.query(field);
     if (value !== undefined) { where.push(`${field} = ?`); params.push(value); }
   }
