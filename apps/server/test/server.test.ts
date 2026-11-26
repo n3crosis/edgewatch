@@ -183,8 +183,9 @@ describe('migrateSqlite', () => {
     const db = new BunSqliteDatabase();
     const first = migrateSqlite(db, MIGRATIONS);
     expect(first[0]).toBe('0001_init.sql');
-    expect(first.at(-1)).toBe('0023_dashboard_auth_limits.sql');
+    expect(first.at(-1)).toBe('0024_project_environments.sql');
     expect(db.raw.query('PRAGMA table_info(traces)').all().some((row: any) => row.name === 'environment')).toBe(true);
+    expect(db.raw.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'project_environments'").all().length).toBe(1);
     expect(migrateSqlite(db, MIGRATIONS)).toEqual([]);
   });
 });
