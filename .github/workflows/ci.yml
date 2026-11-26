@@ -26,26 +26,8 @@ jobs:
         with:
           node-version: 22
 
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.3'
-          extensions: curl, zlib, sqlite3, pdo_sqlite
-          tools: composer:v2
-          coverage: none
-
-      - name: Cache Composer
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/composer
-          key: composer-${{ hashFiles('packages/laravel-edgewatch/composer.json', 'examples/laravel-sandbox/composer.lock') }}
-
       - name: bun install (frozen lockfile)
         run: bun install --frozen-lockfile
-
-      - name: composer install
-        run: |
-          composer install --no-interaction --no-progress --working-dir=packages/laravel-edgewatch
-          composer install --no-interaction --no-progress --working-dir=examples/laravel-sandbox
 
       - name: Typecheck
         run: bun run typecheck
@@ -55,9 +37,6 @@ jobs:
 
       - name: Vitest + script tests (bun test scripts)
         run: bun run test
-
-      - name: Pest
-        run: bun run test:php
 
       - name: Build
         run: bun run build
@@ -77,7 +56,7 @@ jobs:
           docker logs "$container"
           exit 1
 
-      - name: E2E (sandbox -> ingest -> queue -> consumer -> D1/R2 -> api, two projects)
+      - name: E2E (agent-format batches + browser events -> ingest -> queue -> consumer -> D1/R2 -> api, several projects)
         run: bun run e2e
 
       - name: Upload e2e logs
@@ -106,14 +85,10 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test:${{ matrix.database }}
 
-  fresh-laravel:
-    name: Fresh Laravel (${{ matrix.client }})
+  nightwatch-agent:
+    name: Official Nightwatch agent (fresh Laravel app)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        client: [edgewatch, nightwatch]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -129,14 +104,11 @@ jobs:
           tools: composer:v2
           coverage: none
       - run: bun install --frozen-lockfile
-      - run: composer install --no-interaction --no-progress --working-dir=packages/laravel-edgewatch
-      - name: Fresh application installation and telemetry
-        env:
-          CLIENT: ${{ matrix.client }}
-        run: bun run fresh-laravel
-      - name: Upload fresh application logs
+      - name: laravel/nightwatch + php artisan nightwatch:agent against the ingest Worker
+        run: bun run nightwatch-agent
+      - name: Upload agent run logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: fresh-laravel-${{ matrix.client }}-logs
+          name: nightwatch-agent-logs
           path: .wrangler/fresh-logs
