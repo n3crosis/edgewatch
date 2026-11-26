@@ -110,11 +110,18 @@ Deploy the account-enabled dashboard with `VITE_API_URL=/`. Its Pages Worker for
 to the `API` service binding in `apps/dashboard/wrangler.jsonc`, keeping session cookies on the dashboard origin.
 If the API Worker is renamed, update that binding. The standalone server also routes `/auth/*` to the API.
 Apply migrations 0022 and 0023 before deploying the account-enabled API. Account creation is invite-only after the
-owner account exists. Three ways to complete first-time owner setup:
+owner account exists. First-owner setup fails closed: a fresh installation refuses the public claim
+(`POST /auth/setup` answers `403 setup_disabled` with the fix in the message) until one of these is configured:
 
-1. **In the browser (default):** open the dashboard on a fresh installation—it automatically opens the **Set up your owner account** screen. Enter an email and password (minimum 8 characters; display name is optional) and you are signed in immediately. Setup locks permanently once the owner account exists.
-2. **Pre-configured credentials (`OWNER_EMAIL` + `OWNER_PASSWORD`):** set `OWNER_EMAIL` and `OWNER_PASSWORD` (and optional `OWNER_NAME`) as Worker secrets or server environment variables so the owner account is created automatically on first start/request without visiting the setup screen.
-3. **Token-gated bootstrap (`OWNER_SETUP_TOKEN`, optional):** set `cd workers/api && bunx wrangler secret put OWNER_SETUP_TOKEN` to require a setup token before anyone can claim a fresh public installation in the browser. After setup, remove it with `bunx wrangler secret delete OWNER_SETUP_TOKEN`.
+1. **Token-gated claim in the browser (`OWNER_SETUP_TOKEN`):** `cd workers/api && bunx wrangler secret put OWNER_SETUP_TOKEN`
+   (or `-e OWNER_SETUP_TOKEN=...` for the server). The dashboard opens **Set up your owner account** and the claim must
+   include that token; a missing or wrong token gets `403 Invalid setup token.` After setup, remove it with
+   `bunx wrangler secret delete OWNER_SETUP_TOKEN`.
+2. **Pre-configured credentials (`OWNER_EMAIL` + `OWNER_PASSWORD`, optional `OWNER_NAME`):** the owner account is created
+   automatically on the first request. The public claim stays refused (it would let someone else pick the owner); if the
+   values are invalid (bad email, password under 8 characters) the refusal says so.
+
+With neither set, nobody can become owner. Setup locks permanently once the owner account exists (`409`).
 
 The owner can create seven-day invitation links in **Accounts**. Share links privately; email delivery is not configured.
 Viewers can read telemetry; admins can also triage issues and replay dead letters; only the owner manages accounts.

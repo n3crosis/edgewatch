@@ -22,6 +22,12 @@ export function trustedOrigin(c: Pick<Context<{ Bindings: Bindings }>, 'req' | '
 }
 const cookieOptions = (c: Context) => ({ httpOnly: true, secure: new URL(c.req.url).protocol === 'https:', sameSite: 'Lax' as const, path: '/' });
 
+const presetOwner = (c: Context<{ Bindings: Bindings }>) => Boolean(c.env.OWNER_EMAIL && c.env.OWNER_PASSWORD);
+const SETUP_DISABLED = {
+  unconfigured: 'Owner setup is disabled: set OWNER_SETUP_TOKEN (to claim the owner here) or OWNER_EMAIL and OWNER_PASSWORD on the API, then retry.',
+  preset: 'Owner setup is disabled: the owner is created from OWNER_EMAIL and OWNER_PASSWORD. Check that OWNER_EMAIL is valid and OWNER_PASSWORD has at least 8 characters, or set OWNER_SETUP_TOKEN.',
+};
+
 async function maybeBootstrapOwner(c: Context<{ Bindings: Bindings }>, accounts: Accounts): Promise<void> {
   if (c.env.OWNER_EMAIL && c.env.OWNER_PASSWORD) {
     await accounts.ensureBootstrapOwner(c.env.OWNER_EMAIL, c.env.OWNER_PASSWORD, c.env.OWNER_NAME);
@@ -75,6 +81,7 @@ login.get('/session', async (c) => {
     user: account,
     setup_required: !ownerExists,
     setup_token_required: Boolean(c.env.OWNER_SETUP_TOKEN),
+    setup_available: !ownerExists && Boolean(c.env.OWNER_SETUP_TOKEN),
   });
 });
 
@@ -108,10 +115,13 @@ login.post('/setup', async (c) => {
   const body = await c.req.json().catch(() => null);
   const accounts = new Accounts(c.env.DB);
   await maybeBootstrapOwner(c, accounts);
-  if (c.env.OWNER_SETUP_TOKEN) {
-    if (typeof body?.token !== 'string' || authTokenHash(body.token) !== authTokenHash(c.env.OWNER_SETUP_TOKEN)) {
-      return c.json({ error: 'Invalid setup token.' }, 403);
-    }
+  // Fails closed: the public claim needs OWNER_SETUP_TOKEN; with only OWNER_EMAIL + OWNER_PASSWORD the owner is created from them.
+  if (!c.env.OWNER_SETUP_TOKEN) {
+    if (await accounts.hasOwner()) return c.json({ error: 'The owner account already exists.' }, 409);
+    return c.json({ error: SETUP_DISABLED[presetOwner(c) ? 'preset' : 'unconfigured'], code: 'setup_disabled' }, 403);
+  }
+  if (typeof body?.token !== 'string' || authTokenHash(body.token) !== authTokenHash(c.env.OWNER_SETUP_TOKEN)) {
+    return c.json({ error: 'Invalid setup token.' }, 403);
   }
   if (await accounts.hasOwner()) return c.json({ error: 'The owner account already exists.' }, 409);
   const email = normalizeEmail(body?.email);

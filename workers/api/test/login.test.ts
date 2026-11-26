@@ -16,7 +16,7 @@ it('protects token-gated setup, auto-signs in on setup, authenticates cookies, a
   const request = makeRequest(bindings);
 
   const initial = await (await request('/auth/session')).json() as { user: unknown; setup_required: boolean; setup_token_required: boolean };
-  expect(initial).toEqual({ user: null, setup_required: true, setup_token_required: true });
+  expect(initial).toEqual({ user: null, setup_required: true, setup_token_required: true, setup_available: true });
 
   expect((await request('/auth/setup', { token: 'wrong' })).status).toBe(403);
   const setupRes = await request('/auth/setup', { token: 'test-owner-bootstrap', email: 'owner@example.com', name: 'Owner', password });
@@ -68,21 +68,33 @@ it('protects token-gated setup, auto-signs in on setup, authenticates cookies, a
   expect((await request('/v1/permissions', undefined, cookie)).status).toBe(401);
 });
 
-it('allows simple first-run email + password setup when OWNER_SETUP_TOKEN is not set, then locks setup permanently', async () => {
-  const bindings = { ...env } as unknown as Env;
-  const request = makeRequest(bindings);
+it('fails closed: refuses the public owner claim when neither OWNER_SETUP_TOKEN nor OWNER_EMAIL + OWNER_PASSWORD is set', async () => {
+  const request = makeRequest({ ...env } as unknown as Env);
+  const initial = await (await request('/auth/session')).json();
+  expect(initial).toEqual({ user: null, setup_required: true, setup_token_required: false, setup_available: false });
+  for (const body of [{ email: 'attacker@example.com', password }, { token: 'guess', email: 'attacker@example.com', password }]) {
+    const res = await request('/auth/setup', body);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'setup_disabled', error: expect.stringMatching(/OWNER_SETUP_TOKEN.*OWNER_EMAIL and OWNER_PASSWORD/) });
+  }
+  expect((await (await request('/auth/session')).json() as { setup_required: boolean }).setup_required).toBe(true);
+});
 
-  const initial = await (await request('/auth/session')).json() as { user: unknown; setup_required: boolean; setup_token_required: boolean };
-  expect(initial).toEqual({ user: null, setup_required: true, setup_token_required: false });
+it('requires OWNER_SETUP_TOKEN on the claim when it is set', async () => {
+  const request = makeRequest({ ...env, OWNER_SETUP_TOKEN: 'claim-token' } as unknown as Env);
+  expect((await request('/auth/setup', { email: 'owner@example.com', password })).status).toBe(403);
+  expect((await request('/auth/setup', { token: 'claim-tokenx', email: 'owner@example.com', password })).status).toBe(403);
+  const res = await request('/auth/setup', { token: 'claim-token', email: 'alex.smith@example.com', password });
+  expect(res.status).toBe(201);
+  expect(await res.json()).toMatchObject({ user: { email: 'alex.smith@example.com', name: 'Alex Smith', role: 'owner' } });
+  expect((await request('/auth/setup', { token: 'claim-token', email: 'attacker@example.com', password })).status).toBe(409);
+});
 
-  const setupRes = await request('/auth/setup', { email: 'alex.smith@example.com', password });
-  expect(setupRes.status).toBe(201);
-  const body = await setupRes.json() as { user: { email: string; name: string; role: string } };
-  expect(body.user).toMatchObject({ email: 'alex.smith@example.com', name: 'Alex Smith', role: 'owner' });
-
-  const cookie = setupRes.headers.get('set-cookie')!;
-  expect(await (await request('/v1/permissions', undefined, cookie)).json()).toEqual({ can_manage: true });
-  expect((await request('/auth/setup', { email: 'attacker@example.com', password })).status).toBe(409);
+it('refuses the public claim when only OWNER_EMAIL + OWNER_PASSWORD are set but invalid', async () => {
+  const request = makeRequest({ ...env, OWNER_EMAIL: 'admin@example.com', OWNER_PASSWORD: 'short' } as unknown as Env);
+  const res = await request('/auth/setup', { email: 'attacker@example.com', password });
+  expect(res.status).toBe(403);
+  expect(await res.json()).toMatchObject({ code: 'setup_disabled', error: expect.stringContaining('OWNER_PASSWORD') });
 });
 
 it('auto-bootstraps the owner from OWNER_EMAIL and OWNER_PASSWORD on first request', async () => {

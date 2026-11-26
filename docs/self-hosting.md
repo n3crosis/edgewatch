@@ -20,8 +20,9 @@ Cloudflare Workers are the main target: deploy to your own account ([deployment.
 ```bash
 docker build -t edgewatch .
 docker run -d -p 8080:8080 -v edgewatch-data:/data --name edgewatch edgewatch
-# Optional: pre-configure the initial owner with -e OWNER_EMAIL=admin@example.com -e OWNER_PASSWORD=changeme123
-# (or simply open http://host:8080/ to create the owner account in the browser on first visit)
+# Required for first-owner setup (it fails closed without one of these):
+#   -e OWNER_EMAIL=admin@example.com -e OWNER_PASSWORD=changeme123   (owner created on first request), or
+#   -e OWNER_SETUP_TOKEN=<random>   (then open http://host:8080/ and claim the owner with that token)
 # To create accounts or reset a forgotten password later without losing data:
 # docker exec edgewatch bun apps/server/src/main.ts accounts reset-password --owner --password 'new-password'
 docker exec edgewatch bun apps/server/src/main.ts keys create my-app --scopes ingest   # shown once

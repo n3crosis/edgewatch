@@ -179,7 +179,9 @@ if (command === 'migrate') {
   });
   if (!ownerExists && env.DASHBOARD_DIR) {
     log('server', 'info', 'first_run_setup', {
-      message: `Open ${server.url} to create your owner account, or set OWNER_EMAIL and OWNER_PASSWORD.`,
+      message: env.OWNER_SETUP_TOKEN
+        ? `Open ${server.url} and enter OWNER_SETUP_TOKEN to create your owner account.`
+        : 'Owner setup is disabled until OWNER_SETUP_TOKEN or OWNER_EMAIL and OWNER_PASSWORD is set.',
     });
   }
   let stopping = false;
