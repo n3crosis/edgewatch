@@ -2,23 +2,36 @@ import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
-import { ArrowClockwiseIcon, CheckCircleIcon, WarningCircleIcon } from '@phosphor-icons/react';
+import {
+  ArrowClockwiseIcon,
+  ChartLineIcon,
+  CheckCircleIcon,
+  DatabaseIcon,
+  InfoIcon,
+  LockSimpleIcon,
+  QueueIcon,
+  TimerIcon,
+  WarningCircleIcon,
+  WarningOctagonIcon,
+  XIcon,
+} from '@phosphor-icons/react';
 import { useState } from 'react';
 import Link from '@/components/ScopedLink';
 import { LineChart } from '@/components/charts';
-import { Empty, ErrorState, Loading, PageHeader, PageSkeleton, Panel, Stat, TimeAgo } from '@/components/common';
+import { Empty, ErrorState, Loading, PageHeader, PageSkeleton, Panel, Stat, TimeAgo, useRowNavigate } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
-import { ago, compact, ms, time } from '@/lib/format';
+import { ago, bucketTime, compact, ms } from '@/lib/format';
 
 /** Queue lag above this is shown as a warning (the consumer alert default is 10 minutes). */
 const LAG_WARN_MS = 60_000;
 
 export default function PipelinePage() {
+  const rowNav = useRowNavigate();
   const permissions = useAsync(() => api.permissions(), []);
-  const health = useAsync(() => api.pipeline(), []);
+  const health = useAsync(() => api.pipeline(), [], { keepPreviousData: true });
   const [replayed, setReplayed] = useState(0);
-  const dead = useAsync(() => api.deadLetters(), [replayed]);
-  const usage = useAsync(() => api.usage(), []);
+  const dead = useAsync(() => api.deadLetters(), [replayed], { keepPreviousData: true });
+  const usage = useAsync(() => api.usage(), [], { keepPreviousData: true });
   const [replay, setReplay] = useState<{ busy: boolean; message: string | null }>({ busy: false, message: null });
 
   const requestReplay = async () => {
@@ -46,7 +59,7 @@ export default function PipelinePage() {
     <div className="space-y-6">
       <PageHeader
         title="Pipeline"
-        subtitle="Ingest queue health: consumer throughput, queue lag, usage and messages that failed every retry"
+        subtitle="Queue throughput, processing lag, daily usage, and failed deliveries"
         actions={
           <Badge variant={degraded ? 'warning' : idle ? 'secondary' : 'success'}>
             {degraded ? <WarningCircleIcon /> : <CheckCircleIcon />}
@@ -56,28 +69,30 @@ export default function PipelinePage() {
       />
 
       <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Messages (1h)" value={compact(consumer.messages_1h)} hint={consumer.last_batch_at ? `last batch ${ago(consumer.last_batch_at)}` : 'no batches in the last hour'} />
-        <Stat label="Retried (1h)" value={compact(consumer.retried_1h)} tone={consumer.retried_1h > 0 ? 'warn' : 'good'} />
-        <Stat label="Queue lag (5m)" value={ms(consumer.max_lag_ms_5m)} tone={consumer.max_lag_ms_5m > LAG_WARN_MS ? 'warn' : 'good'} hint={`1h peak ${ms(consumer.max_lag_ms_1h)}`} />
+        <Stat label="Messages (1h)" icon={<QueueIcon size={14} />} value={compact(consumer.messages_1h)} hint={consumer.last_batch_at ? `last batch ${ago(consumer.last_batch_at)}` : 'no batches in the last hour'} />
+        <Stat label="Retried (1h)" icon={<ArrowClockwiseIcon size={14} />} value={compact(consumer.retried_1h)} tone={consumer.retried_1h > 0 ? 'warn' : 'good'} />
+        <Stat label="Queue lag (5m)" icon={<TimerIcon size={14} />} value={ms(consumer.max_lag_ms_5m)} tone={consumer.max_lag_ms_5m > LAG_WARN_MS ? 'warn' : 'good'} hint={`1h peak ${ms(consumer.max_lag_ms_1h)}`} />
         <Stat
           label="Dead letters"
+          icon={<WarningOctagonIcon size={14} />}
           value={compact(summary.count)}
           tone={summary.count > 0 ? 'bad' : 'good'}
           hint={summary.replay_pending ? `${summary.replay_pending} replay pending` : summary.oldest_failed_at ? `oldest ${ago(summary.oldest_failed_at)}` : 'all clear'}
         />
       </section>
 
-      <Panel title="Queue lag per minute (last hour)" actions={minutes.length > 0 ? <span className="text-xs tabular-nums text-kumo-subtle">peak {ms(peakLag)}</span> : undefined}>
+      <Panel fetching={!health.loading && health.fetching} title="Queue lag per minute (last hour)" actions={minutes.length > 0 ? <span className="text-xs tabular-nums text-kumo-subtle">peak {ms(peakLag)}</span> : undefined}>
         {minutes.length === 0 ? (
-          <Empty>No consumer batches in the last hour.</Empty>
+          <Empty icon={<ChartLineIcon size={32} className="text-kumo-subtle" />}>No consumer batches in the last hour.</Empty>
         ) : (
           <div className="p-6">
-            <LineChart values={minutes.map((m) => m.max_lag_ms)} labels={minutes.map((m) => time(m.minute))} format={ms} />
+            <LineChart values={minutes.map((m) => m.max_lag_ms)} labels={minutes.map((m) => bucketTime(m.minute, '1h'))} format={ms} />
           </div>
         )}
       </Panel>
 
       <Panel
+        fetching={!usage.loading && usage.fetching}
         title="Records per day (UTC, last 7 days)"
         actions={
           usageTotal > 0 ? (
@@ -92,7 +107,7 @@ export default function PipelinePage() {
         ) : usage.loading || !usage.data ? (
           <Loading rows={3} />
         ) : usage.data.length === 0 ? (
-          <Empty>No records processed in the last 7 days.</Empty>
+          <Empty icon={<DatabaseIcon size={32} className="text-kumo-subtle" />}>No records processed in the last 7 days.</Empty>
         ) : (
           <Table>
             <Table.Header>
@@ -141,6 +156,7 @@ export default function PipelinePage() {
       </Panel>
 
       <Panel
+        fetching={!dead.loading && dead.fetching}
         title="Dead letters"
         actions={
           <Button
@@ -156,13 +172,18 @@ export default function PipelinePage() {
         }
       >
         {permissions.data && !permissions.data.can_manage && (
-          <div className="border-b border-kumo-hairline bg-kumo-elevated/60 px-6 py-3 text-xs text-kumo-subtle">
-            Replay requires an admin account.
+          <div className="flex items-center gap-2 border-b border-kumo-hairline bg-kumo-elevated/60 px-6 py-3 text-xs text-kumo-subtle">
+            <LockSimpleIcon size={14} className="shrink-0" aria-hidden />
+            <span>Replay requires an admin account.</span>
           </div>
         )}
         {replay.message && (
-          <div className="border-b border-kumo-hairline bg-kumo-info-tint px-6 py-3 text-xs text-kumo-strong" role="status">
-            {replay.message}
+          <div className="flex items-center justify-between gap-3 border-b border-kumo-hairline bg-kumo-info-tint px-6 py-3 text-xs text-kumo-strong" role="status">
+            <span className="flex items-center gap-2">
+              <InfoIcon size={15} className="shrink-0" aria-hidden />
+              <span>{replay.message}</span>
+            </span>
+            <Button variant="ghost" shape="square" size="xs" icon={XIcon} aria-label="Dismiss message" onClick={() => setReplay((r) => ({ ...r, message: null }))} />
           </div>
         )}
         {dead.error ? (
@@ -186,7 +207,11 @@ export default function PipelinePage() {
             </Table.Header>
             <Table.Body>
               {dead.data.map((d) => (
-                <Table.Row key={d.id} className="transition-colors hover:bg-kumo-tint/50">
+                <Table.Row
+                  key={d.id}
+                  onClick={d.trace_id ? rowNav(`/traces/${d.trace_id}`) : undefined}
+                  className={`${d.trace_id ? 'cursor-pointer ' : ''}transition-colors hover:bg-kumo-tint/50`}
+                >
                   <Table.Cell className="text-xs"><TimeAgo iso={d.failed_at} /></Table.Cell>
                   <Table.Cell className="font-mono text-xs">{d.project_id}</Table.Cell>
                   <Table.Cell className="font-mono text-xs">

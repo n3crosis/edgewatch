@@ -4,10 +4,26 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Input } from '@cloudflare/kumo/components/input';
 import { LayerCard } from '@cloudflare/kumo/components/layer-card';
-import { ArrowClockwiseIcon, BroadcastIcon, CheckCircleIcon, EyeIcon, EyeSlashIcon, SparkleIcon, WarningCircleIcon } from '@phosphor-icons/react';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
+import {
+  ArrowClockwiseIcon,
+  BroadcastIcon,
+  CheckCircleIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  InfoIcon,
+  MoonIcon,
+  RocketLaunchIcon,
+  SignInIcon,
+  SparkleIcon,
+  SunIcon,
+  UserPlusIcon,
+  WarningCircleIcon,
+} from '@phosphor-icons/react';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { accountRequest, refreshSession, setSessionUser, useSessionStatus, useSessionUser } from '@/lib/auth';
 import { USING_MOCK } from '@/lib/config';
+import { useTheme } from '@/lib/theme';
 
 type Mode = 'login' | 'setup' | 'invite';
 
@@ -133,6 +149,8 @@ function SignIn() {
   const [remember, setRemember] = useState(entry.mode === 'setup');
   const [busy, setBusy] = useState(false);
   const toasts = useKumoToastManager();
+  const { theme, toggle } = useTheme();
+  const themeLabel = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
 
   const needsSetupToken = mode === 'setup' && (setupTokenRequired || (entry.fromLink && entry.mode === 'setup'));
   const needsInviteToken = mode === 'invite' && !(entry.fromLink && entry.mode === 'invite' && token);
@@ -177,7 +195,12 @@ function SignIn() {
   const passwordReady = password.length >= 8;
 
   return (
-    <div className="grid min-h-full place-items-center px-6 py-12">
+    <div className="relative grid min-h-full place-items-center px-6 py-12">
+      <div className="fixed right-5 top-5">
+        <Tooltip asChild content={themeLabel}>
+          <Button variant="ghost" shape="square" size="sm" icon={theme === 'dark' ? SunIcon : MoonIcon} aria-label={themeLabel} onClick={toggle} />
+        </Tooltip>
+      </div>
       <form
         onSubmit={submit}
         className="flex w-full max-w-md flex-col gap-6 rounded-2xl bg-kumo-elevated p-8 ring ring-kumo-line shadow-sm"
@@ -190,7 +213,7 @@ function SignIn() {
             </div>
             <div>
               <div className="text-[15px] font-semibold leading-tight text-kumo-strong">EdgeWatch</div>
-              <div className="mt-0.5 text-xs text-kumo-subtle">Nightwatch APM</div>
+              <div className="mt-0.5 text-xs text-kumo-subtle">Application Monitoring</div>
             </div>
           </div>
           {mode === 'setup' && (
@@ -215,6 +238,7 @@ function SignIn() {
             <Input
               label="Email"
               type="email"
+              autoFocus
               autoComplete="username"
               placeholder="admin@example.com"
               required
@@ -226,6 +250,7 @@ function SignIn() {
           {mode === 'invite' && (
             <Input
               label="Name"
+              autoFocus
               autoComplete="name"
               placeholder="Your name"
               required
@@ -263,8 +288,11 @@ function SignIn() {
             onChange={setPassword}
             description={
               mode !== 'login' ? (
-                <span className={passwordReady ? 'text-kumo-success' : undefined}>
-                  {passwordReady ? 'Password length looks good.' : `${Math.max(0, 8 - password.length)} more character${8 - password.length === 1 ? '' : 's'} needed (minimum 8).`}
+                <span className={`inline-flex items-center gap-1.5 ${passwordReady ? 'text-kumo-success' : ''}`}>
+                  {passwordReady ? <CheckCircleIcon size={13} className="shrink-0" /> : <InfoIcon size={13} className="shrink-0" />}
+                  <span>
+                    {passwordReady ? 'Password length looks good.' : `${Math.max(0, 8 - password.length)} more character${8 - password.length === 1 ? '' : 's'} needed (minimum 8).`}
+                  </span>
                 </span>
               ) : undefined
             }
@@ -281,7 +309,14 @@ function SignIn() {
           )}
           <Checkbox label="Remember me for 30 days" checked={remember} onCheckedChange={(value) => setRemember(value === true)} />
         </div>
-        <Button type="submit" variant="primary" className="w-full justify-center" loading={busy} disabled={busy}>
+        <Button
+          type="submit"
+          variant="primary"
+          icon={mode === 'login' ? SignInIcon : mode === 'setup' ? RocketLaunchIcon : UserPlusIcon}
+          className="w-full justify-center"
+          loading={busy}
+          disabled={busy}
+        >
           {mode === 'login' ? 'Sign in' : mode === 'setup' ? 'Create owner account' : 'Join workspace'}
         </Button>
         {(mode !== 'login' || setupRequired) && (

@@ -16,18 +16,43 @@ import {
   ArrowClockwiseIcon,
   ArrowLeftIcon,
   ArrowUpRightIcon,
+  ArrowsLeftRightIcon,
+  BriefcaseIcon,
+  BrowsersIcon,
+  CalendarCheckIcon,
+  CaretDoubleLeftIcon,
   CaretLeftIcon,
   CaretRightIcon,
   CheckIcon,
   CopyIcon,
   MagnifyingGlassIcon,
+  TerminalIcon,
   TrayIcon,
   WarningCircleIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ago } from '@/lib/format';
 import type { ExecutionSource } from '@/lib/types';
+
+/**
+ * Returns a row click handler that navigates smoothly while ignoring clicks on nested links/buttons,
+ * modifier-key clicks, and text selection drags.
+ */
+export function useRowNavigate() {
+  const navigate = useNavigate();
+  const { projectId } = useProject();
+  const { range } = useRange();
+  const { environment } = useEnvironment();
+  return (to: string) => (event: MouseEvent<HTMLElement>) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('a, button, input, select, textarea, [role="button"]')) return;
+    if (window.getSelection()?.toString()) return;
+    navigate(scopedPath(to, projectId, range, environment));
+  };
+}
 
 export function PageHeader({
   title,
@@ -151,6 +176,7 @@ export function Stat({
   label,
   value,
   hint,
+  icon,
   tone = 'default',
   to,
   className,
@@ -158,6 +184,7 @@ export function Stat({
   label: string;
   value: ReactNode;
   hint?: ReactNode;
+  icon?: ReactNode;
   tone?: keyof typeof TONES;
   to?: string;
   className?: string;
@@ -171,7 +198,10 @@ export function Stat({
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="truncate text-xs font-medium tracking-wide text-kumo-subtle">{label}</div>
+        <div className="flex min-w-0 items-center gap-2 text-xs font-medium tracking-wide text-kumo-subtle">
+          {icon && <span className="shrink-0 text-kumo-subtle" aria-hidden>{icon}</span>}
+          <span className="truncate">{label}</span>
+        </div>
         {to && (
           <ArrowUpRightIcon
             size={14}
@@ -210,16 +240,23 @@ export function StatusBadge({ status, source }: { status: number | null; source:
   return <Badge variant={variant} className="font-mono">{s}</Badge>;
 }
 
-const SOURCE_VARIANTS = {
-  request: 'info',
-  job: 'secondary',
-  command: 'outline',
-  schedule: 'warning',
-  browser: 'beta',
-} as const satisfies Record<ExecutionSource, string>;
+const SOURCE_META = {
+  request: { variant: 'info', label: 'Request', icon: ArrowsLeftRightIcon },
+  job: { variant: 'secondary', label: 'Job', icon: BriefcaseIcon },
+  command: { variant: 'outline', label: 'Command', icon: TerminalIcon },
+  schedule: { variant: 'warning', label: 'Scheduled', icon: CalendarCheckIcon },
+  browser: { variant: 'beta', label: 'Browser', icon: BrowsersIcon },
+} as const satisfies Record<ExecutionSource, { variant: 'info' | 'secondary' | 'outline' | 'warning' | 'beta'; label: string; icon: typeof ArrowsLeftRightIcon }>;
 
 export function SourceBadge({ source }: { source: ExecutionSource }) {
-  return <Badge variant={SOURCE_VARIANTS[source]}>{source}</Badge>;
+  const meta = SOURCE_META[source];
+  const Icon = meta.icon;
+  return (
+    <Badge variant={meta.variant} className="inline-flex items-center gap-1.5">
+      <Icon size={12} aria-hidden />
+      <span>{meta.label}</span>
+    </Badge>
+  );
 }
 
 const METHOD_VARIANTS: Record<string, 'info' | 'success' | 'warning' | 'error' | 'secondary'> = {
@@ -314,7 +351,7 @@ export function PaginationBar({
       <div className="text-xs text-kumo-subtle">{status}</div>
       <div className="flex items-center gap-2.5">
         {onFirst && (
-          <Button variant="secondary" size="sm" disabled={firstDisabled} onClick={onFirst}>
+          <Button variant="secondary" size="sm" icon={CaretDoubleLeftIcon} disabled={firstDisabled} onClick={onFirst}>
             {firstLabel}
           </Button>
         )}

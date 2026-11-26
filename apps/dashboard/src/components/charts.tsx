@@ -1,4 +1,5 @@
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
+import { ChartBarIcon, ChartLineIcon } from '@phosphor-icons/react';
 import { useId } from 'react';
 import { yAxisTicks } from '@/lib/ui-helpers';
 
@@ -89,8 +90,9 @@ export function BarChart({
 }) {
   if (!series.length) {
     return (
-      <div className="grid place-items-center text-sm text-kumo-subtle" style={{ height }}>
-        No data in this window
+      <div className="flex flex-col items-center justify-center gap-2 text-sm text-kumo-subtle" style={{ height }}>
+        <ChartBarIcon size={24} className="text-kumo-subtle/70" aria-hidden />
+        <span>No data in this window</span>
       </div>
     );
   }
@@ -143,8 +145,9 @@ export function LineChart({
   const gradId = useId();
   if (!values.length) {
     return (
-      <div className="grid place-items-center text-sm text-kumo-subtle" style={{ height }}>
-        No data in this window
+      <div className="flex flex-col items-center justify-center gap-2 text-sm text-kumo-subtle" style={{ height }}>
+        <ChartLineIcon size={24} className="text-kumo-subtle/70" aria-hidden />
+        <span>No data in this window</span>
       </div>
     );
   }

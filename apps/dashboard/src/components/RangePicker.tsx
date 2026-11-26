@@ -3,7 +3,7 @@ import { Popover } from '@cloudflare/kumo/components/popover';
 import { Tabs } from '@cloudflare/kumo/components/tabs';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { timeWindow } from '@edgewatch/shared/time-window';
-import { CalendarBlankIcon } from '@phosphor-icons/react';
+import { CalendarBlankIcon, CheckIcon, ClockIcon } from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
 import { useRange } from '@/lib/range';
 import type { Range } from '@/lib/types';
@@ -77,8 +77,8 @@ export default function RangePicker() {
               >
                 {isCustom ? (
                   <>
-                    <span className="2xl:hidden">Custom</span>
-                    <span className="hidden max-w-48 truncate font-mono text-xs 2xl:inline">{shortWindow(range)}</span>
+                    <span className="sm:hidden">Custom</span>
+                    <span className="hidden max-w-48 truncate font-mono text-xs sm:inline">{shortWindow(range)}</span>
                   </>
                 ) : (
                   'Custom'
@@ -96,7 +96,7 @@ export default function RangePicker() {
               </Popover.Description>
               <div className="mt-4 flex flex-wrap gap-2">
                 {QUICK_PRESETS.map((preset) => (
-                  <Button key={preset.label} type="button" size="sm" variant="secondary" onClick={() => applyPreset(preset.ms)}>
+                  <Button key={preset.label} type="button" size="sm" variant="secondary" icon={ClockIcon} onClick={() => applyPreset(preset.ms)}>
                     {preset.label}
                   </Button>
                 ))}
@@ -140,7 +140,7 @@ export default function RangePicker() {
                 {error && <p role="alert" className="text-xs text-kumo-danger">{error}</p>}
                 <div className="flex justify-end gap-2.5 pt-1">
                   <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-                  <Button type="submit" size="sm" variant="primary">Apply window</Button>
+                  <Button type="submit" size="sm" variant="primary" icon={CheckIcon}>Apply window</Button>
                 </div>
               </form>
             </Popover.Popup>

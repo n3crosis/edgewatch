@@ -79,3 +79,20 @@ export function inlineLogContext(value: unknown, maxLength = 140): string | null
   const normalized = raw.replace(/\s+/g, ' ');
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
 }
+
+/** Splits a fully-qualified PHP/JS class name into short name and optional namespace. */
+export function splitClassName(fqcn: string): { short: string; namespace: string | null } {
+  const normalized = fqcn.replace(/^\\+/, '');
+  const idx = normalized.lastIndexOf('\\');
+  if (idx < 0) return { short: normalized, namespace: null };
+  return { short: normalized.slice(idx + 1), namespace: normalized.slice(0, idx) };
+}
+
+/** Extracts a concise human-readable title (e.g. "SELECT · orders") from a normalized SQL statement. */
+export function sqlSummary(sql: string): string {
+  const clean = sql.trim().replace(/\s+/g, ' ');
+  const verbMatch = /^(select|insert|update|delete|replace|create|alter|drop|with)\b/i.exec(clean);
+  const verb = verbMatch ? verbMatch[1].toUpperCase() : 'SQL';
+  const tableMatch = /\b(?:from|into|update|join)\s+[`"]?([A-Za-z0-9_.]+)[`"]?/i.exec(clean);
+  return tableMatch ? `${verb} · ${tableMatch[1]}` : `${verb} query`;
+}

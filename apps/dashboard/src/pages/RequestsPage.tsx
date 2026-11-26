@@ -6,14 +6,14 @@ import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
-import { TimerIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowsLeftRightIcon, TimerIcon, WarningCircleIcon, XIcon } from '@phosphor-icons/react';
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
 import { BarChart, LineChart, Legend } from '@/components/charts';
-import { Empty, ErrorState, FilterBar, Loading, MethodBadge, PageHeader, PaginationBar, Panel, SearchBox, StatusBadge, TimeAgo } from '@/components/common';
+import { Empty, ErrorState, FilterBar, Loading, MethodBadge, PageHeader, PaginationBar, Panel, SearchBox, StatusBadge, TimeAgo, useRowNavigate } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
-import { compact, ms, time } from '@/lib/format';
+import { bucketTime, compact, ms } from '@/lib/format';
 import type { RequestGroup, TraceFilters } from '@/lib/types';
 import { useRange, rangeLabel } from '@/lib/range';
 
@@ -40,6 +40,7 @@ function StatusMix({ row }: { row: RequestGroup }) {
         </div>
         <div className="flex items-center gap-2.5 text-[11px] tabular-nums text-kumo-subtle">
           {row.status_2xx > 0 && <span>2xx {compact(row.status_2xx)}</span>}
+          {row.status_3xx > 0 && <span className="text-kumo-info">3xx {compact(row.status_3xx)}</span>}
           {row.status_4xx > 0 && <span className="text-kumo-warning">4xx {compact(row.status_4xx)}</span>}
           {row.status_5xx > 0 && <span className="font-medium text-kumo-danger">5xx {compact(row.status_5xx)}</span>}
         </div>
@@ -50,6 +51,7 @@ function StatusMix({ row }: { row: RequestGroup }) {
 
 export default function RequestsPage() {
   const { range } = useRange();
+  const rowNav = useRowNavigate();
   const [params, setParams] = useSearchParams();
   const user = params.get('user') || undefined;
   const route = params.get('route');
@@ -101,7 +103,7 @@ export default function RequestsPage() {
             </span>
           )
         }
-        subtitle={`Route investigation · ${rangeLabel(range)} · named routes and captured route templates`}
+        subtitle={route === null ? `HTTP routes over the ${rangeLabel(range)} — click any route to see latency trends and executions` : `Executions for this route over the ${rangeLabel(range)}`}
       />
 
       <FilterBar>
@@ -126,9 +128,40 @@ export default function RequestsPage() {
                 aria-label="Minimum duration (ms)"
                 value={minDraft}
                 onChange={(event) => commitMin(event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') commitMin(minDraft, true); }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') commitMin(minDraft, true);
+                  else if (event.key === 'Escape' && minDraft) commitMin('', true);
+                }}
               />
+              {minDraft && (
+                <InputGroup.Addon align="end">
+                  <button
+                    type="button"
+                    onClick={() => commitMin('', true)}
+                    aria-label="Clear minimum duration"
+                    className="grid size-5 place-items-center rounded text-kumo-subtle transition-colors hover:text-kumo-strong"
+                  >
+                    <XIcon size={12} />
+                  </button>
+                </InputGroup.Addon>
+              )}
             </InputGroup>
+            <Button
+              variant={status === '5xx' ? 'primary' : 'secondary'}
+              size="sm"
+              icon={WarningCircleIcon}
+              onClick={() => update({ status: status === '5xx' ? null : '5xx', cursor: null })}
+            >
+              Errors (5xx)
+            </Button>
+            <Button
+              variant={minimumDuration === '500' ? 'primary' : 'secondary'}
+              size="sm"
+              icon={TimerIcon}
+              onClick={() => commitMin(minimumDuration === '500' ? '' : '500', true)}
+            >
+              Slow (&gt;500ms)
+            </Button>
           </>
         )}
         <UserFilter />
@@ -158,7 +191,7 @@ export default function RequestsPage() {
                 actions={<Legend items={[{ label: 'Requests', className: 'bg-kumo-brand/65' }, { label: '5xx', className: 'bg-kumo-danger' }]} />}
               >
                 <div className="p-6">
-                  <BarChart series={trend.data.series.map((point) => ({ label: time(point.ts), value: point.requests, highlight: point.errors }))} />
+                  <BarChart series={trend.data.series.map((point) => ({ label: bucketTime(point.ts, range), value: point.requests, highlight: point.errors }))} />
                 </div>
               </Panel>
               <Panel
@@ -167,7 +200,7 @@ export default function RequestsPage() {
                 actions={<span className="text-xs tabular-nums text-kumo-subtle">peak {ms(Math.max(0, ...trend.data.series.map((p) => p.p95_ms)))}</span>}
               >
                 <div className="p-6">
-                  <LineChart values={trend.data.series.map((point) => point.p95_ms)} labels={trend.data.series.map((point) => time(point.ts))} format={ms} />
+                  <LineChart values={trend.data.series.map((point) => point.p95_ms)} labels={trend.data.series.map((point) => bucketTime(point.ts, range))} format={ms} />
                 </div>
               </Panel>
             </div>
@@ -175,14 +208,20 @@ export default function RequestsPage() {
         </div>
       )}
 
-      <Panel fetching={route === null ? !groups.loading && groups.fetching : !occurrences.loading && occurrences.fetching}>
+      <Panel
+        title={route !== null ? 'Matching executions' : undefined}
+        fetching={route === null ? !groups.loading && groups.fetching : !occurrences.loading && occurrences.fetching}
+      >
         {route === null ? (
           groups.error ? (
             <ErrorState error={groups.error} />
           ) : groups.loading || !groups.data ? (
             <Loading />
           ) : groups.data.data.length === 0 ? (
-            <Empty action={hasListFilters ? <Button variant="secondary" size="sm" onClick={() => update({ q: null, user: null, offset: null })}>Clear filters</Button> : undefined}>
+            <Empty
+              icon={<ArrowsLeftRightIcon size={32} className="text-kumo-subtle" />}
+              action={hasListFilters ? <Button variant="secondary" size="sm" onClick={() => update({ q: null, user: null, offset: null })}>Clear filters</Button> : undefined}
+            >
               No requests match this window.
             </Empty>
           ) : (
@@ -198,33 +237,33 @@ export default function RequestsPage() {
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {groups.data.data.map((r) => (
-                  <Table.Row key={JSON.stringify([r.method, r.route_kind, r.route])} className="transition-colors hover:bg-kumo-tint/50">
-                    <Table.Cell className="max-w-lg">
-                      <div className="flex items-center gap-2.5">
-                        <MethodBadge method={r.method} />
-                        <Link
-                          className="truncate font-mono text-xs text-kumo-link hover:underline"
-                          to={withUser(`/requests?${new URLSearchParams({ route: r.route, route_kind: r.route_kind, method: r.method })}`, user)}
-                        >
-                          {r.route}
-                        </Link>
-                        <Badge variant="outline" className="shrink-0">
-                          {r.route_kind === 'path' ? 'template' : r.route_kind === 'unknown' ? 'unmatched' : 'named'}
-                        </Badge>
-                      </div>
-                    </Table.Cell>
-                    <Table.Cell><StatusMix row={r} /></Table.Cell>
-                    <Table.Cell className="text-right font-medium tabular-nums">{compact(r.requests)}</Table.Cell>
-                    <Table.Cell className="text-right font-mono text-xs tabular-nums text-kumo-subtle">{ms(r.avg_ms)}</Table.Cell>
-                    <Table.Cell className={`text-right font-mono text-xs tabular-nums ${r.p95_ms !== null && r.p95_ms > 500 ? 'font-medium text-kumo-warning' : ''}`}>
-                      {r.p95_ms === null ? '—' : ms(r.p95_ms)}
-                    </Table.Cell>
-                    <Table.Cell className={`text-right font-mono text-xs tabular-nums ${r.status_5xx > 0 ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}`}>
-                      {compact(r.status_5xx)}
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
+                {groups.data.data.map((r) => {
+                  const target = withUser(`/requests?${new URLSearchParams({ route: r.route, route_kind: r.route_kind, method: r.method })}`, user);
+                  return (
+                    <Table.Row key={JSON.stringify([r.method, r.route_kind, r.route])} onClick={rowNav(target)} className="cursor-pointer transition-colors hover:bg-kumo-tint/50">
+                      <Table.Cell className="max-w-lg">
+                        <div className="flex items-center gap-2.5">
+                          <MethodBadge method={r.method} />
+                          <Link title={r.route} className="truncate font-mono text-xs text-kumo-link hover:underline" to={target}>
+                            {r.route}
+                          </Link>
+                          {r.route_kind === 'unknown' && (
+                            <Badge variant="outline" className="shrink-0">unmatched</Badge>
+                          )}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell><StatusMix row={r} /></Table.Cell>
+                      <Table.Cell className="text-right font-medium tabular-nums">{compact(r.requests)}</Table.Cell>
+                      <Table.Cell className="text-right font-mono text-xs tabular-nums text-kumo-subtle">{ms(r.avg_ms)}</Table.Cell>
+                      <Table.Cell className={`text-right font-mono text-xs tabular-nums ${r.p95_ms !== null && r.p95_ms > 500 ? 'font-medium text-kumo-warning' : ''}`}>
+                        {r.p95_ms === null ? '—' : ms(r.p95_ms)}
+                      </Table.Cell>
+                      <Table.Cell className={`text-right font-mono text-xs tabular-nums ${r.status_5xx > 0 ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}`}>
+                        {compact(r.status_5xx)}
+                      </Table.Cell>
+                    </Table.Row>
+                  );
+                })}
               </Table.Body>
             </Table>
           )
@@ -233,7 +272,10 @@ export default function RequestsPage() {
         ) : occurrences.loading || !occurrences.data ? (
           <Loading />
         ) : occurrences.data.data.length === 0 ? (
-          <Empty action={hasDetailFilters ? <Button variant="secondary" size="sm" onClick={() => update({ status: null, min_duration_ms: null, user: null, cursor: null })}>Clear filters</Button> : undefined}>
+          <Empty
+            icon={<ArrowsLeftRightIcon size={32} className="text-kumo-subtle" />}
+            action={hasDetailFilters ? <Button variant="secondary" size="sm" onClick={() => update({ status: null, min_duration_ms: null, user: null, cursor: null })}>Clear filters</Button> : undefined}
+          >
             No executions in this window.
           </Empty>
         ) : (
@@ -250,7 +292,7 @@ export default function RequestsPage() {
             </Table.Header>
             <Table.Body>
               {occurrences.data.data.map((t) => (
-                <Table.Row key={t.trace_id} className="transition-colors hover:bg-kumo-tint/50">
+                <Table.Row key={t.trace_id} onClick={rowNav(`/traces/${t.trace_id}`)} className="cursor-pointer transition-colors hover:bg-kumo-tint/50">
                   <Table.Cell className="text-xs"><TimeAgo iso={t.timestamp} /></Table.Cell>
                   <Table.Cell className="max-w-md truncate font-mono text-xs">
                     <Link className="text-kumo-link hover:underline" to={`/traces/${t.trace_id}`}>{t.name}</Link>

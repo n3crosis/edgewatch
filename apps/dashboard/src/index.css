@@ -12,6 +12,12 @@ body {
   @apply bg-kumo-canvas text-sm leading-relaxed text-kumo-default antialiased;
 }
 
+@layer base {
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
 /* Subtle, theme-aware scrollbars for data tables and sidebars */
 * {
   scrollbar-width: thin;
@@ -60,10 +66,26 @@ body {
   animation: ew-indeterminate 1.1s ease-in-out infinite;
 }
 
+@keyframes ew-refresh {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-refresh {
+  animation: ew-refresh 450ms ease-in-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ew-indeterminate {
     animation: none;
     width: 100%;
     opacity: 0.45;
+  }
+  .animate-refresh {
+    animation: none;
   }
 }

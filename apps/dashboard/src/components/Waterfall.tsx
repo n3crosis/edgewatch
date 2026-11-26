@@ -1,6 +1,19 @@
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { cn } from '@cloudflare/kumo/utils';
-import type { KeyboardEvent } from 'react';
+import {
+  ArrowsLeftRightIcon,
+  BriefcaseIcon,
+  BugIcon,
+  CodeIcon,
+  DatabaseIcon,
+  EnvelopeIcon,
+  GlobeIcon,
+  LightningIcon,
+  ListBulletsIcon,
+  QueueIcon,
+  StackIcon,
+} from '@phosphor-icons/react';
+import type { ComponentType, KeyboardEvent } from 'react';
 import { waterfallDuration, waterfallPosition } from '@/lib/waterfall';
 import { ms } from '@/lib/format';
 import type { Span, SpanType } from '@/lib/types';
@@ -17,6 +30,34 @@ export const SPAN_COLORS: Record<SpanType, string> = {
   'queued-job': 'bg-violet-300',
   log: 'bg-slate-400',
   exception: 'bg-rose-500',
+};
+
+export const SPAN_LABELS: Record<SpanType, string> = {
+  request: 'Request',
+  job: 'Job',
+  middleware: 'Middleware',
+  controller: 'Controller',
+  query: 'Query',
+  cache: 'Cache',
+  'outgoing-request': 'Outgoing HTTP',
+  mail: 'Mail',
+  'queued-job': 'Queued job',
+  log: 'Log',
+  exception: 'Exception',
+};
+
+export const SPAN_ICONS: Record<SpanType, ComponentType<{ size?: number; className?: string }>> = {
+  request: ArrowsLeftRightIcon,
+  job: BriefcaseIcon,
+  middleware: StackIcon,
+  controller: CodeIcon,
+  query: DatabaseIcon,
+  cache: LightningIcon,
+  'outgoing-request': GlobeIcon,
+  mail: EnvelopeIcon,
+  'queued-job': QueueIcon,
+  log: ListBulletsIcon,
+  exception: BugIcon,
 };
 
 const TICKS = [0, 0.25, 0.5, 0.75, 1] as const;
@@ -77,6 +118,7 @@ export default function Waterfall({
           const isSelected = selected === span.id;
           const depth = hasRoot ? spanDepth(span.type) : 0;
           const slow = isSlowSpan(span);
+          const SpanIcon = SPAN_ICONS[span.type];
           return (
             <button
               type="button"
@@ -86,17 +128,18 @@ export default function Waterfall({
               onClick={() => onSelect?.(span)}
               onKeyDown={(event) => onRowKeyDown(event, index)}
               className={cn(
-                'group flex w-full items-center py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-kumo-link hover:bg-kumo-tint/60',
+                'group flex w-full cursor-pointer items-center py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-kumo-link hover:bg-kumo-tint/60',
                 isSelected && 'bg-kumo-tint',
                 span.type === 'exception' && 'bg-kumo-danger-tint/40 hover:bg-kumo-danger-tint/70',
               )}
             >
               <div
-                className="flex w-[44%] min-w-0 shrink-0 items-center gap-2.5 pr-5"
+                className="flex w-[44%] min-w-0 shrink-0 items-center gap-2 pr-5"
                 style={{ paddingLeft: depth ? `${depth * 14}px` : undefined }}
               >
-                <span className={cn('size-2.5 shrink-0 rounded-full', SPAN_COLORS[span.type])} />
-                <span className="w-28 shrink-0 truncate text-kumo-subtle">{span.type}</span>
+                <span className={cn('size-2 shrink-0 rounded-full', SPAN_COLORS[span.type])} />
+                <SpanIcon size={13} className={cn('shrink-0', span.type === 'exception' ? 'text-kumo-danger' : 'text-kumo-subtle')} />
+                <span className="w-24 shrink-0 truncate text-kumo-subtle">{SPAN_LABELS[span.type]}</span>
                 <span className={cn('truncate font-mono group-hover:text-kumo-strong', span.type === 'exception' ? 'text-kumo-danger' : 'text-kumo-default')}>
                   {span.label}
                 </span>

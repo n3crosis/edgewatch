@@ -1,9 +1,14 @@
 import { USING_MOCK } from '@/lib/config';
 import { Badge } from '@cloudflare/kumo/components/badge';
+import { LinkButton } from '@cloudflare/kumo/components/button';
 import { Table } from '@cloudflare/kumo/components/table';
+import { FolderSimpleIcon, GitBranchIcon, KeyIcon } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
+import Link, { scopedPath } from '@/components/ScopedLink';
 import { CopyButton, PageHeader, Panel } from '@/components/common';
+import { useEnvironment } from '@/lib/environment';
 import { useProject } from '@/lib/project';
+import { useRange } from '@/lib/range';
 
 function Code({ children }: { children: string }) {
   return (
@@ -16,9 +21,19 @@ function Code({ children }: { children: string }) {
   );
 }
 
-function Guide({ title, description, children }: { title: string; description: ReactNode; children: ReactNode }) {
+function StepCard({ step, title, description, children }: { step: number; title: string; description: ReactNode; children: ReactNode }) {
   return (
-    <Panel title={title} description={description}>
+    <Panel
+      title={
+        <span className="flex items-center gap-3">
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-kumo-brand/15 font-mono text-xs font-semibold text-kumo-brand">
+            {step}
+          </span>
+          <span>{title}</span>
+        </span>
+      }
+      description={description}
+    >
       <div className="space-y-4 p-6 text-sm text-kumo-subtle">{children}</div>
     </Panel>
   );
@@ -31,38 +46,59 @@ const SAMPLE_KEYS = [
 
 export default function SetupPage() {
   const { projectId: PROJECT_ID, projects } = useProject();
+  const { range } = useRange();
+  const { environment } = useEnvironment();
   const projectName = projects.find((p) => p.id === PROJECT_ID)?.name ?? PROJECT_ID;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Setup"
-        subtitle="Send telemetry with the official Laravel Nightwatch agent"
+        subtitle="Connect your Laravel application to EdgeWatch in two quick steps"
         actions={
-          <Badge variant="outline" className="font-mono">
-            {projectName} · {PROJECT_ID}
+          <Badge variant="outline" className="inline-flex items-center gap-1.5 font-mono">
+            <FolderSimpleIcon size={13} aria-hidden />
+            <span>{projectName === PROJECT_ID ? PROJECT_ID : `${projectName} · ${PROJECT_ID}`}</span>
           </Badge>
         }
       />
 
-      <Guide
-        title="Use the official laravel/nightwatch agent"
-        description={<>Point the Nightwatch agent at EdgeWatch. Application code and <span className="font-mono">NIGHTWATCH_*</span> settings stay as they are.</>}
+      <StepCard
+        step={1}
+        title="Configure your Laravel environment"
+        description={<>Point the official <span className="font-mono">laravel/nightwatch</span> agent at your EdgeWatch ingest URL. Existing <span className="font-mono">NIGHTWATCH_*</span> settings stay unchanged.</>}
       >
         <Code>{`# .env (app and agent)
 NIGHTWATCH_TOKEN=ew_live_${PROJECT_ID}_••••••••
 
-# agent only: point the agent at your EdgeWatch ingest endpoint
-NIGHTWATCH_BASE_URL=https://ingest.edgewatch.dev
+# agent only: replace with your EdgeWatch ingest worker URL
+NIGHTWATCH_BASE_URL=https://ingest.edgewatch.dev`}</Code>
+      </StepCard>
 
-php artisan nightwatch:agent`}</Code>
-        <p className="text-xs leading-relaxed">
-          The agent calls <code className="rounded bg-kumo-recessed px-1.5 py-0.5 font-mono text-kumo-strong">POST /api/agent-auth</code>, then sends gzip batches to the returned{' '}
-          <code className="rounded bg-kumo-recessed px-1.5 py-0.5 font-mono text-kumo-strong">ingest_url</code>.
-        </p>
-      </Guide>
+      <StepCard
+        step={2}
+        title="Start the agent"
+        description="Run the agent alongside your application; telemetry appears in the dashboard within seconds."
+      >
+        <Code>php artisan nightwatch:agent</Code>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <p className="text-xs leading-relaxed">
+            The agent authenticates via <code className="rounded bg-kumo-recessed px-1.5 py-0.5 font-mono text-kumo-strong">POST /api/agent-auth</code> and streams gzipped batches to the returned ingest endpoint.
+          </p>
+          <LinkButton href={scopedPath('/traces', PROJECT_ID, range, environment)} variant="secondary" size="sm" icon={GitBranchIcon}>
+            View incoming traces
+          </LinkButton>
+        </div>
+      </StepCard>
 
-      <Panel title={USING_MOCK ? 'Example API keys' : 'API keys'}>
+      <Panel
+        title={
+          <span className="flex items-center gap-2">
+            <KeyIcon size={16} className="text-kumo-subtle" aria-hidden />
+            <span>{USING_MOCK ? 'Example API keys' : 'API keys'}</span>
+          </span>
+        }
+      >
         {USING_MOCK ? (
           <Table>
             <Table.Header>
@@ -88,8 +124,11 @@ php artisan nightwatch:agent`}</Code>
           </Table>
         ) : (
           <div className="space-y-4 p-6 text-sm">
-            <p className="text-kumo-default">API keys connect your applications to EdgeWatch. Dashboard access is managed separately in Accounts.</p>
-            <p className="text-xs text-kumo-subtle">The installation operator can list and create application keys with the key management command:</p>
+            <p className="text-kumo-default">
+              API keys authenticate telemetry sent from your applications. Dashboard access is managed separately in{' '}
+              <Link to="/accounts" className="font-medium text-kumo-link hover:underline">Accounts</Link>.
+            </p>
+            <p className="text-xs text-kumo-subtle">List or create ingest keys from your terminal:</p>
             <Code>bun run --filter @edgewatch/ingest keys list --remote</Code>
           </div>
         )}

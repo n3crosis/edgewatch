@@ -1,6 +1,6 @@
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { GitBranchIcon, MagnifyingGlassIcon } from '@phosphor-icons/react';
+import { ArrowDownIcon, ArrowUpIcon, GitBranchIcon, KeyReturnIcon, MagnifyingGlassIcon, XIcon } from '@phosphor-icons/react';
 import { useEffect, useId, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
@@ -114,6 +114,19 @@ export default function CommandPalette({ open, onClose, pages, icons, range, sco
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
           />
+          {query && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                input.current?.focus();
+              }}
+              aria-label="Clear search"
+              className="grid size-6 shrink-0 place-items-center rounded-md text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-strong"
+            >
+              <XIcon size={14} />
+            </button>
+          )}
         </div>
         <div id={listId} role="listbox" aria-label="Results" className="min-h-0 flex-1 overflow-y-auto p-3">
           {items.map((item, i) => {
@@ -149,14 +162,28 @@ export default function CommandPalette({ open, onClose, pages, icons, range, sco
               </div>
             );
           })}
-          {items.length === 0 && search !== 'loading' && <div className="px-4 py-12 text-center text-sm text-kumo-subtle">No pages or traces match.</div>}
+          {items.length === 0 && search !== 'loading' && (
+            <div className="flex flex-col items-center gap-2 px-4 py-12 text-center text-sm text-kumo-subtle">
+              <MagnifyingGlassIcon size={24} className="text-kumo-subtle/70" aria-hidden />
+              <span>No pages or traces match.</span>
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-between gap-4 border-t border-kumo-hairline bg-kumo-elevated/60 px-5 py-3 text-xs text-kumo-subtle" aria-live="polite">
           <span>{search === 'loading' ? 'Searching traces…' : search === 'error' ? <span className="text-kumo-danger">Trace search failed.</span> : `${items.length} result${items.length === 1 ? '' : 's'}`}</span>
           <span className="hidden items-center gap-3 sm:inline-flex">
-            <span><kbd className="rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5 font-sans text-[10px]">↑↓</kbd> move</span>
-            <span><kbd className="rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5 font-sans text-[10px]">↵</kbd> open</span>
-            <span><kbd className="rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5 font-sans text-[10px]">Esc</kbd> close</span>
+            <span className="inline-flex items-center gap-1">
+              <kbd className="inline-flex items-center gap-0.5 rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5"><ArrowUpIcon size={10} /><ArrowDownIcon size={10} /></kbd>
+              <span>move</span>
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <kbd className="inline-flex items-center rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5"><KeyReturnIcon size={10} /></kbd>
+              <span>open</span>
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5 font-sans text-[10px]">Esc</kbd>
+              <span>close</span>
+            </span>
           </span>
         </div>
       </Dialog>

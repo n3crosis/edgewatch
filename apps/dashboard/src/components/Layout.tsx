@@ -15,6 +15,7 @@ import {
   BugIcon,
   DatabaseIcon,
   FlaskIcon,
+  FolderSimpleIcon,
   GaugeIcon,
   GitBranchIcon,
   KeyIcon,
@@ -35,7 +36,7 @@ import { isPaletteShortcut, type PaletteCommand } from '@/lib/command-palette';
 import PageBoundary from './PageBoundary';
 import { Loading } from './common';
 import { Select } from '@cloudflare/kumo/components/select';
-import { Outlet, useLocation, useMatch, useResolvedPath } from 'react-router-dom';
+import { Outlet, useLocation, useMatch, useNavigate, useResolvedPath } from 'react-router-dom';
 import { useTheme } from '@/lib/theme';
 import { EVENT_PAGES } from '@/lib/events';
 import { USING_MOCK } from '@/lib/api';
@@ -74,8 +75,10 @@ const KEYWORDS: Record<string, string[]> = {
 
 const NAV_SECTIONS = [
   { label: 'Overview', items: NAV.filter((item) => ['/', '/issues'].includes(item.to)) },
-  { label: 'Telemetry', items: NAV.filter((item) => !['/', '/issues', '/pipeline', '/setup', '/accounts'].includes(item.to)) },
-  { label: 'Operate', items: NAV.filter((item) => ['/pipeline', '/setup', '/accounts'].includes(item.to)) },
+  { label: 'HTTP & Code', items: NAV.filter((item) => ['/requests', '/traces', '/exceptions', '/queries', '/logs'].includes(item.to)) },
+  { label: 'Background & Services', items: NAV.filter((item) => ['/jobs', '/scheduled-tasks', '/commands', '/outgoing-requests', '/cache', '/mail', '/notifications'].includes(item.to)) },
+  { label: 'Audience', items: NAV.filter((item) => ['/users', '/web-vitals'].includes(item.to)) },
+  { label: 'Manage', items: NAV.filter((item) => ['/pipeline', '/setup', '/accounts'].includes(item.to)) },
 ];
 
 function PaletteHost({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
@@ -98,7 +101,7 @@ function PaletteHost({ open, setOpen }: { open: boolean; setOpen: (open: boolean
   );
 }
 
-function NavItem({ to, label, icon, end }: (typeof NAV)[number]) {
+function NavItem({ to, label, icon: Icon, end }: (typeof NAV)[number]) {
   const { range } = useRange();
   const { projectId } = useProject();
   const { environment } = useEnvironment();
@@ -109,7 +112,7 @@ function NavItem({ to, label, icon, end }: (typeof NAV)[number]) {
       href={href}
       variant={active ? 'secondary' : 'ghost'}
       size="sm"
-      icon={icon}
+      icon={<Icon weight={active ? 'duotone' : 'regular'} />}
       aria-current={active ? 'page' : undefined}
       className={`h-9 w-full justify-start gap-3 px-3 text-sm ${active ? 'font-medium text-kumo-strong' : 'text-kumo-subtle hover:text-kumo-default'}`}
     >
@@ -120,13 +123,29 @@ function NavItem({ to, label, icon, end }: (typeof NAV)[number]) {
 
 function ProjectSwitcher() {
   const { projectId, projects, setProjectId } = useProject();
+  const { range } = useRange();
+  const { environment } = useEnvironment();
+  const { pathname, search } = useLocation();
+  const navigate = useNavigate();
   const items = (projects.length ? projects : [{ id: projectId, name: projectId }]).map((p) => ({ value: p.id, label: p.name }));
+
+  const onChange = (nextId: string) => {
+    setProjectId(nextId);
+    // Avoid stranding users on a project-specific detail URL (e.g. /traces/:id) when switching projects.
+    const segments = pathname.split('/').filter(Boolean);
+    if (segments.length >= 2) {
+      navigate(scopedPath(`/${segments[0]}`, nextId, range, environment), { replace: true });
+    } else if (pathname === '/requests' && new URLSearchParams(search).has('route')) {
+      navigate(scopedPath('/requests', nextId, range, environment), { replace: true });
+    }
+  };
+
   return (
     <Select
       aria-label="Project"
       className="w-full"
       value={projectId}
-      onValueChange={(v) => v && setProjectId(String(v))}
+      onValueChange={(v) => v && onChange(String(v))}
       items={items}
       data-testid="project-switcher"
     />
@@ -136,11 +155,15 @@ function ProjectSwitcher() {
 function ProjectLabel() {
   const { projectId, projects } = useProject();
   const p = projects.find((x) => x.id === projectId);
+  const label = p?.name ?? projectId;
   return (
-    <div className="flex min-w-0 items-center gap-2.5 truncate text-sm text-kumo-subtle">
-      <span className="truncate font-semibold text-kumo-strong">{p?.name ?? projectId}</span>
+    <div className="flex min-w-0 items-center gap-2 truncate text-sm text-kumo-subtle">
+      <FolderSimpleIcon size={15} className="shrink-0 text-kumo-subtle" aria-hidden />
+      <span className="truncate font-semibold text-kumo-strong">{label}</span>
       {p?.host && <span className="hidden truncate xl:inline">· {p.host}</span>}
-      <span className="hidden rounded-md bg-kumo-recessed px-2 py-0.5 font-mono text-xs text-kumo-subtle md:inline">{projectId}</span>
+      {label !== projectId && (
+        <span className="hidden rounded-md bg-kumo-recessed px-2 py-0.5 font-mono text-xs text-kumo-subtle md:inline">{projectId}</span>
+      )}
     </div>
   );
 }
@@ -185,7 +208,7 @@ function Brand() {
       </div>
       <div className="min-w-0">
         <div className="text-[15px] font-semibold leading-tight text-kumo-strong">EdgeWatch</div>
-        <div className="mt-0.5 truncate text-xs text-kumo-subtle">Nightwatch APM</div>
+        <div className="mt-0.5 truncate text-xs text-kumo-subtle">Application Monitoring</div>
       </div>
     </div>
   );
@@ -333,12 +356,12 @@ export default function Layout() {
           <header
             className={`flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-kumo-hairline bg-kumo-elevated/75 px-5 py-3 sm:px-8 lg:min-h-16 lg:px-10 ${!showHeaderControls ? 'lg:hidden' : ''}`}
           >
-            <div className="flex min-w-0 items-center gap-3 lg:hidden">
-              <Button variant="ghost" shape="square" size="sm" icon={ListIcon} aria-label="Open menu" onClick={() => setMenuOpen(true)} data-testid="menu-toggle" />
+            <div className="flex min-w-0 items-center gap-3">
+              <Button variant="ghost" shape="square" size="sm" icon={ListIcon} aria-label="Open menu" onClick={() => setMenuOpen(true)} data-testid="menu-toggle" className="lg:hidden" />
               <ProjectLabel />
             </div>
             {showHeaderControls && (
-              <div className="flex w-full flex-wrap items-center gap-3 lg:ml-auto lg:w-auto">
+              <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto">
                 <RefreshButton />
                 {isTelemetryView && (
                   <>

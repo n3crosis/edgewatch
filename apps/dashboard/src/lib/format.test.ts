@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ago, ms, percentile } from './format';
+import { ago, bucketTime, ms, percentile } from './format';
 import { scopedPath } from '../components/ScopedLink';
 import { exception, exceptions, overview, queries, query, trace, traces } from './mock';
 
@@ -19,6 +19,17 @@ describe('format', () => {
 
   it('formats relative time', () => {
     expect(ago(new Date(Date.now() - 90_000).toISOString())).toBe('1m ago');
+  });
+
+  it('includes dates in chart bucket labels only for multi-day ranges', () => {
+    const sample = '2026-11-24T09:15:00.000Z';
+    const short24h = bucketTime(sample, '24h');
+    const multi7d = bucketTime(sample, '7d');
+    const multiCustom = bucketTime(sample, `custom:${Date.parse('2026-11-22T00:00:00Z')}:${Date.parse('2026-11-25T00:00:00Z')}`);
+
+    expect(short24h).toMatch(/^\d{2}:\d{2}$/);
+    expect(multi7d).toMatch(/Nov \d{1,2}, \d{2}:\d{2}/);
+    expect(multiCustom).toMatch(/Nov \d{1,2}, \d{2}:\d{2}/);
   });
 });
 

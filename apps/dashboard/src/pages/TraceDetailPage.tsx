@@ -1,8 +1,8 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
-import { CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, SourceBadge, Sql, Stat, StatusBadge } from '@/components/common';
-import Waterfall, { SPAN_COLORS } from '@/components/Waterfall';
+import { CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, SourceBadge, Sql, Stat, StatusBadge, useRowNavigate } from '@/components/common';
+import Waterfall, { SPAN_COLORS, SPAN_ICONS, SPAN_LABELS } from '@/components/Waterfall';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
@@ -10,7 +10,24 @@ import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { cn } from '@cloudflare/kumo/utils';
-import { CaretLeftIcon, CaretRightIcon, MagnifyingGlassIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
+import {
+  BugIcon,
+  CaretLeftIcon,
+  CaretRightIcon,
+  ClockIcon,
+  CloudIcon,
+  CpuIcon,
+  DatabaseIcon,
+  GitBranchIcon,
+  GitForkIcon,
+  HardDrivesIcon,
+  MagnifyingGlassIcon,
+  PathIcon,
+  TimerIcon,
+  UserIcon,
+  WarningIcon,
+  XIcon,
+} from '@phosphor-icons/react';
 import { api, useAsync } from '@/lib/api';
 import { bytes, ms } from '@/lib/format';
 import { traceView, updateTraceView } from '@/lib/trace-view';
@@ -51,7 +68,11 @@ function SpanSheet({
               <div className="min-w-0">
                 <Dialog.Title className="flex items-center gap-2.5 text-lg font-semibold text-kumo-strong">
                   <span className={cn('size-2.5 shrink-0 rounded-full', SPAN_COLORS[span.type])} />
-                  <span className="capitalize">{span.type.replace('-', ' ')}</span>
+                  {(() => {
+                    const SpanIcon = SPAN_ICONS[span.type];
+                    return <SpanIcon size={18} className="shrink-0 text-kumo-subtle" />;
+                  })()}
+                  <span>{SPAN_LABELS[span.type]}</span>
                 </Dialog.Title>
                 <Dialog.Description className="mt-1 font-mono text-xs text-kumo-subtle">
                   {ms(span.duration_ms)} starting at +{ms(span.start_ms)}
@@ -71,14 +92,17 @@ function SpanSheet({
                 <dd className="font-mono text-kumo-strong">+{ms(span.start_ms)}</dd>
                 <dt className="font-medium text-kumo-subtle">Duration</dt>
                 <dd className="font-mono text-kumo-strong">{ms(span.duration_ms)}</dd>
-                {Object.entries(span.meta ?? {}).map(([k, v]) => (
-                  <div key={k} className="contents">
-                    <dt className="font-medium text-kumo-subtle">{k}</dt>
-                    <dd className="break-all font-mono text-kumo-strong">
-                      {k === 'sql_hash' ? <Link className="text-kumo-link hover:underline" to={`/queries/${v}`}>{String(v)}</Link> : v}
-                    </dd>
-                  </div>
-                ))}
+                {Object.entries(span.meta ?? {}).map(([k, v]) => {
+                  const metaLabel = k.replace(/_/g, ' ').replace(/\bsql\b/i, 'SQL').replace(/^\w/, (c) => c.toUpperCase());
+                  return (
+                    <div key={k} className="contents">
+                      <dt className="font-medium text-kumo-subtle">{metaLabel}</dt>
+                      <dd className="break-all font-mono text-kumo-strong">
+                        {k === 'sql_hash' ? <Link className="text-kumo-link hover:underline" to={`/queries/${v}`}>{String(v)}</Link> : v}
+                      </dd>
+                    </div>
+                  );
+                })}
               </dl>
               {spans.length > 1 && index >= 0 && (
                 <div className="flex items-center justify-between border-t border-kumo-hairline pt-4">
@@ -109,9 +133,10 @@ const BREAKDOWN_COLORS: Record<SpanType | 'app', string> = {
 
 export default function TraceDetailPage() {
   const { traceId = '' } = useParams();
+  const rowNav = useRowNavigate();
   const eventTypeId = useId();
   const [spanQuery, setSpanQuery] = useState('');
-  const { data, error, loading } = useAsync(() => api.trace(traceId), [traceId]);
+  const { data, error, loading } = useAsync(() => api.trace(traceId), [traceId], { keepPreviousData: true });
   const [search, setSearch] = useSearchParams();
   const { eventType, spanId, selected, visibleSpans } = traceView(search, data?.spans ?? []);
   const updateView = (values: Record<string, string | null>, replace = false) => {
@@ -138,7 +163,21 @@ export default function TraceDetailPage() {
 
   if (error) return <ErrorState error={error} />;
   if (loading) return <Loading />;
-  if (!data) return <Empty>Trace not found.</Empty>;
+  if (!data) {
+    return (
+      <>
+        <PageHeader back={{ to: '/traces', label: 'Traces' }} title="Trace not found" />
+        <Panel>
+          <Empty
+            icon={<GitBranchIcon size={32} className="text-kumo-subtle" />}
+            description="This trace may have expired or belongs to another project."
+          >
+            Trace not found.
+          </Empty>
+        </Panel>
+      </>
+    );
+  }
 
   const { trace, spans, records, capture, repeated_queries: repeated = [], user, related = [] } = data;
   const userLabel = user ? user.name || user.username || `#${user.id}` : trace.user ? `#${trace.user}` : '—';
@@ -165,14 +204,33 @@ export default function TraceDetailPage() {
       />
 
       <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Duration" value={ms(trace.duration_ms)} tone={trace.duration_ms > 2000 ? 'bad' : trace.duration_ms > 500 ? 'warn' : 'default'} />
-        <Stat label="Queries" value={trace.query_count} hint={`${ms(queryTime)} in database`} />
-        <Stat label="Exceptions" value={trace.exception_count} tone={trace.exception_count ? 'bad' : 'good'} />
-        <Stat label="Memory" value={trace.peak_memory_usage ? bytes(trace.peak_memory_usage) : '—'} hint="peak" />
-        <Stat label="User" value={userLabel} hint={user?.username && user.name ? user.username : undefined} />
-        <Stat label="Environment" value={trace.environment || 'Unknown'} />
-        <Stat label="Server" value={trace.server} hint={new Date(trace.timestamp).toLocaleString()} className="sm:col-span-2" />
+        <Stat label="Duration" icon={<TimerIcon size={14} />} value={ms(trace.duration_ms)} hint={`${spans.length} span${spans.length === 1 ? '' : 's'}`} tone={trace.duration_ms > 2000 ? 'bad' : trace.duration_ms > 500 ? 'warn' : 'default'} />
+        <Stat label="Queries" icon={<DatabaseIcon size={14} />} value={trace.query_count} hint={`${ms(queryTime)} in database`} />
+        <Stat label="Exceptions" icon={<BugIcon size={14} />} value={trace.exception_count} hint={trace.exception_count ? 'captured in trace' : 'clean execution'} tone={trace.exception_count ? 'bad' : 'good'} />
+        <Stat label="Peak memory" icon={<CpuIcon size={14} />} value={trace.peak_memory_usage ? bytes(trace.peak_memory_usage) : '—'} />
       </section>
+
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-xl border border-kumo-hairline bg-kumo-elevated/55 px-5 py-4 text-xs sm:grid-cols-4 sm:px-6">
+        <div>
+          <dt className="flex items-center gap-1.5 font-medium text-kumo-subtle"><UserIcon size={13} aria-hidden />User</dt>
+          <dd className="mt-1 truncate text-kumo-strong">
+            {userLabel}
+            {user?.username && user.name && <span className="ml-1.5 text-kumo-subtle">({user.username})</span>}
+          </dd>
+        </div>
+        <div>
+          <dt className="flex items-center gap-1.5 font-medium text-kumo-subtle"><CloudIcon size={13} aria-hidden />Environment</dt>
+          <dd className="mt-1 truncate text-kumo-strong">{trace.environment || 'Unknown'}</dd>
+        </div>
+        <div>
+          <dt className="flex items-center gap-1.5 font-medium text-kumo-subtle"><HardDrivesIcon size={13} aria-hidden />Server</dt>
+          <dd className="mt-1 truncate font-mono text-kumo-strong">{trace.server || '—'}</dd>
+        </div>
+        <div>
+          <dt className="flex items-center gap-1.5 font-medium text-kumo-subtle"><ClockIcon size={13} aria-hidden />Recorded at</dt>
+          <dd className="mt-1 truncate font-mono tabular-nums text-kumo-strong">{new Date(trace.timestamp).toLocaleString()}</dd>
+        </div>
+      </dl>
 
       {capture && (!capture.records_available || capture.dropped_records > 0) && (
         <Banner
@@ -199,7 +257,12 @@ export default function TraceDetailPage() {
           {repeated.length > 0 ? (
             <ul className="divide-y divide-kumo-hairline">
               {repeated.map((q) => (
-                <li key={q.sql_hash} className="flex items-center justify-between gap-4 px-6 py-3.5 text-xs transition-colors hover:bg-kumo-tint/50">
+                /* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard navigation is provided by the inner Link */
+                <li
+                  key={q.sql_hash}
+                  onClick={rowNav(`/queries/${q.sql_hash}`)}
+                  className="flex cursor-pointer items-center justify-between gap-4 px-6 py-3.5 text-xs transition-colors hover:bg-kumo-tint/50"
+                >
                   <div className="flex min-w-0 items-center gap-3">
                     <Badge variant="warning" className="shrink-0 font-mono">{q.count}×</Badge>
                     <Link to={`/queries/${q.sql_hash}`} className="truncate hover:underline">
@@ -219,10 +282,22 @@ export default function TraceDetailPage() {
       )}
 
       {related.length > 0 && (
-        <Panel title={related.some((r) => r.trace_id === trace.origin_trace_id) ? 'Dispatched by' : 'Dispatched jobs'}>
+        <Panel
+          title={
+            <span className="flex items-center gap-2">
+              <GitForkIcon size={16} className="text-kumo-subtle" aria-hidden />
+              <span>{related.some((r) => r.trace_id === trace.origin_trace_id) ? 'Dispatched by' : 'Dispatched jobs'}</span>
+            </span>
+          }
+        >
           <ul className="divide-y divide-kumo-hairline">
             {related.map((r) => (
-              <li key={r.trace_id} className="flex items-center gap-3.5 px-6 py-3.5 text-sm transition-colors hover:bg-kumo-tint/50">
+              /* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard navigation is provided by the inner Link */
+              <li
+                key={r.trace_id}
+                onClick={rowNav(`/traces/${r.trace_id}`)}
+                className="flex cursor-pointer items-center gap-3.5 px-6 py-3.5 text-sm transition-colors hover:bg-kumo-tint/50"
+              >
                 <SourceBadge source={r.execution_source} />
                 <Link className="truncate font-mono text-xs text-kumo-link hover:underline" to={`/traces/${r.trace_id}`}>{r.name}</Link>
                 {r.status && <Badge variant={r.status === 'failed' ? 'error' : r.status === 'processed' ? 'success' : 'warning'}>{r.status}</Badge>}
@@ -310,6 +385,7 @@ export default function TraceDetailPage() {
             </button>
             {spanBreakdown.map(([type, stats]) => {
               const active = eventType === type;
+              const SpanIcon = SPAN_ICONS[type];
               return (
                 <button
                   key={type}
@@ -317,14 +393,15 @@ export default function TraceDetailPage() {
                   aria-pressed={active}
                   onClick={() => updateView({ type: active ? null : type, span: null })}
                   className={cn(
-                    'inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
+                    'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
                     active
                       ? 'border-kumo-line bg-kumo-base font-medium text-kumo-strong shadow-2xs'
                       : 'border-transparent text-kumo-subtle hover:bg-kumo-tint/60 hover:text-kumo-default',
                   )}
                 >
                   <span className={cn('size-2 rounded-full', SPAN_COLORS[type])} />
-                  <span>{type}</span>
+                  <SpanIcon size={13} className="shrink-0" />
+                  <span>{SPAN_LABELS[type]}</span>
                   <span className="font-mono text-[11px] text-kumo-subtle">
                     {stats.count}{stats.totalMs > 0 ? ` · ${ms(stats.totalMs)}` : ''}
                   </span>
@@ -355,6 +432,7 @@ export default function TraceDetailPage() {
             <Waterfall spans={filteredSpans} total={trace.duration_ms} onSelect={(span) => updateView({ tab: 'timeline', span: span.id })} selected={selected?.id} />
           ) : (
             <Empty
+              icon={<GitBranchIcon size={32} className="text-kumo-subtle" />}
               action={
                 eventType || spanQuery ? (
                   <Button variant="secondary" size="sm" onClick={() => { setSpanQuery(''); updateView({ type: null, span: null }); }}>
@@ -363,7 +441,7 @@ export default function TraceDetailPage() {
                 ) : undefined
               }
             >
-              No spans match these filters.
+              {eventType || spanQuery ? 'No spans match these filters.' : 'No spans recorded for this trace.'}
             </Empty>
           )}
         </div>
@@ -391,7 +469,14 @@ function Breadcrumbs({ records }: { records: { t?: unknown; browser?: unknown }[
   });
   if (!crumbs.length) return null;
   return (
-    <Panel title="Browser breadcrumbs">
+    <Panel
+      title={
+        <span className="flex items-center gap-2">
+          <PathIcon size={16} className="text-kumo-subtle" aria-hidden />
+          <span>Browser breadcrumbs</span>
+        </span>
+      }
+    >
       <ol className="divide-y divide-kumo-hairline text-xs" data-testid="breadcrumbs">
         {crumbs.map((c, i) => (
           <li key={i} className="flex items-baseline gap-4 px-6 py-3.5">

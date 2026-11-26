@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Span } from './types';
-import { filterSpansByQuery, formatStackTrace, inlineLogContext, traceTimeBreakdown, yAxisTicks } from './ui-helpers';
+import { filterSpansByQuery, formatStackTrace, inlineLogContext, splitClassName, sqlSummary, traceTimeBreakdown, yAxisTicks } from './ui-helpers';
 
 describe('yAxisTicks', () => {
   const nice = (n: number) => `${Math.round(n)}`;
@@ -77,5 +77,24 @@ describe('inlineLogContext', () => {
     expect(inlineLogContext('{}')).toBeNull();
     expect(inlineLogContext('{"status":500}')).toBe('{"status":500}');
     expect(inlineLogContext('a'.repeat(20), 10)).toBe(`${'a'.repeat(9)}…`);
+  });
+});
+
+describe('splitClassName', () => {
+  it('separates short class name from namespace', () => {
+    expect(splitClassName('App\\Exceptions\\PaymentDeclinedException')).toEqual({
+      short: 'PaymentDeclinedException',
+      namespace: 'App\\Exceptions',
+    });
+    expect(splitClassName('RuntimeException')).toEqual({ short: 'RuntimeException', namespace: null });
+  });
+});
+
+describe('sqlSummary', () => {
+  it('extracts SQL verb and primary table name', () => {
+    expect(sqlSummary('select * from `orders` where user_id = ?')).toBe('SELECT · orders');
+    expect(sqlSummary('update order_items set qty = ? where id = ?')).toBe('UPDATE · order_items');
+    expect(sqlSummary('insert into "audit_logs" (id) values (?)')).toBe('INSERT · audit_logs');
+    expect(sqlSummary('select 1')).toBe('SELECT query');
   });
 });

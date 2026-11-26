@@ -3,11 +3,11 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
-import { HardDrivesIcon, TimerIcon, UserIcon, XIcon } from '@phosphor-icons/react';
+import { BugIcon, FunnelSimpleIcon, GitBranchIcon, HardDrivesIcon, TimerIcon, UserIcon, WarningCircleIcon, XIcon } from '@phosphor-icons/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
-import { Empty, ErrorState, FilterBar, Loading, PageHeader, PaginationBar, Panel, SearchBox, SourceBadge, StatusBadge, TimeAgo } from '@/components/common';
+import { Empty, ErrorState, FilterBar, Loading, PageHeader, PaginationBar, Panel, SearchBox, SourceBadge, StatusBadge, TimeAgo, useRowNavigate } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
 import { ms } from '@/lib/format';
 import { useProject } from '@/lib/project';
@@ -38,7 +38,7 @@ function DebouncedFilterInput({
   placeholder,
   ariaLabel,
   type = 'text',
-  className = 'w-40',
+  className = 'w-44',
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -93,6 +93,7 @@ function DebouncedFilterInput({
 }
 
 export default function TracesPage() {
+  const rowNav = useRowNavigate();
   const [params, setParams] = useSearchParams();
   const filters: TraceFilters = {
     source: (params.get('source') ?? 'all') as TraceFilters['source'],
@@ -103,6 +104,9 @@ export default function TracesPage() {
     environment: params.get('environment') || undefined,
     min_duration_ms: params.get('min_duration_ms') || undefined,
   };
+  const advancedCount = [filters.min_duration_ms, filters.user, filters.server].filter(Boolean).length;
+  const moreFilterCount = [filters.min_duration_ms && filters.min_duration_ms !== '500', filters.user, filters.server].filter(Boolean).length;
+  const [showMore, setShowMore] = useState(moreFilterCount > 0);
   const cursor = params.get('cursor');
   const { range } = useRange();
   const { projectId } = useProject();
@@ -135,59 +139,93 @@ export default function TracesPage() {
     setPaging({ scope, cursor: null, history: [] });
   };
 
-  const hasFilters = Boolean(filters.q || filters.source !== 'all' || filters.status !== 'all' || filters.min_duration_ms || filters.user || filters.server);
+  const hasFilters = Boolean(filters.q || filters.source !== 'all' || filters.status !== 'all' || advancedCount > 0);
+  const isErrorsOnly = filters.status === '5xx';
+  const isSlowOnly = filters.min_duration_ms === '500';
 
   const clearFilters = () => update({ q: '', source: 'all', status: 'all', min_duration_ms: '', user: '', server: '' });
 
   return (
     <>
-      <PageHeader title="Traces" subtitle="Every request, queued job and command, newest first" />
+      <PageHeader title="Traces" subtitle="Requests, background jobs, commands, and scheduled tasks — click any row to inspect its timeline" />
 
-      <FilterBar>
-        <SearchBox className="min-w-64 flex-1" value={filters.q ?? ''} onChange={(q) => update({ q })} placeholder="Search route, trace ID or user…" />
-        <Select
-          aria-label="Execution type"
-          className="w-36"
-          value={filters.source}
-          onValueChange={(v) => update({ source: (v ?? 'all') as TraceFilters['source'] })}
-          items={SOURCES.map((s) => ({ value: s.value as string, label: s.label }))}
-        />
-        <Select
-          aria-label="Status"
-          className="w-32"
-          value={filters.status}
-          onValueChange={(v) => update({ status: (v ?? 'all') as TraceFilters['status'] })}
-          items={STATUSES.map((s) => ({ value: s.value as string, label: s.label }))}
-        />
-        <DebouncedFilterInput
-          type="number"
-          className="w-36"
-          icon={<TimerIcon className="text-kumo-subtle" />}
-          placeholder="Min ms"
-          ariaLabel="Minimum duration (ms)"
-          value={filters.min_duration_ms ?? ''}
-          onChange={(min_duration_ms) => update({ min_duration_ms })}
-        />
-        <DebouncedFilterInput
-          className="w-40"
-          icon={<UserIcon className="text-kumo-subtle" />}
-          placeholder="User ID"
-          ariaLabel="User ID"
-          value={filters.user ?? ''}
-          onChange={(user) => update({ user })}
-        />
-        <DebouncedFilterInput
-          className="w-40"
-          icon={<HardDrivesIcon className="text-kumo-subtle" />}
-          placeholder="Server"
-          ariaLabel="Server"
-          value={filters.server ?? ''}
-          onChange={(server) => update({ server })}
-        />
-        {hasFilters && (
-          <Button variant="ghost" size="sm" icon={XIcon} onClick={clearFilters}>
-            Clear
+      <FilterBar className="flex-col items-stretch">
+        <div className="flex flex-wrap items-center gap-3">
+          <SearchBox className="min-w-64 flex-1" value={filters.q ?? ''} onChange={(q) => update({ q })} placeholder="Search route, job name, or trace ID…" />
+          <Select
+            aria-label="Execution type"
+            className="w-36"
+            value={filters.source}
+            onValueChange={(v) => update({ source: (v ?? 'all') as TraceFilters['source'] })}
+            items={SOURCES.map((s) => ({ value: s.value as string, label: s.label }))}
+          />
+          <Select
+            aria-label="Status"
+            className="w-32"
+            value={filters.status}
+            onValueChange={(v) => update({ status: (v ?? 'all') as TraceFilters['status'] })}
+            items={STATUSES.map((s) => ({ value: s.value as string, label: s.label }))}
+          />
+          <Button
+            variant={isErrorsOnly ? 'primary' : 'secondary'}
+            size="sm"
+            icon={WarningCircleIcon}
+            onClick={() => update({ status: isErrorsOnly ? 'all' : '5xx' })}
+          >
+            Errors (5xx)
           </Button>
+          <Button
+            variant={isSlowOnly ? 'primary' : 'secondary'}
+            size="sm"
+            icon={TimerIcon}
+            onClick={() => update({ min_duration_ms: isSlowOnly ? '' : '500' })}
+          >
+            Slow (&gt;500ms)
+          </Button>
+          <Button
+            variant={showMore || moreFilterCount > 0 ? 'secondary' : 'ghost'}
+            size="sm"
+            icon={FunnelSimpleIcon}
+            aria-expanded={showMore}
+            onClick={() => setShowMore((open) => !open)}
+          >
+            More filters
+            {moreFilterCount > 0 && <Badge variant="primary" className="ml-1">{moreFilterCount}</Badge>}
+          </Button>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" icon={XIcon} onClick={clearFilters}>
+              Clear
+            </Button>
+          )}
+        </div>
+        {showMore && (
+          <div className="flex flex-wrap items-center gap-3 border-t border-kumo-hairline pt-3">
+            <DebouncedFilterInput
+              type="number"
+              className="w-44"
+              icon={<TimerIcon className="text-kumo-subtle" />}
+              placeholder="Min duration (ms)"
+              ariaLabel="Minimum duration (ms)"
+              value={filters.min_duration_ms ?? ''}
+              onChange={(min_duration_ms) => update({ min_duration_ms })}
+            />
+            <DebouncedFilterInput
+              className="w-44"
+              icon={<UserIcon className="text-kumo-subtle" />}
+              placeholder="User ID"
+              ariaLabel="User ID"
+              value={filters.user ?? ''}
+              onChange={(user) => update({ user })}
+            />
+            <DebouncedFilterInput
+              className="w-48"
+              icon={<HardDrivesIcon className="text-kumo-subtle" />}
+              placeholder="Server host"
+              ariaLabel="Server"
+              value={filters.server ?? ''}
+              onChange={(server) => update({ server })}
+            />
+          </div>
         )}
       </FilterBar>
 
@@ -198,6 +236,7 @@ export default function TracesPage() {
           <Loading rows={10} />
         ) : data.data.length === 0 ? (
           <Empty
+            icon={<GitBranchIcon size={32} className="text-kumo-subtle" />}
             description={hasFilters ? 'Try broadening your filters or choosing a wider time window.' : undefined}
             action={hasFilters ? <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button> : undefined}
           >
@@ -219,15 +258,24 @@ export default function TracesPage() {
             </Table.Header>
             <Table.Body>
               {data.data.map((t) => (
-                <Table.Row key={t.trace_id} className="transition-colors hover:bg-kumo-tint/50">
+                <Table.Row
+                  key={t.trace_id}
+                  onClick={rowNav(`/traces/${t.trace_id}`)}
+                  className="cursor-pointer transition-colors hover:bg-kumo-tint/50"
+                >
                   <Table.Cell className="text-xs"><TimeAgo iso={t.timestamp} /></Table.Cell>
                   <Table.Cell><SourceBadge source={t.execution_source} /></Table.Cell>
                   <Table.Cell className="max-w-md">
                     <div className="flex items-center gap-2.5">
-                      <Link className="truncate font-mono text-xs text-kumo-link hover:underline" to={`/traces/${t.trace_id}`}>
+                      <Link title={t.name} className="truncate font-mono text-xs text-kumo-link hover:underline" to={`/traces/${t.trace_id}`}>
                         {t.name}
                       </Link>
-                      {t.exception_count > 0 && <Badge variant="error" className="shrink-0">exception</Badge>}
+                      {t.exception_count > 0 && (
+                        <Badge variant="error" className="inline-flex shrink-0 items-center gap-1">
+                          <BugIcon size={12} aria-hidden />
+                          <span>{t.exception_count > 1 ? `${t.exception_count} exceptions` : 'exception'}</span>
+                        </Badge>
+                      )}
                     </div>
                   </Table.Cell>
                   <Table.Cell><StatusBadge status={t.status_code} source={t.execution_source} /></Table.Cell>

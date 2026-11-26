@@ -1,8 +1,41 @@
 import { Badge } from '@cloudflare/kumo/components/badge';
-import { SpeedometerIcon, BellIcon, BriefcaseIcon, CalendarCheckIcon, EnvelopeIcon, ListBulletsIcon, UsersIcon, GlobeIcon, LightningIcon, TerminalIcon } from '@phosphor-icons/react';
-import type { ReactNode } from 'react';
+import {
+  ArrowCounterClockwiseIcon,
+  BellIcon,
+  BriefcaseIcon,
+  BugIcon,
+  CalendarCheckIcon,
+  CheckCircleIcon,
+  EnvelopeIcon,
+  FastForwardIcon,
+  GaugeIcon,
+  GitBranchIcon,
+  GlobeIcon,
+  LightningIcon,
+  ListBulletsIcon,
+  PencilSimpleIcon,
+  QueueIcon,
+  SpeedometerIcon,
+  TerminalIcon,
+  TimerIcon,
+  UsersIcon,
+  WarningCircleIcon,
+  WarningIcon,
+} from '@phosphor-icons/react';
+import type { ComponentType, ReactNode } from 'react';
 import { compact, ms } from './format';
+import { splitClassName } from './ui-helpers';
 import type { EventGroup, EventRow } from './types';
+
+function renderClassKey(key: string) {
+  const { short, namespace } = splitClassName(key);
+  return (
+    <span className="inline-flex min-w-0 items-baseline gap-2 font-mono text-xs">
+      <span className="truncate font-medium">{short}</span>
+      {namespace && <span className="truncate text-kumo-subtle">{namespace}</span>}
+    </span>
+  );
+}
 
 export interface EventColumn<T> {
   label: string;
@@ -18,10 +51,16 @@ export interface EventPage {
   icon: typeof BriefcaseIcon;
   subtitle: string;
   keyLabel: string;
+  isClassKey?: boolean;
   renderKey?: (key: string) => ReactNode;
   columns: EventColumn<EventGroup>[];
   rowColumns: EventColumn<EventRow>[];
-  summary?: { label: string; render: (s: Record<string, number>) => ReactNode; tone?: (s: Record<string, number>) => 'bad' | 'good' | 'warn' | 'default' }[];
+  summary?: {
+    label: string;
+    icon?: ComponentType<{ size?: number; className?: string }>;
+    render: (s: Record<string, number>) => ReactNode;
+    tone?: (s: Record<string, number>) => 'bad' | 'good' | 'warn' | 'default';
+  }[];
   filters?: { param: string; label: string; options: string[] }[];
   searchPlaceholder: string;
 }
@@ -47,9 +86,10 @@ export const EVENT_PAGES: EventPage[] = [
     title: 'Jobs',
     nav: 'Jobs',
     icon: BriefcaseIcon,
-    subtitle: 'Queued jobs (job-attempt and queued-job records) grouped by job class',
+    subtitle: 'Background jobs grouped by class — click any job to inspect attempts',
     keyLabel: 'Job',
-    renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
+    isClassKey: true,
+    renderKey: renderClassKey,
     columns: [
       { label: 'Queue', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.queue ?? '—'}</span> },
       { label: 'Queued', align: 'right', render: (g) => num(g.queued) },
@@ -67,10 +107,10 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
     summary: [
-      { label: 'Queued', render: (s) => num(s.queued) },
-      { label: 'Attempts', render: (s) => num(s.attempts) },
-      { label: 'Failed', render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Released', render: (s) => num(s.released), tone: (s) => (s.released ? 'warn' : 'default') },
+      { label: 'Queued', icon: QueueIcon, render: (s) => num(s.queued) },
+      { label: 'Attempts', icon: BriefcaseIcon, render: (s) => num(s.attempts) },
+      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
+      { label: 'Released', icon: ArrowCounterClockwiseIcon, render: (s) => num(s.released), tone: (s) => (s.released ? 'warn' : 'default') },
     ],
     filters: [{ param: 'status', label: 'Status', options: ['all', 'processed', 'released', 'failed'] }],
     searchPlaceholder: 'Search job class or queue…',
@@ -95,9 +135,9 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
     summary: [
-      { label: 'Runs', render: (s) => num(s.runs) },
-      { label: 'Failed', render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Avg duration', render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
+      { label: 'Runs', icon: TerminalIcon, render: (s) => num(s.runs) },
+      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
+      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
     ],
     filters: [{ param: 'status', label: 'Status', options: ['all', 'success', 'failed'] }],
     searchPlaceholder: 'Search command…',
@@ -127,10 +167,10 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
     summary: [
-      { label: 'Hit ratio', render: (s) => pct(s.hit_ratio), tone: (s) => (s.hit_ratio === null || s.hit_ratio === undefined ? 'default' : s.hit_ratio >= 0.8 ? 'good' : s.hit_ratio >= 0.5 ? 'warn' : 'bad') },
-      { label: 'Hits', render: (s) => num(s.hits) },
-      { label: 'Misses', render: (s) => num(s.misses) },
-      { label: 'Writes / deletes', render: (s) => `${num(s.writes)} / ${num(s.deletes)}` },
+      { label: 'Hit ratio', icon: GaugeIcon, render: (s) => pct(s.hit_ratio), tone: (s) => (s.hit_ratio === null || s.hit_ratio === undefined ? 'default' : s.hit_ratio >= 0.8 ? 'good' : s.hit_ratio >= 0.5 ? 'warn' : 'bad') },
+      { label: 'Hits', icon: CheckCircleIcon, render: (s) => num(s.hits) },
+      { label: 'Misses', icon: LightningIcon, render: (s) => num(s.misses) },
+      { label: 'Writes / deletes', icon: PencilSimpleIcon, render: (s) => `${num(s.writes)} / ${num(s.deletes)}` },
     ],
     filters: [{ param: 'type', label: 'Type', options: ['all', 'hit', 'miss', 'write', 'delete', 'write-failure', 'delete-failure'] }],
     searchPlaceholder: 'Search key or store…',
@@ -156,9 +196,9 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
     summary: [
-      { label: 'Requests', render: (s) => num(s.requests) },
-      { label: 'Failed', render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Avg duration', render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
+      { label: 'Requests', icon: GlobeIcon, render: (s) => num(s.requests) },
+      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
+      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
     ],
     filters: [
       { param: 'method', label: 'Method', options: ['all', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
@@ -173,7 +213,8 @@ export const EVENT_PAGES: EventPage[] = [
     icon: EnvelopeIcon,
     subtitle: 'Emails your app sent, grouped by mailable',
     keyLabel: 'Mailable',
-    renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
+    isClassKey: true,
+    renderKey: renderClassKey,
     columns: [
       { label: 'Mailer', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.mailers ?? '—'}</span> },
       { label: 'Sent', align: 'right', render: (g) => num(g.count) },
@@ -190,9 +231,9 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
     summary: [
-      { label: 'Sent', render: (s) => num(s.sent) },
-      { label: 'Failed', render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Avg duration', render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
+      { label: 'Sent', icon: EnvelopeIcon, render: (s) => num(s.sent) },
+      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
+      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
     ],
     filters: [{ param: 'status', label: 'Status', options: ['all', 'sent', 'failed'] }],
     searchPlaceholder: 'Search mailable or subject…',
@@ -204,7 +245,8 @@ export const EVENT_PAGES: EventPage[] = [
     icon: BellIcon,
     subtitle: 'Notifications your app sent, grouped by class',
     keyLabel: 'Notification',
-    renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
+    isClassKey: true,
+    renderKey: renderClassKey,
     columns: [
       { label: 'Channels', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.channels ?? '—'}</span> },
       { label: 'Sent', align: 'right', render: (g) => num(g.count) },
@@ -218,9 +260,9 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
     summary: [
-      { label: 'Sent', render: (s) => num(s.sent) },
-      { label: 'Failed', render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Avg duration', render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
+      { label: 'Sent', icon: BellIcon, render: (s) => num(s.sent) },
+      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
+      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
     ],
     filters: [
       { param: 'channel', label: 'Channel', options: ['all', 'mail', 'database', 'broadcast', 'slack', 'vonage'] },
@@ -251,10 +293,10 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
     summary: [
-      { label: 'Runs', render: (s) => num(s.runs) },
-      { label: 'Failed', render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Skipped', render: (s) => num(s.skipped) },
-      { label: 'Avg duration', render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
+      { label: 'Runs', icon: CalendarCheckIcon, render: (s) => num(s.runs) },
+      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
+      { label: 'Skipped', icon: FastForwardIcon, render: (s) => num(s.skipped) },
+      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
     ],
     filters: [{ param: 'status', label: 'Status', options: ['all', 'processed', 'failed', 'skipped'] }],
     searchPlaceholder: 'Search task or cron…',
@@ -277,9 +319,9 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Context', render: (r) => <span className="break-all font-mono text-xs text-kumo-subtle">{r.context ? String(r.context) : '—'}</span> },
     ],
     summary: [
-      { label: 'Entries', render: (s) => num(s.logs) },
-      { label: 'Errors', render: (s) => num(s.errors), tone: (s) => (s.errors ? 'bad' : 'good') },
-      { label: 'Warnings', render: (s) => num(s.warnings), tone: (s) => (s.warnings ? 'warn' : 'good') },
+      { label: 'Entries', icon: ListBulletsIcon, render: (s) => num(s.logs) },
+      { label: 'Errors', icon: WarningCircleIcon, render: (s) => num(s.errors), tone: (s) => (s.errors ? 'bad' : 'good') },
+      { label: 'Warnings', icon: WarningIcon, render: (s) => num(s.warnings), tone: (s) => (s.warnings ? 'warn' : 'good') },
     ],
     filters: [{ param: 'level', label: 'Level', options: ['all', ...LOG_LEVELS] }],
     searchPlaceholder: 'Search message or context…',
@@ -289,7 +331,7 @@ export const EVENT_PAGES: EventPage[] = [
     title: 'Web vitals',
     nav: 'Web vitals',
     icon: SpeedometerIcon,
-    subtitle: 'Core Web Vitals per page (averages; "good" = share within LCP 2.5 s, INP 200 ms, CLS 0.1)',
+    subtitle: 'Core Web Vitals per page (averages across page loads)',
     keyLabel: 'Page',
     renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
@@ -309,10 +351,10 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'TTFB', align: 'right', render: (r) => dur(r.ttfb_ms) },
     ],
     summary: [
-      { label: 'Page views', render: (s) => num(s.views) },
-      { label: 'LCP good', render: (s) => pct(s.lcp_good), tone: (s) => (s.lcp_good === null ? 'default' : s.lcp_good >= 0.75 ? 'good' : 'warn') },
-      { label: 'INP good', render: (s) => pct(s.inp_good), tone: (s) => (s.inp_good === null ? 'default' : s.inp_good >= 0.75 ? 'good' : 'warn') },
-      { label: 'CLS good', render: (s) => pct(s.cls_good), tone: (s) => (s.cls_good === null ? 'default' : s.cls_good >= 0.75 ? 'good' : 'warn') },
+      { label: 'Page views', icon: SpeedometerIcon, render: (s) => num(s.views) },
+      { label: 'LCP good', icon: GaugeIcon, render: (s) => pct(s.lcp_good), tone: (s) => (s.lcp_good === null ? 'default' : s.lcp_good >= 0.75 ? 'good' : 'warn') },
+      { label: 'INP good', icon: LightningIcon, render: (s) => pct(s.inp_good), tone: (s) => (s.inp_good === null ? 'default' : s.inp_good >= 0.75 ? 'good' : 'warn') },
+      { label: 'CLS good', icon: CheckCircleIcon, render: (s) => pct(s.cls_good), tone: (s) => (s.cls_good === null ? 'default' : s.cls_good >= 0.75 ? 'good' : 'warn') },
     ],
     searchPlaceholder: 'Search page path…',
   },
@@ -338,9 +380,9 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
     summary: [
-      { label: 'Users', render: (s) => num(s.users) },
-      { label: 'Traces', render: (s) => num(s.traces) },
-      { label: 'Exceptions', render: (s) => num(s.exceptions), tone: (s) => (s.exceptions ? 'bad' : 'good') },
+      { label: 'Users', icon: UsersIcon, render: (s) => num(s.users) },
+      { label: 'Traces', icon: GitBranchIcon, render: (s) => num(s.traces) },
+      { label: 'Exceptions', icon: BugIcon, render: (s) => num(s.exceptions), tone: (s) => (s.exceptions ? 'bad' : 'good') },
     ],
     filters: [{ param: 'source', label: 'Type', options: ['all', 'request', 'command', 'job', 'schedule'] }],
     searchPlaceholder: 'Search user ID or trace…',

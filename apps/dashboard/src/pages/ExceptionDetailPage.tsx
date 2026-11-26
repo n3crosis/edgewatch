@@ -8,15 +8,15 @@ import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Link, { scopedPath } from '@/components/ScopedLink';
 import { BarChart } from '@/components/charts';
-import { CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, Stat, TimeAgo } from '@/components/common';
+import { CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, Stat, TimeAgo, useRowNavigate } from '@/components/common';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { LinkButton } from '@cloudflare/kumo/components/button';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Tabs } from '@cloudflare/kumo/components/tabs';
-import { WarningOctagonIcon } from '@phosphor-icons/react';
+import { BugIcon, ClockIcon, UsersIcon, WarningOctagonIcon } from '@phosphor-icons/react';
 import { api, USING_MOCK, useAsync } from '@/lib/api';
-import { ago, compact } from '@/lib/format';
-import { formatStackTrace } from '@/lib/ui-helpers';
+import { ago, bucketTime, compact } from '@/lib/format';
+import { formatStackTrace, splitClassName } from '@/lib/ui-helpers';
 
 export default function ExceptionDetailPage() {
   const { group = '' } = useParams();
@@ -24,19 +24,37 @@ export default function ExceptionDetailPage() {
   const { projectId } = useProject();
   const { environment } = useEnvironment();
   const [params] = useSearchParams();
+  const rowNav = useRowNavigate();
   const user = params.get('user') || undefined;
-  const [frameFilter, setFrameFilter] = useState<'all' | 'app'>('all');
-  const { data, error, loading } = useAsync(() => api.exception(group, range, user), [group, range, user]);
+  const [frameFilter, setFrameFilter] = useState<'all' | 'app'>('app');
+  const { data, error, loading, fetching } = useAsync(() => api.exception(group, range, user), [group, range, user], { keepPreviousData: true });
 
   if (error) return <ErrorState error={error} />;
   if (loading) return <Loading />;
-  if (!data) return <Empty>Exception group not found.</Empty>;
+  if (!data) {
+    return (
+      <>
+        <PageHeader back={{ to: groupListLink('/exceptions', params), label: 'Exceptions' }} title="Exception not found" />
+        <Panel>
+          <Empty
+            icon={<BugIcon size={32} className="text-kumo-subtle" />}
+            description="No occurrences for this exception group exist in the selected project or time window."
+          >
+            Exception group not found.
+          </Empty>
+        </Panel>
+      </>
+    );
+  }
 
+  const { short, namespace } = splitClassName(data.class);
+  const win = timeWindow(range);
   const appFrames = data.stack.filter((f) => !f.file.startsWith('vendor/'));
   const hasVendorFrames = appFrames.length > 0 && appFrames.length < data.stack.length;
+  const effectiveFilter = hasVendorFrames ? frameFilter : 'all';
   const indexedFrames = data.stack
     .map((frame, index) => ({ frame, index, vendor: frame.file.startsWith('vendor/') }))
-    .filter((item) => frameFilter === 'all' || !item.vendor);
+    .filter((item) => effectiveFilter === 'all' || !item.vendor);
   const stackText = formatStackTrace(
     data.class,
     data.message,
@@ -47,15 +65,16 @@ export default function ExceptionDetailPage() {
     <div className="space-y-6">
       <PageHeader
         back={{ to: groupListLink('/exceptions', params), label: 'Exceptions' }}
-        documentTitle={data.class.split('\\').pop() || data.class}
-        title={<span className="font-mono text-kumo-danger">{data.class}</span>}
+        documentTitle={short}
+        title={<span className="font-mono text-kumo-danger">{short}</span>}
         subtitle={
           <div className="mt-1.5 space-y-2">
             <div className="flex flex-wrap items-center gap-2.5">
               <Badge variant={data.handled ? 'secondary' : 'error'}>{exceptionHandling(data)}</Badge>
+              {namespace && <span className="font-mono text-xs text-kumo-subtle">{namespace}</span>}
               {user && <Badge variant="outline" className="font-mono">User #{user}</Badge>}
-              <span className="text-kumo-default">{data.message}</span>
             </div>
+            <div className="text-sm text-kumo-default">{data.message}</div>
             {data.handled_count !== undefined && data.unhandled_count !== undefined && (
               <div className="text-xs text-kumo-subtle">
                 {data.unhandled_count} unhandled · {data.handled_count} handled occurrences in this scope
@@ -73,26 +92,26 @@ export default function ExceptionDetailPage() {
       />
 
       <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label={`Events (${rangeLabel(range)})`} value={compact(data.count)} tone="bad" />
-        <Stat label="Users affected" value={compact(data.users)} />
-        <Stat label="First seen" value={ago(data.first_seen)} hint={new Date(data.first_seen).toLocaleString()} />
-        <Stat label="Last seen" value={ago(data.last_seen)} hint={new Date(data.last_seen).toLocaleString()} />
+        <Stat label={`Events (${rangeLabel(range)})`} icon={<BugIcon size={14} />} value={compact(data.count)} tone="bad" />
+        <Stat label="Users affected" icon={<UsersIcon size={14} />} value={compact(data.users)} />
+        <Stat label="First seen" icon={<ClockIcon size={14} />} value={ago(data.first_seen)} hint={new Date(data.first_seen).toLocaleString()} />
+        <Stat label="Last seen" icon={<ClockIcon size={14} />} value={ago(data.last_seen)} hint={new Date(data.last_seen).toLocaleString()} />
       </section>
 
       <section className="grid grid-cols-1 gap-6 [&>*]:min-w-0 xl:grid-cols-2">
         <Panel
-          title={`Stack trace (${indexedFrames.length}${frameFilter === 'app' ? ` of ${data.stack.length}` : ''} frames)`}
+          title={`Stack trace (${indexedFrames.length}${effectiveFilter === 'app' ? ` of ${data.stack.length}` : ''} frames)`}
           actions={
             <div className="flex items-center gap-2.5">
               {hasVendorFrames && (
                 <Tabs
                   variant="segmented"
                   size="sm"
-                  value={frameFilter}
+                  value={effectiveFilter}
                   onValueChange={(value) => setFrameFilter(value as 'all' | 'app')}
                   tabs={[
-                    { value: 'all', label: `All (${data.stack.length})` },
                     { value: 'app', label: `App (${appFrames.length})` },
+                    { value: 'all', label: `All (${data.stack.length})` },
                   ]}
                 />
               )}
@@ -117,41 +136,45 @@ export default function ExceptionDetailPage() {
         </Panel>
 
         <div className="space-y-6">
-          <Panel title={`Occurrences over ${rangeLabel(range)}`}>
+          <Panel fetching={!loading && fetching} title={`Occurrences over ${rangeLabel(range)}`}>
             <div className="p-6">
               <BarChart
                 height={168}
                 tone="danger"
                 unit="occurrences"
                 series={data.trend.map((v, i) => ({
-                  label: new Date(timeWindow(range)!.since + i * timeWindow(range)!.width).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  label: win ? bucketTime(win.since + i * win.width, range) : `#${i + 1}`,
                   value: v,
                 }))}
               />
             </div>
           </Panel>
 
-          <Panel title="Recent occurrences">
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>When</Table.Head>
-                  <Table.Head>Trace</Table.Head>
-                  <Table.Head>User</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {data.occurrences.slice(0, 8).map((o) => (
-                  <Table.Row key={o.trace_id} className="transition-colors hover:bg-kumo-tint/50">
-                    <Table.Cell className="text-xs"><TimeAgo iso={o.timestamp} /></Table.Cell>
-                    <Table.Cell className="max-w-xs truncate">
-                      <Link to={`/traces/${o.trace_id}`} className="font-mono text-xs text-kumo-link hover:underline">{o.name}</Link>
-                    </Table.Cell>
-                    <Table.Cell className="font-mono text-xs text-kumo-subtle">{o.user ? `#${o.user}` : '—'}</Table.Cell>
+          <Panel fetching={!loading && fetching} title="Recent occurrences">
+            {data.occurrences.length === 0 ? (
+              <Empty icon={<BugIcon size={28} className="text-kumo-subtle" />}>No recent occurrences in this window.</Empty>
+            ) : (
+              <Table>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head>When</Table.Head>
+                    <Table.Head>Trace</Table.Head>
+                    <Table.Head>User</Table.Head>
                   </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
+                </Table.Header>
+                <Table.Body>
+                  {data.occurrences.slice(0, 8).map((o) => (
+                    <Table.Row key={o.trace_id} onClick={rowNav(`/traces/${o.trace_id}`)} className="cursor-pointer transition-colors hover:bg-kumo-tint/50">
+                      <Table.Cell className="text-xs"><TimeAgo iso={o.timestamp} /></Table.Cell>
+                      <Table.Cell className="max-w-xs truncate">
+                        <Link to={`/traces/${o.trace_id}`} className="font-mono text-xs text-kumo-link hover:underline">{o.name}</Link>
+                      </Table.Cell>
+                      <Table.Cell className="font-mono text-xs text-kumo-subtle">{o.user ? `#${o.user}` : '—'}</Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            )}
           </Panel>
         </div>
       </section>

@@ -4,19 +4,30 @@ import { scopedPath } from '@/components/ScopedLink';
 import { timeWindow } from '@edgewatch/shared/time-window';
 import Link from '@/components/ScopedLink';
 import { BarChart, Legend, LineChart } from '@/components/charts';
-import { Empty, ErrorState, Loading, MethodBadge, PageHeader, PageSkeleton, Panel, Sql, Stat } from '@/components/common';
+import { Empty, ErrorState, Loading, MethodBadge, PageHeader, PageSkeleton, Panel, Sql, Stat, useRowNavigate } from '@/components/common';
 import { Badge } from '@cloudflare/kumo/components/badge';
-import { LinkButton } from '@cloudflare/kumo/components/button';
+import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Table } from '@cloudflare/kumo/components/table';
-import { PlugIcon, PulseIcon } from '@phosphor-icons/react';
+import {
+  ArrowRightIcon,
+  ArrowsLeftRightIcon,
+  BugIcon,
+  CheckCircleIcon,
+  DatabaseIcon,
+  PlugIcon,
+  PulseIcon,
+  TimerIcon,
+  WarningCircleIcon,
+} from '@phosphor-icons/react';
 import { api, useAsync } from '@/lib/api';
-import { compact, ms, percent, time } from '@/lib/format';
+import { bucketTime, compact, ms, percent } from '@/lib/format';
 import { useRange, rangeLabel } from '@/lib/range';
 
 function ViewAll({ to, label = 'View all' }: { to: string; label?: string }) {
   return (
-    <Link to={to} className="text-xs font-medium text-kumo-link hover:underline">
-      {label} →
+    <Link to={to} className="inline-flex items-center gap-1 text-xs font-medium text-kumo-link hover:underline">
+      <span>{label}</span>
+      <ArrowRightIcon size={12} aria-hidden />
     </Link>
   );
 }
@@ -27,9 +38,10 @@ function splitRoute(route: string): { method: string | null; path: string } {
 }
 
 export default function OverviewPage() {
-  const { range } = useRange();
+  const { range, setRange } = useRange();
   const { projectId } = useProject();
-  const { environment } = useEnvironment();
+  const { environment, setEnvironment } = useEnvironment();
+  const rowNav = useRowNavigate();
   const { data, error, loading, fetching } = useAsync(() => api.overview(range), [range], { keepPreviousData: true });
   const exceptions = useAsync(() => api.exceptions(range), [range], { keepPreviousData: true });
   const queries = useAsync(() => api.queries(range), [range], { keepPreviousData: true });
@@ -43,11 +55,27 @@ export default function OverviewPage() {
         <Panel>
           <Empty
             icon={<PulseIcon size={36} className="text-kumo-subtle" />}
-            description="Point the Laravel Nightwatch agent at this project's ingest URL and telemetry will appear here within seconds."
+            description={
+              environment
+                ? `No telemetry arrived for ${environment} in this window. Try switching environments or widening the time range.`
+                : "Point the Laravel Nightwatch agent at this project's ingest URL and telemetry will appear here within seconds."
+            }
             action={
-              <LinkButton href={scopedPath('/setup', projectId, range, environment)} variant="primary" icon={PlugIcon}>
-                Connect an app
-              </LinkButton>
+              <div className="flex flex-wrap items-center justify-center gap-2.5">
+                {environment && (
+                  <Button variant="secondary" onClick={() => setEnvironment(undefined)}>
+                    All environments
+                  </Button>
+                )}
+                {range !== '7d' && (
+                  <Button variant="secondary" onClick={() => setRange('7d')}>
+                    Try last 7d
+                  </Button>
+                )}
+                <LinkButton href={scopedPath('/setup', projectId, range, environment)} variant="primary" icon={PlugIcon}>
+                  Connect an app
+                </LinkButton>
+              </div>
             }
           >
             {`No traffic in the ${rangeLabel(range)}`}
@@ -68,23 +96,26 @@ export default function OverviewPage() {
       <PageHeader title="Dashboard" subtitle={`Application health over the ${rangeLabel(range)}`} />
 
       <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
-        <Stat label="Requests" value={compact(data.requests)} hint={`${rpm.toFixed(1)} / min`} to="/requests" />
+        <Stat label="Requests" icon={<ArrowsLeftRightIcon size={14} />} value={compact(data.requests)} hint={`${rpm.toFixed(1)} / min`} to="/requests" />
         <Stat
           label="Error rate"
+          icon={<WarningCircleIcon size={14} />}
           value={percent(data.error_rate)}
           tone={data.error_rate > 0.01 ? 'bad' : 'good'}
           hint="5xx responses"
           to="/traces?source=request&status=5xx"
         />
         <Stat
-          label="p95 latency"
+          label="p95 response time"
+          icon={<TimerIcon size={14} />}
           value={ms(data.p95_ms)}
           tone={data.p95_ms > 500 ? 'warn' : 'default'}
-          hint={`peak ${ms(peakLatency)}`}
+          hint={`95% faster · peak ${ms(peakLatency)}`}
           to="/traces?source=request&min_duration_ms=500"
         />
         <Stat
           label="Exceptions"
+          icon={<BugIcon size={14} />}
           value={compact(data.exceptions)}
           tone={data.exceptions > 0 ? 'bad' : 'good'}
           hint={data.exceptions > 0 ? 'recorded in window' : 'none recorded'}
@@ -92,6 +123,7 @@ export default function OverviewPage() {
         />
         <Stat
           label="Slow queries"
+          icon={<DatabaseIcon size={14} />}
           value={compact(data.slow_queries)}
           hint="> 100ms"
           tone={data.slow_queries > 0 ? 'warn' : 'good'}
@@ -106,7 +138,7 @@ export default function OverviewPage() {
           actions={<Legend items={[{ label: 'Requests', className: 'bg-kumo-brand/65' }, { label: 'Errors', className: 'bg-kumo-danger' }]} />}
         >
           <div className="p-6">
-            <BarChart series={data.series.map((s) => ({ label: time(s.ts), value: s.requests, highlight: s.errors }))} />
+            <BarChart series={data.series.map((s) => ({ label: bucketTime(s.ts, range), value: s.requests, highlight: s.errors }))} />
           </div>
         </Panel>
         <Panel
@@ -115,7 +147,7 @@ export default function OverviewPage() {
           actions={<span className="text-xs tabular-nums text-kumo-subtle">peak {ms(peakLatency)}</span>}
         >
           <div className="p-6">
-            <LineChart values={data.series.map((s) => s.p95_ms)} labels={data.series.map((s) => time(s.ts))} format={ms} />
+            <LineChart values={data.series.map((s) => s.p95_ms)} labels={data.series.map((s) => bucketTime(s.ts, range))} format={ms} />
           </div>
         </Panel>
       </section>
@@ -123,7 +155,7 @@ export default function OverviewPage() {
       <section className="grid grid-cols-1 gap-6 [&>*]:min-w-0 xl:grid-cols-3">
         <Panel fetching={!loading && fetching} title="Top routes" className="xl:col-span-2" actions={<ViewAll to="/requests" label="All routes" />}>
           {data.top_routes.length === 0 ? (
-            <Empty>No routes recorded in this window.</Empty>
+            <Empty icon={<ArrowsLeftRightIcon size={32} className="text-kumo-subtle" />}>No routes recorded in this window.</Empty>
           ) : (
             <Table>
               <Table.Header>
@@ -138,10 +170,11 @@ export default function OverviewPage() {
                 {data.top_routes.map((r) => {
                   const { method, path } = splitRoute(r.route);
                   const share = Math.max(4, Math.round((r.requests / maxRouteRequests) * 100));
+                  const target = `/traces?${new URLSearchParams({ q: r.route, source: 'request' })}`;
                   return (
-                    <Table.Row key={r.route} className="transition-colors hover:bg-kumo-tint/50">
+                    <Table.Row key={r.route} onClick={rowNav(target)} className="cursor-pointer transition-colors hover:bg-kumo-tint/50">
                       <Table.Cell className="max-w-md">
-                        <Link to={`/traces?${new URLSearchParams({ q: r.route, source: 'request' })}`} className="inline-flex max-w-full items-center gap-2.5 hover:underline">
+                        <Link title={r.route} to={target} className="inline-flex max-w-full items-center gap-2.5 hover:underline">
                           {method && <MethodBadge method={method} />}
                           <span className="truncate font-mono text-xs text-kumo-strong">{path}</span>
                         </Link>
@@ -175,7 +208,7 @@ export default function OverviewPage() {
             ) : exceptions.loading && !exceptions.data ? (
               <Loading rows={3} />
             ) : exceptions.data?.length === 0 ? (
-              <Empty>No exceptions</Empty>
+              <Empty icon={<CheckCircleIcon size={32} className="text-kumo-success" />}>No exceptions</Empty>
             ) : (
               <div className="divide-y divide-kumo-hairline">
                 {exceptions.data?.slice(0, 3).map((e) => (
@@ -184,7 +217,7 @@ export default function OverviewPage() {
                       <span className="truncate font-mono text-xs font-medium text-kumo-danger">{e.class.split('\\').pop()}</span>
                       <Badge variant={e.handled ? 'secondary' : 'error'} className="shrink-0 tabular-nums">{e.count}×</Badge>
                     </div>
-                    <div className="mt-1.5 truncate text-xs text-kumo-subtle">{e.message}</div>
+                    <div title={e.message} className="mt-1.5 truncate text-xs text-kumo-subtle">{e.message}</div>
                   </Link>
                 ))}
               </div>
@@ -197,7 +230,7 @@ export default function OverviewPage() {
             ) : queries.loading && !queries.data ? (
               <Loading rows={3} />
             ) : queries.data?.length === 0 ? (
-              <Empty>No queries</Empty>
+              <Empty icon={<DatabaseIcon size={32} className="text-kumo-subtle" />}>No queries</Empty>
             ) : (
               <div className="divide-y divide-kumo-hairline">
                 {queries.data &&

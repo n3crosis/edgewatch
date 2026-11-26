@@ -1,7 +1,7 @@
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { ArrowSquareOutIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowSquareOutIcon, ClockIcon, CloudIcon, FolderSimpleIcon, HardDrivesIcon, ListBulletsIcon, UserIcon, XIcon } from '@phosphor-icons/react';
 import { useRef } from 'react';
 import { scopedPath } from './ScopedLink';
 import { CopyButton, Empty, ErrorState, Loading } from './common';
@@ -75,28 +75,30 @@ export default function LogInspector({
         ) : loading ? (
           <Loading />
         ) : !data ? (
-          <Empty>This log entry is unavailable in the selected project, environment, user or time window. It may have expired.</Empty>
+          <Empty icon={<ListBulletsIcon size={32} className="text-kumo-subtle" />}>
+            This log entry is unavailable in the selected project, environment, user or time window. It may have expired.
+          </Empty>
         ) : (
           <div className="space-y-6 text-sm">
             <dl className="grid grid-cols-2 gap-x-8 gap-y-4 rounded-xl border border-kumo-hairline bg-kumo-elevated/60 p-5 sm:grid-cols-3">
               <div>
-                <dt className="text-xs font-medium text-kumo-subtle">Timestamp</dt>
+                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><ClockIcon size={13} aria-hidden />Timestamp</dt>
                 <dd className="mt-1 font-mono text-xs text-kumo-strong">{new Date(data.timestamp).toLocaleString()}</dd>
               </div>
               <div>
-                <dt className="text-xs font-medium text-kumo-subtle">Project</dt>
+                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><FolderSimpleIcon size={13} aria-hidden />Project</dt>
                 <dd className="mt-1 font-mono text-xs text-kumo-strong">{data.project_id}</dd>
               </div>
               <div>
-                <dt className="text-xs font-medium text-kumo-subtle">Environment</dt>
+                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><CloudIcon size={13} aria-hidden />Environment</dt>
                 <dd className="mt-1 text-xs text-kumo-strong">{data.environment || 'Unknown'}</dd>
               </div>
               <div>
-                <dt className="text-xs font-medium text-kumo-subtle">Server</dt>
+                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><HardDrivesIcon size={13} aria-hidden />Server</dt>
                 <dd className="mt-1 font-mono text-xs text-kumo-strong">{data.server || 'Not captured'}</dd>
               </div>
               <div>
-                <dt className="text-xs font-medium text-kumo-subtle">User</dt>
+                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><UserIcon size={13} aria-hidden />User</dt>
                 <dd className="mt-1 font-mono text-xs text-kumo-strong">{data.user ? `#${data.user}` : 'Not captured'}</dd>
               </div>
             </dl>

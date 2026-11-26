@@ -1,3 +1,5 @@
+import { timeWindow } from '@edgewatch/shared/time-window';
+
 export function ms(value: number): string {
   if (value >= 1000) return `${(value / 1000).toFixed(2)}s`;
   if (value >= 100) return `${Math.round(value)}ms`;
@@ -29,6 +31,17 @@ export function ago(iso: string, now = Date.now()): string {
 
 export function time(iso: string): string {
   return new Date(iso).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+/** Formats a chart bucket timestamp with the date included for multi-day windows (e.g. 3d / 7d). */
+export function bucketTime(value: string | number, range: string): string {
+  const date = new Date(value);
+  const win = timeWindow(range);
+  const multiDay = win ? win.now - win.since > 86_400_000 : range === '7d';
+  if (multiDay) {
+    return date.toLocaleString('en', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+  return date.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 export function percentile(values: number[], p: number): number {

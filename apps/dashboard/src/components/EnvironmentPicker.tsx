@@ -1,7 +1,7 @@
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
-import { WarningCircleIcon } from '@phosphor-icons/react';
+import { GlobeIcon, WarningCircleIcon } from '@phosphor-icons/react';
 import { useLocation } from 'react-router-dom';
 import { api, useAsync } from '@/lib/api';
 import { useEnvironment } from '@/lib/environment';
@@ -16,7 +16,10 @@ export default function EnvironmentPicker() {
     return (
       <Tooltip asChild content="This page shows project-wide data across all environments.">
         <span className="inline-flex">
-          <Badge variant="outline">Project-wide</Badge>
+          <Badge variant="outline" className="inline-flex items-center gap-1.5">
+            <GlobeIcon size={12} aria-hidden />
+            <span>Project-wide</span>
+          </Badge>
         </span>
       </Tooltip>
     );
