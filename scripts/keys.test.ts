@@ -20,7 +20,7 @@ describe('keys', () => {
     expect(() => parseDuration('soon')).toThrow(KeyError);
   });
 
-  test('creates hashed keys with prefixes, expiry, origins and an audit entry; never stores the raw key', async () => {
+  test('creates hashed keys with prefixes, expiry and an audit entry; never stores the raw key', async () => {
     const store = memoryStore();
     const { key, id, record: r } = await createKey(store, { project: 'shop', scopes: ['ingest'], name: 'server', expiresIn: 86_400 }, NOW);
     expect(key).toStartWith('ew_live_');
@@ -28,10 +28,9 @@ describe('keys', () => {
     expect(record(store, key)).toEqual({ project_id: 'shop', name: 'server', scopes: ['ingest'], created_at: NOW, expires_at: NOW + 86_400 });
     expect([...store.data.values()].some((v) => v.includes(key))).toBe(false);
     expect(r.expires_at).toBe(NOW + 86_400);
-    expect((await createKey(store, { project: 'shop', scopes: ['browser'], origins: ['https://a.test'] }, NOW)).key).toStartWith('ew_pub_');
     expect((await createKey(store, { project: 'shop', scopes: ['read'] }, NOW)).key).toStartWith('ew_read_');
     expect((await createKey(store, { project: 'shop', scopes: ['admin'] }, NOW)).record.scopes).toEqual(['admin']);
-    expect(await auditLog(store)).toHaveLength(4);
+    expect(await auditLog(store)).toHaveLength(3);
     await expect(createKey(store, { project: 'shop', scopes: ['invalid'] })).rejects.toThrow('Invalid scope invalid');
     await expect(createKey(store, { project: 'bad project', scopes: ['read'] })).rejects.toThrow('Invalid project');
   });

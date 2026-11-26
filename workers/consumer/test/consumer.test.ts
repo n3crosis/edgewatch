@@ -406,17 +406,6 @@ describe('scheduled-task records', () => {
   });
 });
 
-describe('web-vital records', () => {
-  it('stores one row per page view with each metric', async () => {
-    const W = '019aa7b1-35fb-7000-8000-0000000000w1';
-    await deliver(message([
-      { v: 1, t: 'web-vital', ...base, trace_id: W, execution_source: 'browser', path: '/checkout', lcp: 1800, inp: 120, cls: 0.02, fcp: 900, ttfb: null },
-    ], { project_id: 'proj_vitals', trace_id: W }));
-    const row = await env.DB.prepare("SELECT path, lcp_ms, inp_ms, cls, fcp_ms, ttfb_ms FROM web_vitals WHERE project_id = 'proj_vitals'").first();
-    expect(row).toEqual({ path: '/checkout', lcp_ms: 1800, inp_ms: 120, cls: 0.02, fcp_ms: 900, ttfb_ms: null });
-  });
-});
-
 describe('log records', () => {
   it('stores level, PII-scrubbed message and truncated context', async () => {
     const L = '019aa7b1-35fb-7000-8000-0000000000l1';

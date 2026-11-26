@@ -56,7 +56,7 @@ jobs:
           docker logs "$container"
           exit 1
 
-      - name: E2E (agent-format batches + browser events -> ingest -> queue -> consumer -> D1/R2 -> api, several projects)
+      - name: E2E (agent-format batches -> ingest -> queue -> consumer -> D1/R2 -> api, several projects)
         run: bun run e2e
 
       - name: Upload e2e logs

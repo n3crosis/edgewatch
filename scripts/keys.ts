@@ -4,7 +4,7 @@
  * key is printed once and never stored. A key's id is the first 12 hex characters of its hash. Every change is
  * appended to an audit log in the same namespace (audit:<ms>:<random>).
  *
- *   keys create <default_project> [ingest|read|browser|admin[,...]] [name] [--expires 90d] [--origins https://a,https://b]
+ *   keys create <default_project> [ingest|read|admin[,...]] [name] [--expires 90d]
  *   keys list
  *   keys revoke <id>
  *   keys rotate <id> [--grace 7d]      new key with the same project, scopes and name; the old one expires after the grace
@@ -20,15 +20,14 @@ import { fileURLToPath } from 'node:url';
 import { connectPostgres } from '../packages/shared/src/postgres-js';
 import { SqlKeyStore } from '../packages/shared/src/sql-keystore';
 
-export type Scope = 'ingest' | 'read' | 'browser' | 'admin';
-const SCOPES: Scope[] = ['ingest', 'read', 'browser', 'admin'];
+export type Scope = 'ingest' | 'read' | 'admin';
+const SCOPES: Scope[] = ['ingest', 'read', 'admin'];
 
 export interface KeyRecord {
   project_id: string;
   name: string;
   scopes: Scope[];
   disabled?: boolean;
-  allowed_origins?: string[];
   created_at?: number;
   expires_at?: number;
   revoked_at?: number;
@@ -77,7 +76,6 @@ export interface CreateOptions {
   scopes: string[];
   name?: string;
   expiresIn?: number;
-  origins?: string[];
 }
 
 export async function createKey(store: KeyStore, o: CreateOptions, now = Date.now() / 1000, action: 'create' | 'rotate' = 'create') {
@@ -85,7 +83,7 @@ export async function createKey(store: KeyStore, o: CreateOptions, now = Date.no
   const bad = o.scopes.filter((s) => !(SCOPES as string[]).includes(s));
   if (!o.scopes.length || bad.length) throw new KeyError(`Invalid scope ${bad.join(', ') || '(none)'}: use ${SCOPES.join(', ')}.`);
   const scopes = o.scopes as Scope[];
-  const prefix = scopes.includes('ingest') ? 'ew_live' : scopes.includes('browser') ? 'ew_pub' : 'ew_read';
+  const prefix = scopes.includes('ingest') ? 'ew_live' : 'ew_read';
   const key = `${prefix}_${randomBytes(24).toString('base64url')}`;
   const hash = sha256(key);
   const record: KeyRecord = {
@@ -94,7 +92,6 @@ export async function createKey(store: KeyStore, o: CreateOptions, now = Date.no
     scopes,
     created_at: Math.floor(now),
     ...(o.expiresIn ? { expires_at: Math.floor(now + o.expiresIn) } : {}),
-    ...(o.origins?.length ? { allowed_origins: o.origins } : {}),
   };
   await store.put(`apikey:${hash}`, JSON.stringify(record));
   const id = hash.slice(0, 12);
@@ -145,12 +142,12 @@ export async function revokeKey(store: KeyStore, id: string, now = Date.now() / 
   return updated;
 }
 
-/** New key with the same project, scopes, name, origins and lifetime; the old key expires after `grace` seconds (0 = now). */
+/** New key with the same project, scopes, name and lifetime; the old key expires after `grace` seconds (0 = now). */
 export async function rotateKey(store: KeyStore, id: string, grace: number, now = Date.now() / 1000) {
   const { kvKey, record } = await findKey(store, id);
   if (statusOf(record, now) !== 'active') throw new KeyError(`Key ${id} is ${statusOf(record, now)}; create a new key instead.`);
   const lifetime = record.expires_at && record.created_at ? record.expires_at - record.created_at : undefined;
-  const fresh = await createKey(store, { project: record.project_id, scopes: record.scopes, name: record.name, expiresIn: lifetime, origins: record.allowed_origins }, now, 'rotate');
+  const fresh = await createKey(store, { project: record.project_id, scopes: record.scopes, name: record.name, expiresIn: lifetime }, now, 'rotate');
   const until = Math.floor(now + grace);
   const old: KeyRecord = grace > 0 ? { ...record, expires_at: Math.min(record.expires_at ?? until, until) } : { ...record, disabled: true, revoked_at: Math.floor(now) };
   await store.put(kvKey, JSON.stringify(old));
@@ -203,17 +200,17 @@ function flag(args: string[], name: string): string | undefined {
 }
 
 export async function main(argv: string[], store: KeyStore, out: (line: string) => void = console.log): Promise<number> {
-  const valued = new Set(['--expires', '--origins', '--grace', '--limit', '--persist-to', '--postgres']);
+  const valued = new Set(['--expires', '--grace', '--limit', '--persist-to', '--postgres']);
   const positional = argv.filter((a, i) => !a.startsWith('--') && !valued.has(argv[i - 1] ?? ''));
   const [command, ...rest] = positional;
   try {
     switch (command) {
       case 'create': {
         const [project, scopes = 'ingest', name] = rest;
-        if (!project) throw new KeyError('Usage: keys create <default_project> [scopes] [name] [--expires 90d] [--origins a,b]');
+        if (!project) throw new KeyError('Usage: keys create <default_project> [scopes] [name] [--expires 90d]');
         const expires = flag(argv, 'expires');
         const { key, id, record } = await createKey(store, {
-          project, scopes: scopes.split(','), name, expiresIn: expires ? parseDuration(expires) : undefined, origins: flag(argv, 'origins')?.split(','),
+          project, scopes: scopes.split(','), name, expiresIn: expires ? parseDuration(expires) : undefined,
         });
         out(`Key ${id} (${record.scopes.join(',')}) for ${project}${record.expires_at ? `, expires ${iso(record.expires_at)}` : ''}:\n${key}\nShown once; store it now.`);
         return 0;

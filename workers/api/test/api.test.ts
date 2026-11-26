@@ -819,24 +819,6 @@ describe('scheduled tasks endpoints', () => {
   });
 });
 
-describe('web vitals endpoints', () => {
-  beforeAll(async () => {
-    const view = (offset: number, path: string, lcp: number, inp: number, cls: number) =>
-      ({ v: 1, t: 'web-vital', ...base(`019aa7b1-35fb-7000-8000-0000000000v${offset}`, offset), execution_source: 'browser', path, lcp, inp, cls, fcp: 500, ttfb: 100 });
-    await processMessage({ project_id: 'proj_api', server: 'browser', received_at: Date.now(), trace_id: null, records: [
-      view(1, '/checkout', 2000, 100, 0.05), view(2, '/checkout', 4000, 300, 0.3), view(3, '/', 1000, 50, 0),
-    ] as unknown as IngestMessage['records'] }, env as never);
-  });
-
-  it('groups page views by path with averages and the share of good values', async () => {
-    const { json } = await get('/v1/projects/proj_api/web-vitals?range=1h');
-    const checkout = json.data.find((g: { key: string }) => g.key === '/checkout');
-    expect(checkout).toMatchObject({ count: 2, lcp_ms: 3000, inp_ms: 200, lcp_good: 0.5, inp_good: 0.5, cls_good: 0.5 });
-    expect(json.summary).toMatchObject({ views: 3, lcp_good: 0.6667 });
-    expect((await get('/v1/projects/proj_api/web-vitals/%2Fcheckout')).json.data).toHaveLength(2);
-  });
-});
-
 describe('logs endpoints', () => {
   beforeAll(async () => {
     const log = (offset: number, level: string, message: string) => ({ v: 1, t: 'log', ...base(T1, offset), level, message, context: '{"k":1}' });

@@ -391,8 +391,6 @@ export function summarize(records: NightwatchRecord[], message: Pick<IngestMessa
   } else if (root?.t === 'scheduled-task') {
     source = 'schedule';
     name = String(root.name);
-  } else if (!root && any?.execution_source === 'browser') {
-    name = `browser ${str(any.execution_preview) ?? ''}`.trim();
   }
 
   return {

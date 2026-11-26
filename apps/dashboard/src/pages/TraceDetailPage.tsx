@@ -22,7 +22,6 @@ import {
   GitForkIcon,
   HardDrivesIcon,
   MagnifyingGlassIcon,
-  PathIcon,
   TimerIcon,
   UserIcon,
   WarningIcon,
@@ -179,7 +178,7 @@ export default function TraceDetailPage() {
     );
   }
 
-  const { trace, spans, records, capture, repeated_queries: repeated = [], user, related = [] } = data;
+  const { trace, spans, capture, repeated_queries: repeated = [], user, related = [] } = data;
   const userLabel = user ? user.name || user.username || `#${user.id}` : trace.user ? `#${trace.user}` : '—';
   const queryTime = spans.filter((s) => s.type === 'query').reduce((a, s) => a + s.duration_ms, 0);
 
@@ -447,7 +446,6 @@ export default function TraceDetailPage() {
         </div>
       </Panel>
 
-      <Breadcrumbs records={records} />
       <SpanSheet
         fallbackId={eventTypeId}
         span={selected}
@@ -459,33 +457,3 @@ export default function TraceDetailPage() {
   );
 }
 
-interface Crumb { timestamp: number; category: string; message: string; level?: string }
-
-/** Browser breadcrumbs leading up to the first browser exception in this trace. */
-function Breadcrumbs({ records }: { records: { t?: unknown; browser?: unknown }[] }) {
-  const crumbs = records.flatMap((r) => {
-    const b = r.t === 'exception' && typeof r.browser === 'object' && r.browser !== null ? (r.browser as { breadcrumbs?: unknown }).breadcrumbs : null;
-    return Array.isArray(b) ? (b as Crumb[]) : [];
-  });
-  if (!crumbs.length) return null;
-  return (
-    <Panel
-      title={
-        <span className="flex items-center gap-2">
-          <PathIcon size={16} className="text-kumo-subtle" aria-hidden />
-          <span>Browser breadcrumbs</span>
-        </span>
-      }
-    >
-      <ol className="divide-y divide-kumo-hairline text-xs" data-testid="breadcrumbs">
-        {crumbs.map((c, i) => (
-          <li key={i} className="flex items-baseline gap-4 px-6 py-3.5">
-            <span className="w-24 shrink-0 font-mono tabular-nums text-kumo-subtle">{new Date(c.timestamp * 1000).toLocaleTimeString()}</span>
-            <Badge variant={c.level === 'error' ? 'error' : 'secondary'} className="shrink-0">{c.category}</Badge>
-            <span className="min-w-0 break-all text-kumo-default">{c.message}</span>
-          </li>
-        ))}
-      </ol>
-    </Panel>
-  );
-}

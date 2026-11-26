@@ -18,7 +18,6 @@ import {
   ArrowUpRightIcon,
   ArrowsLeftRightIcon,
   BriefcaseIcon,
-  BrowsersIcon,
   CalendarCheckIcon,
   CaretDoubleLeftIcon,
   CaretLeftIcon,
@@ -245,7 +244,6 @@ const SOURCE_META = {
   job: { variant: 'secondary', label: 'Job', icon: BriefcaseIcon },
   command: { variant: 'outline', label: 'Command', icon: TerminalIcon },
   schedule: { variant: 'warning', label: 'Scheduled', icon: CalendarCheckIcon },
-  browser: { variant: 'beta', label: 'Browser', icon: BrowsersIcon },
 } as const satisfies Record<ExecutionSource, { variant: 'info' | 'secondary' | 'outline' | 'warning' | 'beta'; label: string; icon: typeof ArrowsLeftRightIcon }>;
 
 export function SourceBadge({ source }: { source: ExecutionSource }) {

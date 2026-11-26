@@ -4,16 +4,12 @@ import {
   errorBody,
   errorFields,
   healthChecks,
-  BrowserBody,
-  BrowserEvent,
-  browserEventToRecord,
   IngestBody,
   signIngestToken,
   validateRecords,
   verifyIngestToken,
   type ApiKeyRecord,
   type IngestMessage,
-  type NightwatchRecord,
   log,
   type Scope,
   type BlobStore,
@@ -288,77 +284,5 @@ async function readBody(request: Request, maxBytes: number): Promise<string> {
   }
   return text + decoder.decode();
 }
-
-/**
- * Browser error telemetry (EdgeWatch extension; the Nightwatch wire format has no browser record type).
- * Auth is a public `browser`-scope key in ?key= (navigator.sendBeacon cannot set headers) or a Bearer header,
- * optionally restricted to allowed_origins. Events become Nightwatch-shaped exception records on the normal queue.
- */
-function browserCors(c: Context, origin: string | undefined) {
-  if (!origin) return;
-  c.header('Access-Control-Allow-Origin', origin);
-  c.header('Vary', 'Origin');
-  c.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  c.header('Access-Control-Allow-Headers', 'content-type, authorization');
-  c.header('Access-Control-Max-Age', '86400');
-}
-
-app.options('/api/browser', (c) => {
-  browserCors(c, c.req.header('origin'));
-  return c.body(null, 204);
-});
-
-app.post('/api/browser', async (c) => {
-  const origin = c.req.header('origin');
-  const raw = c.req.query('key') ?? bearer(c);
-  const key = raw ? await lookupKey(c.env, raw, 'browser') : null;
-  if (!key) return unauthenticated(c);
-  const tag = projectTag(c);
-  if (tag === false) return badTag(c);
-  const projectId = tag ?? key.project_id;
-  c.set('projectId', projectId);
-  if (key.allowed_origins?.length && (!origin || !key.allowed_origins.includes(origin))) {
-    return fail(c, 403, 'forbidden', 'Origin not allowed for this key.');
-  }
-  browserCors(c, origin);
-
-  const stopped = await quotaStop(c, projectId, true);
-  if (stopped) return stopped;
-
-  let text: string;
-  try {
-    text = await readBody(c.req.raw, 256_000);
-  } catch (e) {
-    return e instanceof PayloadTooLarge ? fail(c, 413, 'payload_too_large', 'Payload too large.') : fail(c, 400, 'invalid_request', 'Unable to decode request body.');
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return fail(c, 422, 'unprocessable', 'Body must be JSON.');
-  }
-  const body = BrowserBody.safeParse(parsed);
-  if (!body.success) return fail(c, 422, 'unprocessable', 'Body must be {"events": [...]} with 1-50 events.');
-
-  const records: NightwatchRecord[] = [];
-  let rejected = 0;
-  for (const event of body.data.events) {
-    const ok = BrowserEvent.safeParse(event);
-    if (ok.success) records.push(await browserEventToRecord(ok.data));
-    else rejected++;
-  }
-  if (records.length) {
-    try {
-      await enqueue(c.env, projectId, 'browser', records);
-    } catch (e) {
-      log('ingest', 'error', 'enqueue_failed', { request_id: c.get('requestId'), project_id: projectId, ...errorFields(e) });
-      c.header('Retry-After', '5');
-      return fail(c, 503, 'unavailable', 'Temporarily unable to accept data.');
-    }
-  }
-  c.set('logFields', { accepted: records.length, rejected });
-  return c.json({ ok: true, accepted: records.length, rejected });
-});
-
 
 export default app;

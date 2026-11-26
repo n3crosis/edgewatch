@@ -77,7 +77,7 @@ const NAV_SECTIONS = [
   { label: 'Overview', items: NAV.filter((item) => ['/', '/issues'].includes(item.to)) },
   { label: 'HTTP & Code', items: NAV.filter((item) => ['/requests', '/traces', '/exceptions', '/queries', '/logs'].includes(item.to)) },
   { label: 'Background & Services', items: NAV.filter((item) => ['/jobs', '/scheduled-tasks', '/commands', '/outgoing-requests', '/cache', '/mail', '/notifications'].includes(item.to)) },
-  { label: 'Audience', items: NAV.filter((item) => ['/users', '/web-vitals'].includes(item.to)) },
+  { label: 'Audience', items: NAV.filter((item) => ['/users'].includes(item.to)) },
   { label: 'Manage', items: NAV.filter((item) => ['/pipeline', '/setup', '/accounts'].includes(item.to)) },
 ];
 

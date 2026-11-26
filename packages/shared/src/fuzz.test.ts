@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BrowserBody, BrowserEvent, browserEventToRecord, INGEST_TOKEN_PREFIX, normalizeSql, scrubPii, signIngestToken, validateRecords, verifyIngestToken } from './index';
+import { INGEST_TOKEN_PREFIX, normalizeSql, scrubPii, signIngestToken, validateRecords, verifyIngestToken } from './index';
 
 /** Deterministic PRNG (mulberry32) so a failing case can be replayed from its seed. */
 function rng(seed: number) {
@@ -48,21 +48,6 @@ describe('fuzz: validateRecords', () => {
       }
       expect(Object.prototype).not.toHaveProperty('polluted');
     }
-  });
-});
-
-describe('fuzz: browser events', () => {
-  it('parses or rejects any event without throwing, and accepted events always convert to a bounded record', async () => {
-    for (let seed = 1; seed <= 300; seed++) {
-      const r = rng(seed);
-      const raw = { ...(r.value() as object), type: r.pick(['error', 'vitals', 'manual', 'x', undefined]), timestamp: r.pick([1_700_000_000, 'x', undefined]), message: r.pick(['boom', r.str(3000), undefined]), url: r.pick(['https://a.test/p?q=1', 'not a url', '', undefined]), breadcrumbs: r.pick([undefined, [], [{ timestamp: 1, category: 'c', message: r.str(600) }], Array(31).fill({ timestamp: 1, category: 'c', message: 'm' })]), vitals: r.pick([undefined, { lcp: 1 }, { lcp: -1 }, { cls: 'x' }]) };
-      const parsed = BrowserEvent.safeParse(raw);
-      if (!parsed.success) continue;
-      const rec = await browserEventToRecord(parsed.data);
-      expect(JSON.stringify(rec).length, `seed ${seed}`).toBeLessThan(64_000);
-      expect(['exception', 'web-vital']).toContain(rec.t);
-    }
-    expect(BrowserBody.safeParse({ events: Array(51).fill({}) }).success).toBe(false);
   });
 });
 

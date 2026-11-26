@@ -1,4 +1,4 @@
-export type ExecutionSource = 'request' | 'command' | 'job' | 'schedule' | 'browser';
+export type ExecutionSource = 'request' | 'command' | 'job' | 'schedule';
 export type { TimeRange as Range } from '@edgewatch/shared/time-window';
 import type { TimeRange as Range } from '@edgewatch/shared/time-window';
 

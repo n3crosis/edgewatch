@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BrowserEvent, browserEventToRecord, normalizeSql, signIngestToken, sqlHash, usableKey, validateRecords, verifyIngestToken } from './index';
+import { normalizeSql, signIngestToken, sqlHash, usableKey, validateRecords, verifyIngestToken } from './index';
 
 const fixtures: { name: string; sql: string; normalized: string }[] = JSON.parse(
   readFileSync(new URL('../../../fixtures/sql-normalization.json', import.meta.url), 'utf8'),
@@ -106,19 +106,3 @@ describe('usableKey', () => {
   });
 });
 
-describe('browser breadcrumbs and web vitals', () => {
-  const base = { timestamp: 1_700_000_000, url: 'https://shop.test/cart?x=1', release: 'v1' };
-  it('turns a vitals event into a web-vital record for the page path', async () => {
-    const r = await browserEventToRecord(BrowserEvent.parse({ ...base, type: 'vitals', vitals: { lcp: 1200, inp: 80, cls: 0.01, fcp: 600 } }));
-    expect(r).toMatchObject({ t: 'web-vital', path: '/cart', lcp: 1200, inp: 80, cls: 0.01, fcp: 600, ttfb: null, execution_source: 'browser' });
-  });
-  it('attaches PII-scrubbed breadcrumbs to browser exceptions and rejects oversized lists', async () => {
-    const crumb = { timestamp: 1, category: 'console', message: 'login failed for jane@example.com', data: { url: '/u?email=jane@example.com', n: 1 } };
-    const r = await browserEventToRecord(BrowserEvent.parse({ ...base, message: 'x', breadcrumbs: [crumb] }));
-    const crumbs = (r.browser as { breadcrumbs: { message: string; data: Record<string, unknown> }[] }).breadcrumbs;
-    expect(crumbs[0].message).not.toContain('jane@example.com');
-    expect(String(crumbs[0].data.url)).not.toContain('jane@example.com');
-    expect(BrowserEvent.safeParse({ ...base, message: 'x', breadcrumbs: Array(31).fill(crumb) }).success).toBe(false);
-    expect(BrowserEvent.safeParse({ ...base, type: 'vitals', vitals: { lcp: -1 } }).success).toBe(false);
-  });
-});

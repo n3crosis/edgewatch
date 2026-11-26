@@ -28,10 +28,6 @@ const CACHE_COUNTS = `sum(type = 'hit') AS hits, sum(type = 'miss') AS misses, s
 /** hits / (hits + misses), null when nothing was read. */
 const hitRatio = (col: string) => `CASE WHEN sum(${col} IN ('hit', 'miss')) > 0 THEN round(sum(${col} = 'hit') * 1.0 / sum(${col} IN ('hit', 'miss')), 4) END AS hit_ratio`;
 
-const VITALS = 'avg(lcp_ms) AS lcp_ms, avg(inp_ms) AS inp_ms, avg(cls) AS cls, avg(fcp_ms) AS fcp_ms, avg(ttfb_ms) AS ttfb_ms';
-const good = (col: string, max: number, name: string) => `round(sum(${col} <= ${max}) * 1.0 / nullif(count(${col}), 0), 4) AS ${name}`;
-const VITALS_GOOD = [good('lcp_ms', 2500, 'lcp_good'), good('inp_ms', 200, 'inp_good'), good('cls', 0.1, 'cls_good')].join(', ');
-
 export const EVENT_SPECS: EventSpec[] = [
   {
     path: '/jobs',
@@ -117,15 +113,6 @@ export const EVENT_SPECS: EventSpec[] = [
     summary: `count(*) AS logs, sum(level IN ('emergency', 'alert', 'critical', 'error')) AS errors, sum(level = 'warning') AS warnings`,
     filters: { level: 'level = ?' },
     search: ['message', 'context'],
-  },
-  {
-    // Core Web Vitals per page path. *_good is the share of page views within Google's "good" threshold.
-    path: '/web-vitals',
-    table: 'web_vitals',
-    group: 'path',
-    aggregates: `${VITALS}, ${VITALS_GOOD}`,
-    summary: `count(*) AS views, ${VITALS}, ${VITALS_GOOD}`,
-    search: ['path'],
   },
   {
     path: '/users',

@@ -5,7 +5,6 @@ export * from './sql';
 export * from './token';
 export * from './types';
 export * from './keys';
-export * from './browser';
 export * from './observability';
 export * from './storage';
 export * from './sql-dialect';

@@ -20,7 +20,6 @@ const SOURCES = [
   { value: 'job', label: 'Jobs' },
   { value: 'command', label: 'Commands' },
   { value: 'schedule', label: 'Scheduled' },
-  { value: 'browser', label: 'Browser' },
 ] as const;
 
 const STATUSES = [

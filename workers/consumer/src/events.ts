@@ -102,12 +102,6 @@ EVENT_TABLES.log = {
   row: (r) => [String(r.level).toLowerCase(), scrubPii(String(r.message)).slice(0, MAX_LOG_MESSAGE), logContext(r.context)],
 };
 
-/** EdgeWatch browser extension: one row per page view from @edgewatch/browser. */
-EVENT_TABLES['web-vital'] = {
-  table: 'web_vitals',
-  columns: ['path', 'lcp_ms', 'inp_ms', 'cls', 'fcp_ms', 'ttfb_ms'],
-  row: (r) => [String(r.path ?? '/').slice(0, 500), n(r.lcp), n(r.inp), n(r.cls), n(r.fcp), n(r.ttfb)],
-};
-
 /** Tables the retention job prunes besides traces. */
-export const RETAINED_TABLES = ['exceptions', 'queries', ...new Set(Object.values(EVENT_TABLES).flatMap((t) => (t ? [t.table] : [])))];
+/** `web_vitals` is no longer written (the browser extension was removed) but older rows still age out. */
+export const RETAINED_TABLES = ['exceptions', 'queries', ...new Set(Object.values(EVENT_TABLES).flatMap((t) => (t ? [t.table] : []))), 'web_vitals'];

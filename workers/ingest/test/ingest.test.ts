@@ -165,7 +165,7 @@ describe('POST /api/ingest', () => {
 
   const sized = (bytes: number) => {
     const base = JSON.stringify({ records: [] });
-    return base.slice(0, -1) + ' '.repeat(bytes - base.length) + '}';
+    return `${base.slice(0, -1)}${' '.repeat(bytes - base.length)}}`;
   };
   const streamed = (text: string) => new ReadableStream<Uint8Array>({
     start(controller) {
@@ -249,72 +249,6 @@ describe('over quota / rate limited (Nightwatch stop instruction)', () => {
   });
 });
 
-describe('POST /api/browser (EdgeWatch browser error extension)', () => {
-  const BROWSER_KEY = 'ew_pub_browser_key';
-  const LOCKED_KEY = 'ew_pub_locked_key';
-  const event = (extra: Record<string, unknown> = {}) => ({
-    type: 'error', timestamp: 1763750000.5, class: 'TypeError', message: "Cannot read properties of undefined (reading 'id') for jane@example.com",
-    stack: 'TypeError: ...\n    at app.js:10:5', file: 'https://shop.example.com/assets/app.js', line: 10, column: 5,
-    url: 'https://shop.example.com/checkout?step=2', user_agent: 'Mozilla/5.0', release: 'v42', ...extra,
-  });
-
-  beforeAll(async () => {
-    await env.API_KEYS.put(await apiKeyKvKey(BROWSER_KEY), JSON.stringify({ project_id: 'proj_1', name: 'browser', scopes: ['browser'] }));
-    await env.API_KEYS.put(await apiKeyKvKey(LOCKED_KEY), JSON.stringify({ project_id: 'proj_1', name: 'locked', scopes: ['browser'], allowed_origins: ['https://shop.example.com'] }));
-  });
-
-  it('answers 503 with Retry-After, without the cause, when the queue rejects browser events', async () => {
-    const failing = { send: async () => { throw new Error('queue-secret-91c'); }, sendBatch: async () => { throw new Error('queue-secret-91c'); } } as unknown as Queue<IngestMessage>;
-    const res = await app.fetch(new Request(`https://ingest.edgewatch.test/api/browser?key=${BROWSER_KEY}`, {
-      method: 'POST', headers: { 'content-type': 'text/plain;charset=UTF-8', origin: 'https://shop.example.com' }, body: JSON.stringify({ events: [event()] }),
-    }), { ...testEnv, INGEST_QUEUE: failing });
-    expect(res.status).toBe(503);
-    expect(res.headers.get('retry-after')).toBe('5');
-    expect(await res.text()).not.toContain('queue-secret-91c');
-  });
-
-  it('accepts sendBeacon-style text/plain posts with ?key= and queues Nightwatch-shaped exception records', async () => {
-    const res = await call(`/api/browser?key=${BROWSER_KEY}`, {
-      method: 'POST', headers: { 'content-type': 'text/plain;charset=UTF-8', origin: 'https://shop.example.com' },
-      body: JSON.stringify({ events: [event(), event({ trace_id: TRACE_A, handled: true }), { nope: true }] }),
-    });
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, accepted: 2, rejected: 1 });
-    expect(res.headers.get('access-control-allow-origin')).toBe('https://shop.example.com');
-
-    const records = sent.flatMap((m) => m.records ?? []);
-    expect(sent.every((m) => m.project_id === 'proj_1' && m.server === 'browser')).toBe(true);
-    expect(records[0]).toMatchObject({
-      v: 3, t: 'exception', server: 'browser', execution_source: 'browser', execution_preview: '/checkout', deploy: 'v42',
-      class: 'TypeError', file: 'https://shop.example.com/assets/app.js', line: 10, code: '0', handled: false,
-      browser: { type: 'error', column: 5, url: 'https://shop.example.com/checkout?step=2' },
-    });
-    expect(records[0]._group).toMatch(/^[0-9a-f]{32}$/);
-    expect(records[1].trace_id).toBe(TRACE_A);
-  });
-
-  it('answers CORS preflight', async () => {
-    const res = await call('/api/browser', { method: 'OPTIONS', headers: { origin: 'https://a.test', 'access-control-request-method': 'POST' } });
-    expect(res.status).toBe(204);
-    expect(res.headers.get('access-control-allow-methods')).toContain('POST');
-  });
-
-  it('rejects ingest keys, unknown keys and disallowed origins', async () => {
-    const body = JSON.stringify({ events: [event()] });
-    expect((await call(`/api/browser?key=${INGEST_KEY}`, { method: 'POST', body })).status).toBe(401);
-    expect((await call('/api/browser?key=nope', { method: 'POST', body })).status).toBe(401);
-    expect((await call(`/api/browser?key=${LOCKED_KEY}`, { method: 'POST', headers: { origin: 'https://evil.test' }, body })).status).toBe(403);
-    expect((await call(`/api/browser?key=${LOCKED_KEY}`, { method: 'POST', headers: { origin: 'https://shop.example.com' }, body })).status).toBe(200);
-  });
-
-  it('rejects malformed bodies and browser keys cannot use the agent endpoints', async () => {
-    expect((await call(`/api/browser?key=${BROWSER_KEY}`, { method: 'POST', body: 'nope' })).status).toBe(422);
-    expect((await call(`/api/browser?key=${BROWSER_KEY}`, { method: 'POST', body: '{"events":[]}' })).status).toBe(422);
-    expect((await call('/api/ingest', { method: 'POST', headers: { authorization: `Bearer ${BROWSER_KEY}` }, body: '{"records":[]}' })).status).toBe(401);
-  });
-});
-
 describe('project tag (single-tenant)', () => {
   const OTHER_KEY = 'ew_live_second_app';
   beforeAll(async () => {
@@ -350,16 +284,6 @@ describe('project tag (single-tenant)', () => {
     expect((await ingest(token, { records: [query(TRACE_A)] })).status).toBe(200);
     expect(sent.map((m) => m.project_id)).toEqual(['billing']);
   });
-
-  it('tags browser errors too', async () => {
-    await env.API_KEYS.put(await apiKeyKvKey('ew_pub_tagged'), JSON.stringify({ project_id: 'proj_1', name: 'web', scopes: ['browser'] }));
-    const res = await call('/api/browser?key=ew_pub_tagged&project=marketing-site', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ events: [{ type: 'error', timestamp: Date.now() / 1000, class: 'TypeError', message: 'x', file: 'https://m.test/a.js', line: 1, url: 'https://m.test/' }] }),
-    });
-    expect(res.status).toBe(200);
-    expect(sent.map((m) => m.project_id)).toEqual(['marketing-site']);
-  });
 });
 
 describe('error bodies, request ids and key validation', () => {
@@ -379,10 +303,9 @@ describe('error bodies, request ids and key validation', () => {
     expect(missing.headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it('rejects a missing, malformed, unknown, read-scope, browser-scope or disabled key', async () => {
+  it('rejects a missing, malformed, unknown, read-scope or disabled key', async () => {
     await env.API_KEYS.put(await apiKeyKvKey('ew_live_disabled'), JSON.stringify({ project_id: 'proj_1', name: 'off', scopes: ['ingest'], disabled: true }));
-    await env.API_KEYS.put(await apiKeyKvKey('ew_pub_browser'), JSON.stringify({ project_id: 'proj_1', name: 'pub', scopes: ['browser'] }));
-    for (const auth of [undefined, 'Basic abc', 'Bearer ', 'Bearer ew_live_unknown', `Bearer ${READ_KEY}`, 'Bearer ew_pub_browser', 'Bearer ew_live_disabled']) {
+    for (const auth of [undefined, 'Basic abc', 'Bearer ', 'Bearer ew_live_unknown', `Bearer ${READ_KEY}`, 'Bearer ew_live_disabled']) {
       const res = await call('/api/ingest', { method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: auth } : {}) }, body: records() });
       expect(res.status, String(auth)).toBe(401);
       expect(((await res.json()) as any).error.code).toBe('unauthenticated');
@@ -449,13 +372,12 @@ describe('error bodies, request ids and key validation', () => {
     expect(auth.status).toBe(200);
   });
 
-  it('answers 429 over_quota on agent-auth, ingest and browser for a blocked project', async () => {
-    await env.API_KEYS.put(await apiKeyKvKey('ew_live_q'), JSON.stringify({ project_id: 'proj_quota', name: 'q', scopes: ['ingest', 'browser'] }));
+  it('answers 429 over_quota on agent-auth and ingest for a blocked project', async () => {
+    await env.API_KEYS.put(await apiKeyKvKey('ew_live_q'), JSON.stringify({ project_id: 'proj_quota', name: 'q', scopes: ['ingest'] }));
     await env.API_KEYS.put('project:proj_quota', JSON.stringify({ over_quota_until: Date.now() / 1000 + 120 }));
     const auth = await call('/api/agent-auth', { method: 'POST', headers: { authorization: 'Bearer ew_live_q' }, body: '{}' });
     const data = await ingest('ew_live_q', records());
-    const browser = await call('/api/browser?key=ew_live_q', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ events: [] }) });
-    for (const res of [auth, data, browser]) {
+    for (const res of [auth, data]) {
       expect(res.status).toBe(429);
       const body = (await res.json()) as any;
       expect(body).toMatchObject({ error: { code: 'over_quota' }, stop: true });

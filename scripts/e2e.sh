@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Live end-to-end check, entirely local (wrangler dev / Miniflare, no Cloudflare account needed):
-#   agent-style gzip batches (the official Nightwatch agent's wire format) + browser events --> workers/ingest --Queue-->
+#   agent-style gzip batches (the official Nightwatch agent's wire format) --> workers/ingest --Queue-->
 #   workers/consumer --> D1 + R2 --> workers/api, across several projects sent with one owner key, checking that the
 #   project filter returns each project's own data. The official agent itself is exercised by scripts/nightwatch-agent.sh.
 #
@@ -104,10 +104,8 @@ kvput() { # key, json value: into KV, or into Postgres kv_store with E2E_KEYS=sq
 
 step "Creating API keys in local KV"
 INGEST_KEY="ew_live_e2e_$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-BROWSER_KEY="ew_pub_e2e_$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 READ_KEY="ew_read_e2e_$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 kvput "apikey:$(sha256 "$INGEST_KEY")" "{\"project_id\":\"$PROJECT\",\"name\":\"e2e\",\"scopes\":[\"ingest\"]}"
-kvput "apikey:$(sha256 "$BROWSER_KEY")" "{\"project_id\":\"$PROJECT\",\"name\":\"e2e-browser\",\"scopes\":[\"browser\"]}"
 kvput "apikey:$(sha256 "$READ_KEY")" "{\"project_id\":\"$PROJECT\",\"name\":\"e2e-read\",\"scopes\":[\"read\"]}"
 
 ADMIN_KEY="ew_read_admin_e2e_$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -127,14 +125,6 @@ for svc in "ingest $INGEST_PORT" "api $API_PORT"; do
   if [ "$(tail -n1 <<<"$body")" = 200 ] && grep -q '"status":"ok"' <<<"$body"; then ok "GET /healthz on $1 reports ok"; else bad "GET /healthz on $1: $body"; fi
 done
 
-
-step "Browser events (EdgeWatch extension)"
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$INGEST_PORT/api/browser?key=$BROWSER_KEY" -H 'content-type: text/plain' \
-  -d "{\"events\":[{\"type\":\"error\",\"timestamp\":$(date +%s),\"class\":\"TypeError\",\"message\":\"e2e browser error\",\"file\":\"https://shop.test/app.js\",\"line\":3,\"url\":\"https://shop.test/cart\"}]}")
-[ "$code" = 200 ] && ok "POST /api/browser (browser error, EdgeWatch extension)" || bad "POST /api/browser returned $code"
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$INGEST_PORT/api/browser?key=$BROWSER_KEY" -H 'content-type: text/plain' \
-  -d "{\"events\":[{\"type\":\"vitals\",\"timestamp\":$(date +%s),\"url\":\"https://shop.test/cart\",\"vitals\":{\"lcp\":1800,\"inp\":120,\"cls\":0.02}}]}")
-[ "$code" = 200 ] && ok "POST /api/browser (web vitals)" || bad "POST /api/browser vitals returned $code"
 
 API="http://127.0.0.1:$API_PORT/v1/projects/$PROJECT"
 auth=(-H "authorization: Bearer $READ_KEY")
@@ -171,10 +161,9 @@ printf "%s" "$traces_b" > "$LOGS/traces-b.json"
 check "filter: $PROJECT_B traces are only its invoice request (status 500)" "$traces_b" "d.data.length===1 && d.data[0].trace_id==='$TB' && d.data[0].status_code===500"
 check "filter: $PROJECT_B exceptions = only CardDeclined (PII scrubbed)" "$(curl -fsS "${auth[@]}" "$API_B/exceptions")" "d.data.length===1 && d.data[0].class.endsWith('CardDeclined') && !JSON.stringify(d).includes('billing@example.com')"
 check "filter: $PROJECT_B queries are only its invoices insert, literals stripped" "$(curl -fsS "${auth[@]}" "$API_B/queries")" "d.data.length===1 && d.data[0].sql.includes('invoices') && !d.data[0].sql.includes('4200')"
-check "api: browser error stored as a $PROJECT exception (execution_source browser)" "$(curl -fsS "${auth[@]}" "$API/exceptions")" "d.data.some(e=>e.class==='TypeError') && !d.data.some(e=>e.class.endsWith('CardDeclined'))"
-check "api: /web-vitals groups the /cart page view" "$(curl -fsS "${auth[@]}" "$API/web-vitals?range=1h")" "d.data.some(g=>g.key==='/cart')"
+check "api: $PROJECT exceptions contain none of $PROJECT_B's" "$(curl -fsS "${auth[@]}" "$API/exceptions")" "!d.data.some(e=>e.class.endsWith('CardDeclined'))"
 check "api: /v1/traces?project_id=$PROJECT has none of $PROJECT_B's traces" "$(curl -fsS "${auth[@]}" "http://127.0.0.1:$API_PORT/v1/traces?project_id=$PROJECT&limit=200")" "!d.data.some(t=>t.trace_id==='$TB')"
-check "api: /v1/projects lists $PROJECT and $PROJECT_B" "$(curl -fsS "${auth[@]}" "http://127.0.0.1:$API_PORT/v1/projects")" "['$PROJECT','$PROJECT_B'].every(id=>d.data.some(p=>p.id===id))"
+check "api: /v1/projects lists the tagged project $PROJECT_B" "$(curl -fsS "${auth[@]}" "http://127.0.0.1:$API_PORT/v1/projects")" "d.data.some(p=>p.id==='$PROJECT_B')"
 step "Every Nightwatch record type across two more projects (agent-style gzip batches): D1, R2, API and project filter"
 node "$ROOT/scripts/e2e-records.mjs" "http://127.0.0.1:$INGEST_PORT" "http://127.0.0.1:$API_PORT/v1" "$INGEST_KEY" "$READ_KEY" e2e-matrix-a e2e-matrix-b > "$LOGS/records.log" 2>&1; records_exit=$?
 while IFS= read -r line; do

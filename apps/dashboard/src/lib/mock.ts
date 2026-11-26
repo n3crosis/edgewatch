@@ -528,24 +528,6 @@ function createDataset(profile: MockProject) {
     filters: { source: (e) => e.execution_source },
     search: ['key', 'trace_name'],
   };
-  // Every request trace doubles as a page view; checkout is the slow page.
-  const goodShare = (l: MockEvent[], col: string, max: number) => (l.length ? count(l, (e) => Number(e[col]) <= max) / l.length : null);
-  const avgOf = (l: MockEvent[], col: string) => avg(l.map((e) => Number(e[col])));
-  const vitalsTotals = (l: MockEvent[]) => ({
-    lcp_ms: avgOf(l, 'lcp_ms'), inp_ms: avgOf(l, 'inp_ms'), cls: avgOf(l, 'cls'), fcp_ms: avgOf(l, 'fcp_ms'), ttfb_ms: avgOf(l, 'ttfb_ms'),
-    lcp_good: goodShare(l, 'lcp_ms', 2500), inp_good: goodShare(l, 'inp_ms', 200), cls_good: goodShare(l, 'cls', 0.1),
-  });
-  MOCK_SPECS['/web-vitals'] = {
-    build: () =>
-      fromTraces('request', (t) => {
-        if (t.method !== 'GET') return [];
-        const slow = t.name.includes('checkout') ? 2 : 1;
-        return [{ key: t.route ?? t.name, lcp_ms: 900 * slow + t.duration_ms, inp_ms: 60 * slow, cls: 0.02 * slow, fcp_ms: 400 + t.duration_ms / 2, ttfb_ms: t.duration_ms }];
-      }),
-    group: vitalsTotals,
-    summary: (l) => Object.fromEntries(Object.entries({ views: l.length, ...vitalsTotals(l) }).map(([k, v]) => [k, v ?? 0])),
-    search: ['key'],
-  };
   const built = new Map<string, MockEvent[]>();
   const allEvents = (path: string) => {
     let events = built.get(path);

@@ -9,7 +9,6 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/dashboard/package.json apps/dashboard/
 COPY apps/server/package.json apps/server/
-COPY packages/browser/package.json packages/browser/
 COPY packages/shared/package.json packages/shared/
 COPY workers/api/package.json workers/api/
 COPY workers/consumer/package.json workers/consumer/

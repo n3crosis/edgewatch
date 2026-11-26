@@ -4,7 +4,6 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import app, { type Env } from '../src/index';
 
 const KEY = 'ew_live_fuzz_key';
-const BROWSER = 'ew_pub_fuzz_key';
 const SECRET_MARKERS = ['TOKEN_SIGNING_SECRET', 'at ', 'Error:', 'D1_', 'stack'];
 
 function rng(seed: number) {
@@ -37,7 +36,6 @@ async function body(seed: number): Promise<{ bytes: Uint8Array; headers: Record<
     () => `${'['.repeat(r.int(5000))}`,
     () => JSON.stringify({ records: [RECORD] }).slice(0, r.int(200)),
     () => JSON.stringify({ __proto__: { polluted: 1 }, constructor: { prototype: { polluted: 1 } }, records: [] }),
-    () => JSON.stringify({ events: Array.from({ length: r.int(60) }, () => ({ type: r.pick(['error', 'vitals', 'x']), timestamp: r.pick([1, 'x']), message: 'm', url: r.pick(['https://a/b', 7]) })) }),
   ])();
   let bytes = r.next() < 0.2 ? crypto.getRandomValues(new Uint8Array(1 + r.int(2000))) : enc.encode(json);
   const headers: Record<string, string> = { 'content-type': r.pick(['application/json', 'text/plain', 'application/octet-stream']) };
@@ -51,19 +49,16 @@ async function body(seed: number): Promise<{ bytes: Uint8Array; headers: Record<
 let testEnv: Env;
 beforeAll(async () => {
   await env.API_KEYS.put(await apiKeyKvKey(KEY), JSON.stringify({ project_id: 'proj_fuzz', name: 'fuzz', scopes: ['ingest'] }));
-  await env.API_KEYS.put(await apiKeyKvKey(BROWSER), JSON.stringify({ project_id: 'proj_fuzz', name: 'fuzz', scopes: ['browser'] }));
   const queue = { send: async () => {}, sendBatch: async () => {} } as unknown as Queue<IngestMessage>;
   testEnv = { ...(env as unknown as Env), INGEST_QUEUE: queue, MAX_BODY_BYTES: '100000' };
 });
 
 describe('fuzz: ingest HTTP parsers', () => {
-  it('answers every random /api/ingest and /api/browser body with a typed 2xx/4xx and no internals', async () => {
+  it('answers every random /api/ingest body with a typed 2xx/4xx and no internals', async () => {
     const seen = new Set<number>();
     for (let seed = 1; seed <= 250; seed++) {
       const { bytes, headers } = await body(seed);
-      const browser = seed % 3 === 0;
-      const url = browser ? `https://ingest.test/api/browser?key=${BROWSER}` : 'https://ingest.test/api/ingest';
-      const res = await app.fetch(new Request(url, { method: 'POST', body: bytes, headers: browser ? headers : { ...headers, authorization: `Bearer ${KEY}` } }), testEnv);
+      const res = await app.fetch(new Request('https://ingest.test/api/ingest', { method: 'POST', body: bytes, headers: { ...headers, authorization: `Bearer ${KEY}` } }), testEnv);
       const text = await res.text();
       seen.add(res.status);
       expect([200, 400, 413, 422], `seed ${seed} -> ${res.status} ${text.slice(0, 200)}`).toContain(res.status);
@@ -75,14 +70,12 @@ describe('fuzz: ingest HTTP parsers', () => {
     expect([...seen].sort()).toEqual(expect.arrayContaining([200, 422]));
   });
 
-  it('rejects random bearer tokens and browser keys with 401', async () => {
+  it('rejects random bearer tokens with 401', async () => {
     for (let seed = 1; seed <= 100; seed++) {
       const r = rng(seed);
-      const token = r.pick(['ewt.', 'ew_live_', 'ew_pub_', '']) + Array.from({ length: r.int(80) }, () => String.fromCharCode(33 + r.int(94))).join('');
+      const token = r.pick(['ewt.', 'ew_live_', '']) + Array.from({ length: r.int(80) }, () => String.fromCharCode(33 + r.int(94))).join('');
       const ingest = await app.fetch(new Request('https://ingest.test/api/ingest', { method: 'POST', body: '{"records":[]}', headers: { authorization: `Bearer ${token}` } }), testEnv);
       expect(ingest.status, `seed ${seed}`).toBe(401);
-      const browser = await app.fetch(new Request(`https://ingest.test/api/browser?key=${encodeURIComponent(token)}`, { method: 'POST', body: '{"events":[{}]}' }), testEnv);
-      expect(browser.status, `seed ${seed}`).toBe(401);
     }
   });
 });
