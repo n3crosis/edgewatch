@@ -1,4 +1,5 @@
 import { Badge } from '@cloudflare/kumo/components/badge';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import {
   BellIcon,
   BriefcaseIcon,
@@ -11,15 +12,51 @@ import {
   UsersIcon,
 } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
+import Link from '@/components/ScopedLink';
 import { bucketTimeSeries, durationRangeLabel, type BarDatum, type MetricLegendItem } from '@/components/charts';
-import { ErrorCount, StatusCodeText, WarningCount } from '@/components/common';
+import { CompactNumber, DurationHover, ErrorCount, StatusCodeText, StatusCountHover } from '@/components/common';
 import { compact, ms } from './format';
 import type { EventGroup, EventRow, Range } from './types';
 
 export interface EventColumn<T> {
   label: string;
   align?: 'right';
+  sortValue?: (row: T) => number | string;
   render: (row: T) => ReactNode;
+}
+
+/** Human-readable explanation for common 5-field cron expressions (Nightwatch `CronForHumans`). */
+function describeCron(expr: string): string {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return expr;
+  const [min, hour, dom, mon, dow] = parts;
+  if (expr.trim() === '* * * * *') return 'Every minute';
+  if (/^\*\/(\d+)$/.test(min) && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
+    return `Every ${min.slice(2)} minutes`;
+  }
+  if (min === '0' && hour === '*' && dom === '*' && mon === '*' && dow === '*') return 'Every hour';
+  if (min === '0' && /^\*\/(\d+)$/.test(hour) && dom === '*' && mon === '*' && dow === '*') {
+    return `Every ${hour.slice(2)} hours`;
+  }
+  if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === '*' && mon === '*' && dow === '*') {
+    return `Daily at ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`;
+  }
+  if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === '*' && mon === '*' && dow !== '*') {
+    return `Weekly on day ${dow} at ${hour.padStart(2, '0')}:${min.padStart(2, '0')}`;
+  }
+  return expr;
+}
+
+function CronSchedule({ cron, timezone }: { cron: unknown; timezone?: unknown }) {
+  if (!cron) return <span className="text-neutral-400">—</span>;
+  const text = String(cron);
+  const human = describeCron(text);
+  const tip = timezone ? `${human} (${String(timezone)})` : human;
+  return (
+    <Tooltip content={tip} asChild>
+      <span className="cursor-default font-mono text-neutral-600 dark:text-neutral-400">{text}</span>
+    </Tooltip>
+  );
 }
 
 export interface EventChartCardData {
@@ -116,13 +153,43 @@ export const EVENT_PAGES: EventPage[] = [
     showUserFilter: true,
     isClassKey: true,
     columns: [
-      { label: 'Queued', align: 'right', render: (g) => num(g.queued) },
-      { label: 'Processed', align: 'right', render: (g) => num(Math.max(0, Number(g.attempts ?? 0) - Number(g.failed ?? 0) - Number(g.released ?? 0))) },
-      { label: 'Released', align: 'right', render: (g) => <WarningCount count={Number(g.released ?? 0)} /> },
-      { label: 'Failed', align: 'right', render: (g) => <ErrorCount count={Number(g.failed ?? 0)} /> },
-      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(g.attempts)}</span> },
-      { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'Queued', align: 'right', sortValue: (g) => Number(g.queued ?? 0), render: (g) => <CompactNumber value={Number(g.queued ?? 0)} /> },
+      {
+        label: 'Processed',
+        align: 'right',
+        sortValue: (g) => Math.max(0, Number(g.attempts ?? 0) - Number(g.failed ?? 0) - Number(g.released ?? 0)),
+        render: (g) => (
+          <StatusCountHover
+            value={Math.max(0, Number(g.attempts ?? 0) - Number(g.failed ?? 0) - Number(g.released ?? 0))}
+            total={Number(g.attempts ?? 0)}
+          />
+        ),
+      },
+      {
+        label: 'Released',
+        align: 'right',
+        sortValue: (g) => Number(g.released ?? 0),
+        render: (g) => <StatusCountHover value={Number(g.released ?? 0)} total={Number(g.attempts ?? 0)} variant="warning" />,
+      },
+      {
+        label: 'Failed',
+        align: 'right',
+        sortValue: (g) => Number(g.failed ?? 0),
+        render: (g) => <StatusCountHover value={Number(g.failed ?? 0)} total={Number(g.attempts ?? 0)} variant="error" />,
+      },
+      { label: 'Total', align: 'right', sortValue: (g) => Number(g.attempts ?? 0), render: (g) => <span className="font-medium"><CompactNumber value={Number(g.attempts ?? 0)} /></span> },
+      {
+        label: 'Avg',
+        align: 'right',
+        sortValue: (g) => Number(g.avg_ms ?? 0),
+        render: (g) => <DurationHover value={g.avg_ms != null ? Number(g.avg_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
+      {
+        label: 'P95',
+        align: 'right',
+        sortValue: (g) => Number(g.max_ms ?? 0),
+        render: (g) => <DurationHover value={g.max_ms != null ? Number(g.max_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
     ],
     rowColumns: [
       { label: 'Kind', render: (r) => <Badge variant="outline">{String(r.kind)}</Badge> },
@@ -172,11 +239,31 @@ export const EVENT_PAGES: EventPage[] = [
     sectionUnit: ['Command', 'Commands'],
     emptyLabel: 'No commands found',
     columns: [
-      { label: 'Success', align: 'right', render: (g) => num(Math.max(0, Number(g.count ?? 0) - Number(g.failed ?? 0))) },
-      { label: 'Failed', align: 'right', render: (g) => <ErrorCount count={Number(g.failed ?? 0)} /> },
-      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
-      { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
+      {
+        label: 'Success',
+        align: 'right',
+        sortValue: (g) => Math.max(0, Number(g.count ?? 0) - Number(g.failed ?? 0)),
+        render: (g) => <StatusCountHover value={Math.max(0, Number(g.count ?? 0) - Number(g.failed ?? 0))} total={Number(g.count ?? 0)} />,
+      },
+      {
+        label: 'Failed',
+        align: 'right',
+        sortValue: (g) => Number(g.failed ?? 0),
+        render: (g) => <StatusCountHover value={Number(g.failed ?? 0)} total={Number(g.count ?? 0)} variant="error" />,
+      },
+      { label: 'Total', align: 'right', sortValue: (g) => Number(g.count ?? 0), render: (g) => <span className="font-medium"><CompactNumber value={Number(g.count ?? 0)} /></span> },
+      {
+        label: 'Avg',
+        align: 'right',
+        sortValue: (g) => Number(g.avg_ms ?? 0),
+        render: (g) => <DurationHover value={g.avg_ms != null ? Number(g.avg_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
+      {
+        label: 'P95',
+        align: 'right',
+        sortValue: (g) => Number(g.max_ms ?? 0),
+        render: (g) => <DurationHover value={g.max_ms != null ? Number(g.max_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
     ],
     rowColumns: [
       { label: 'Exit code', render: (r) => (r.exit_code === null || r.exit_code === undefined ? '—' : <StatusCodeText status={Number(r.exit_code)} source="command" />) },
@@ -221,13 +308,18 @@ export const EVENT_PAGES: EventPage[] = [
     sectionUnit: ['key', 'keys'],
     emptyLabel: 'No cache keys found',
     columns: [
-      { label: 'Hit %', align: 'right', render: (g) => pct(g.hit_ratio) },
-      { label: 'Hits', align: 'right', render: (g) => num(g.hits) },
-      { label: 'Misses', align: 'right', render: (g) => num(g.misses) },
-      { label: 'Writes', align: 'right', render: (g) => num(g.writes) },
-      { label: 'Deletes', align: 'right', render: (g) => num(g.deletes) },
-      { label: 'Failures', align: 'right', render: (g) => <ErrorCount count={Number(g.failures ?? 0)} /> },
-      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(Number(g.hits ?? 0) + Number(g.misses ?? 0) + Number(g.writes ?? 0) + Number(g.deletes ?? 0))}</span> },
+      { label: 'Hit %', align: 'right', sortValue: (g) => Number(g.hit_ratio ?? -1), render: (g) => pct(g.hit_ratio) },
+      { label: 'Hits', align: 'right', sortValue: (g) => Number(g.hits ?? 0), render: (g) => <CompactNumber value={Number(g.hits ?? 0)} /> },
+      { label: 'Misses', align: 'right', sortValue: (g) => Number(g.misses ?? 0), render: (g) => <CompactNumber value={Number(g.misses ?? 0)} /> },
+      { label: 'Writes', align: 'right', sortValue: (g) => Number(g.writes ?? 0), render: (g) => <CompactNumber value={Number(g.writes ?? 0)} /> },
+      { label: 'Deletes', align: 'right', sortValue: (g) => Number(g.deletes ?? 0), render: (g) => <CompactNumber value={Number(g.deletes ?? 0)} /> },
+      { label: 'Failures', align: 'right', sortValue: (g) => Number(g.failures ?? 0), render: (g) => <ErrorCount count={Number(g.failures ?? 0)} /> },
+      {
+        label: 'Total',
+        align: 'right',
+        sortValue: (g) => Number(g.hits ?? 0) + Number(g.misses ?? 0) + Number(g.writes ?? 0) + Number(g.deletes ?? 0),
+        render: (g) => <span className="font-medium"><CompactNumber value={Number(g.hits ?? 0) + Number(g.misses ?? 0) + Number(g.writes ?? 0) + Number(g.deletes ?? 0)} /></span>,
+      },
     ],
     rowColumns: [
       { label: 'Type', render: (r) => <Badge variant={r.type === 'hit' ? 'success' : String(r.type).endsWith('failure') ? 'error' : r.type === 'miss' ? 'warning' : 'secondary'}>{String(r.type)}</Badge> },
@@ -296,11 +388,31 @@ export const EVENT_PAGES: EventPage[] = [
     sectionUnit: ['Domain', 'Domains'],
     emptyLabel: 'No outgoing requests found',
     columns: [
-      { label: '1/2/3xx', align: 'right', render: (g) => num(Math.max(0, Number(g.count ?? 0) - Number(g.failed ?? 0))) },
-      { label: 'Failed', align: 'right', render: (g) => <ErrorCount count={Number(g.failed ?? 0)} /> },
-      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
-      { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
+      {
+        label: '1/2/3xx',
+        align: 'right',
+        sortValue: (g) => Math.max(0, Number(g.count ?? 0) - Number(g.failed ?? 0)),
+        render: (g) => <StatusCountHover value={Math.max(0, Number(g.count ?? 0) - Number(g.failed ?? 0))} total={Number(g.count ?? 0)} />,
+      },
+      {
+        label: 'Failed',
+        align: 'right',
+        sortValue: (g) => Number(g.failed ?? 0),
+        render: (g) => <StatusCountHover value={Number(g.failed ?? 0)} total={Number(g.count ?? 0)} variant="error" />,
+      },
+      { label: 'Total', align: 'right', sortValue: (g) => Number(g.count ?? 0), render: (g) => <span className="font-medium"><CompactNumber value={Number(g.count ?? 0)} /></span> },
+      {
+        label: 'Avg',
+        align: 'right',
+        sortValue: (g) => Number(g.avg_ms ?? 0),
+        render: (g) => <DurationHover value={g.avg_ms != null ? Number(g.avg_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
+      {
+        label: 'P95',
+        align: 'right',
+        sortValue: (g) => Number(g.max_ms ?? 0),
+        render: (g) => <DurationHover value={g.max_ms != null ? Number(g.max_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
     ],
     rowColumns: [
       { label: 'Status', render: (r) => (r.status_code === null || r.status_code === undefined ? <Badge variant="error">no response</Badge> : <StatusCodeText status={Number(r.status_code)} source="request" />) },
@@ -349,9 +461,19 @@ export const EVENT_PAGES: EventPage[] = [
     emptyLabel: 'No mail found',
     isClassKey: true,
     columns: [
-      { label: 'Count', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
-      { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'Count', align: 'right', sortValue: (g) => Number(g.count ?? 0), render: (g) => <span className="font-medium"><CompactNumber value={Number(g.count ?? 0)} /></span> },
+      {
+        label: 'Avg',
+        align: 'right',
+        sortValue: (g) => Number(g.avg_ms ?? 0),
+        render: (g) => <DurationHover value={g.avg_ms != null ? Number(g.avg_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
+      {
+        label: 'P95',
+        align: 'right',
+        sortValue: (g) => Number(g.max_ms ?? 0),
+        render: (g) => <DurationHover value={g.max_ms != null ? Number(g.max_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
     ],
     rowColumns: [
       { label: 'Status', render: (r) => <Badge variant={r.failed ? 'error' : 'success'}>{r.failed ? 'failed' : 'sent'}</Badge> },
@@ -399,9 +521,19 @@ export const EVENT_PAGES: EventPage[] = [
     emptyLabel: 'No notifications found',
     isClassKey: true,
     columns: [
-      { label: 'Count', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
-      { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'Count', align: 'right', sortValue: (g) => Number(g.count ?? 0), render: (g) => <span className="font-medium"><CompactNumber value={Number(g.count ?? 0)} /></span> },
+      {
+        label: 'Avg',
+        align: 'right',
+        sortValue: (g) => Number(g.avg_ms ?? 0),
+        render: (g) => <DurationHover value={g.avg_ms != null ? Number(g.avg_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
+      {
+        label: 'P95',
+        align: 'right',
+        sortValue: (g) => Number(g.max_ms ?? 0),
+        render: (g) => <DurationHover value={g.max_ms != null ? Number(g.max_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
     ],
     rowColumns: [
       { label: 'Status', render: (r) => <Badge variant={r.failed ? 'error' : 'success'}>{r.failed ? 'failed' : 'sent'}</Badge> },
@@ -450,13 +582,38 @@ export const EVENT_PAGES: EventPage[] = [
     sectionUnit: ['Task', 'Tasks'],
     emptyLabel: 'No scheduled tasks found',
     columns: [
-      { label: 'Schedule', render: (g) => <span className="text-neutral-600 dark:text-neutral-400">{g.cron ?? '—'}</span> },
-      { label: 'Processed', align: 'right', render: (g) => num(g.processed) },
-      { label: 'Skipped', align: 'right', render: (g) => <WarningCount count={Number(g.skipped ?? 0)} /> },
-      { label: 'Failed', align: 'right', render: (g) => <ErrorCount count={Number(g.failed ?? 0)} /> },
-      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
-      { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'Schedule', sortValue: (g) => String(g.cron ?? ''), render: (g) => <CronSchedule cron={g.cron} timezone={g.timezone} /> },
+      {
+        label: 'Processed',
+        align: 'right',
+        sortValue: (g) => Number(g.processed ?? 0),
+        render: (g) => <StatusCountHover value={Number(g.processed ?? 0)} total={Number(g.count ?? 0)} />,
+      },
+      {
+        label: 'Skipped',
+        align: 'right',
+        sortValue: (g) => Number(g.skipped ?? 0),
+        render: (g) => <StatusCountHover value={Number(g.skipped ?? 0)} total={Number(g.count ?? 0)} variant="warning" />,
+      },
+      {
+        label: 'Failed',
+        align: 'right',
+        sortValue: (g) => Number(g.failed ?? 0),
+        render: (g) => <StatusCountHover value={Number(g.failed ?? 0)} total={Number(g.count ?? 0)} variant="error" />,
+      },
+      { label: 'Total', align: 'right', sortValue: (g) => Number(g.count ?? 0), render: (g) => <span className="font-medium"><CompactNumber value={Number(g.count ?? 0)} /></span> },
+      {
+        label: 'Avg',
+        align: 'right',
+        sortValue: (g) => Number(g.avg_ms ?? 0),
+        render: (g) => <DurationHover value={g.avg_ms != null ? Number(g.avg_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
+      {
+        label: 'P95',
+        align: 'right',
+        sortValue: (g) => Number(g.max_ms ?? 0),
+        render: (g) => <DurationHover value={g.max_ms != null ? Number(g.max_ms) : null} avg={g.avg_ms != null ? Number(g.avg_ms) : null} max={g.max_ms != null ? Number(g.max_ms) : null} />,
+      },
     ],
     rowColumns: [
       { label: 'Status', render: (r) => <Badge variant={r.status === 'failed' ? 'error' : r.status === 'skipped' ? 'secondary' : 'success'}>{String(r.status ?? '—')}</Badge> },
@@ -530,12 +687,86 @@ export const EVENT_PAGES: EventPage[] = [
       </span>
     ),
     columns: [
-      { label: '1/2/3xx', align: 'right', render: (g) => num(Math.max(0, Number(g.requests ?? 0) - Number(g.server_errors ?? 0))) },
-      { label: '4xx', align: 'right', render: (g) => <WarningCount count={Number(g.client_errors ?? 0)} /> },
-      { label: '5xx', align: 'right', render: (g) => <ErrorCount count={Number(g.server_errors ?? 0)} /> },
-      { label: 'Requests', align: 'right', render: (g) => <span className="font-medium">{num(g.requests)}</span> },
-      { label: 'Queued Jobs', align: 'right', render: (g) => num(g.queued_jobs ?? 0) },
-      { label: 'Exceptions', align: 'right', render: (g) => <ErrorCount count={Number(g.exceptions ?? 0)} /> },
+      {
+        label: '1/2/3xx',
+        align: 'right',
+        sortValue: (g) => Math.max(0, Number(g.requests ?? 0) - Number(g.server_errors ?? 0) - Number(g.client_errors ?? 0)),
+        render: (g) => (
+          <StatusCountHover
+            value={Math.max(0, Number(g.requests ?? 0) - Number(g.server_errors ?? 0) - Number(g.client_errors ?? 0))}
+            total={Number(g.requests ?? 0)}
+            to={`/requests?user=${encodeURIComponent(g.key)}&status=2xx`}
+          />
+        ),
+      },
+      {
+        label: '4xx',
+        align: 'right',
+        sortValue: (g) => Number(g.client_errors ?? 0),
+        render: (g) => (
+          <StatusCountHover
+            value={Number(g.client_errors ?? 0)}
+            total={Number(g.requests ?? 0)}
+            variant="warning"
+            to={`/requests?user=${encodeURIComponent(g.key)}&status=4xx`}
+          />
+        ),
+      },
+      {
+        label: '5xx',
+        align: 'right',
+        sortValue: (g) => Number(g.server_errors ?? 0),
+        render: (g) => (
+          <StatusCountHover
+            value={Number(g.server_errors ?? 0)}
+            total={Number(g.requests ?? 0)}
+            variant="error"
+            to={`/requests?user=${encodeURIComponent(g.key)}&status=5xx`}
+          />
+        ),
+      },
+      {
+        label: 'Requests',
+        align: 'right',
+        sortValue: (g) => Number(g.requests ?? 0),
+        render: (g) => (
+          <Link
+            to={`/requests?user=${encodeURIComponent(g.key)}`}
+            onClick={(e) => e.stopPropagation()}
+            className="border-b border-dashed border-transparent py-[2px] font-medium hover:border-neutral-400 dark:hover:border-white/70"
+          >
+            <CompactNumber value={Number(g.requests ?? 0)} />
+          </Link>
+        ),
+      },
+      {
+        label: 'Queued Jobs',
+        align: 'right',
+        sortValue: (g) => Number(g.queued_jobs ?? 0),
+        render: (g) => (
+          <Link
+            to={`/jobs?user=${encodeURIComponent(g.key)}`}
+            onClick={(e) => e.stopPropagation()}
+            className="border-b border-dashed border-transparent py-[2px] hover:border-neutral-400 dark:hover:border-white/70"
+          >
+            <CompactNumber value={Number(g.queued_jobs ?? 0)} />
+          </Link>
+        ),
+      },
+      {
+        label: 'Exceptions',
+        align: 'right',
+        sortValue: (g) => Number(g.exceptions ?? 0),
+        render: (g) => (
+          <Link
+            to={`/exceptions?user=${encodeURIComponent(g.key)}`}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center border-b border-dashed border-transparent py-[2px] hover:border-neutral-400 dark:hover:border-white/70"
+          >
+            <ErrorCount count={Number(g.exceptions ?? 0)} />
+          </Link>
+        ),
+      },
     ],
     rowColumns: [
       { label: 'Status', render: (r) => (r.status_code === null || r.status_code === undefined ? '—' : <StatusCodeText status={Number(r.status_code)} source="request" />) },

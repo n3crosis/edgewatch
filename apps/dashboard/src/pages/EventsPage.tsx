@@ -1,5 +1,7 @@
+import { useMemo, useState } from 'react';
 import { withUser } from '@/lib/user-activity';
 import UserFilter from '@/components/UserFilter';
+import { EventDetailsDrawer } from '@/components/DetailsDrawer';
 import { BarChart, LineChart, MetricChartCard, rangeFooterBounds } from '@/components/charts';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Table } from '@cloudflare/kumo/components/table';
@@ -16,12 +18,14 @@ import {
   RowActionLink,
   SearchBox,
   SectionBar,
+  SortableLabel,
   TimeAgo,
   useRowNavigate,
 } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
 import type { EventChartCardData, EventPage } from '@/lib/events';
 import { useRange } from '@/lib/range';
+import type { EventGroup } from '@/lib/types';
 
 function EventChartCard({
   card,
@@ -64,6 +68,9 @@ export default function EventsPage({ page }: { page: EventPage }) {
   const { range } = useRange();
   const rowNav = useRowNavigate();
   const [params, setParams] = useSearchParams();
+  const [previewGroup, setPreviewGroup] = useState<EventGroup | null>(null);
+  const [sortCol, setSortCol] = useState<string>('');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const user = params.get('user') || undefined;
   const q = params.get('q') ?? '';
   const update = (key: string, value: string) => setParams((previous) => {
@@ -95,6 +102,39 @@ export default function EventsPage({ page }: { page: EventPage }) {
   const [singular, plural] = page.sectionUnit ?? [page.keyLabel, `${page.keyLabel}s`];
   const bounds = rangeFooterBounds(range);
   const deck = page.chartDeck ? page.chartDeck(summary, rows, range) : null;
+
+  const toggleSort = (col: string, defaultDir: 'asc' | 'desc' = 'desc') => {
+    if (sortCol === col) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortCol(col);
+      setSortDir(defaultDir);
+    }
+  };
+
+  const sortedRows = useMemo(() => {
+    if (!sortCol) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const list = [...rows];
+    if (sortCol === '__key__') {
+      list.sort((a, b) => dir * a.key.localeCompare(b.key));
+      return list;
+    }
+    if (sortCol === '__last_seen__') {
+      list.sort((a, b) => dir * (Date.parse(a.last_seen) - Date.parse(b.last_seen)));
+      return list;
+    }
+    const column = page.columns.find((c) => c.label === sortCol);
+    if (!column?.sortValue) return rows;
+    const getVal = column.sortValue;
+    list.sort((a, b) => {
+      const av = getVal(a);
+      const bv = getVal(b);
+      if (typeof av === 'string' && typeof bv === 'string') return dir * av.localeCompare(bv);
+      return dir * (Number(av) - Number(bv));
+    });
+    return list;
+  }, [rows, sortCol, sortDir, page.columns]);
 
   return (
     <div className="space-y-4 md:space-y-6 xl:space-y-10">
@@ -138,14 +178,49 @@ export default function EventsPage({ page }: { page: EventPage }) {
             <Table>
               <Table.Header>
                 <Table.Row>
-                  <Table.Head>{page.keyLabel}</Table.Head>
-                  {page.columns.map((col) => <Table.Head key={col.label} className={col.align === 'right' ? 'text-right' : ''}>{col.label}</Table.Head>)}
-                  {isUsersPage && <Table.Head className="text-right">Last seen</Table.Head>}
-                  {showActionArrow && <Table.Head className="w-12" />}
+                  <Table.Head>
+                    <SortableLabel
+                      align="left"
+                      active={sortCol === '__key__'}
+                      direction={sortDir}
+                      onClick={() => toggleSort('__key__', 'asc')}
+                    >
+                      {page.keyLabel}
+                    </SortableLabel>
+                  </Table.Head>
+                  {page.columns.map((col) => (
+                    <Table.Head key={col.label} className={col.align === 'right' ? 'text-right' : ''}>
+                      {col.sortValue ? (
+                        <SortableLabel
+                          align={col.align ?? 'left'}
+                          active={sortCol === col.label}
+                          direction={sortDir}
+                          onClick={() => toggleSort(col.label, col.align === 'right' ? 'desc' : 'asc')}
+                        >
+                          {col.label}
+                        </SortableLabel>
+                      ) : (
+                        col.label
+                      )}
+                    </Table.Head>
+                  ))}
+                  {isUsersPage && (
+                    <Table.Head className="text-right">
+                      <SortableLabel
+                        align="right"
+                        active={sortCol === '__last_seen__'}
+                        direction={sortDir}
+                        onClick={() => toggleSort('__last_seen__', 'desc')}
+                      >
+                        Last seen
+                      </SortableLabel>
+                    </Table.Head>
+                  )}
+                  {showActionArrow && <Table.Head className="w-16" />}
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {rows.map((g) => {
+                {sortedRows.map((g) => {
                   const target = withUser(`${page.path}/${encodeURIComponent(g.key)}`, user);
                   return (
                     <Table.Row key={g.key} onClick={isCachePage ? undefined : rowNav(target)} className={isCachePage ? undefined : 'cursor-pointer'}>
@@ -164,7 +239,15 @@ export default function EventsPage({ page }: { page: EventPage }) {
                       </Table.Cell>
                       {page.columns.map((col) => <Table.Cell key={col.label} className={col.align === 'right' ? 'text-right' : ''}>{col.render(g)}</Table.Cell>)}
                       {isUsersPage && <Table.Cell className="text-right"><TimeAgo iso={g.last_seen} /></Table.Cell>}
-                      {showActionArrow && <Table.Cell className="text-right"><RowActionLink to={target} label={`Inspect ${g.key}`} /></Table.Cell>}
+                      {showActionArrow && (
+                        <Table.Cell className="text-right">
+                          <RowActionLink
+                            to={target}
+                            label={`Inspect ${g.key}`}
+                            onPreview={() => setPreviewGroup(g)}
+                          />
+                        </Table.Cell>
+                      )}
                     </Table.Row>
                   );
                 })}
@@ -173,6 +256,15 @@ export default function EventsPage({ page }: { page: EventPage }) {
           </FloatingTablePanel>
         )}
       </div>
+
+      {showActionArrow && (
+        <EventDetailsDrawer
+          page={page}
+          group={previewGroup}
+          user={user}
+          onClose={() => setPreviewGroup(null)}
+        />
+      )}
     </div>
   );
 }

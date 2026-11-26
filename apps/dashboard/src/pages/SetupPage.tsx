@@ -129,8 +129,8 @@ function EnvColorPopover({
         }
       />
       <Popover.Portal>
-        <Popover.Positioner side="bottom" align="start" sideOffset={6}>
-          <Popover.Popup className="rounded-lg border border-neutral-200 bg-white p-2.5 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
+        <Popover.Positioner side="bottom" align="start" sideOffset={4}>
+          <Popover.Popup className="rounded-md border border-neutral-800 bg-neutral-900 p-2.5 text-white shadow-2xl shadow-black/50 dark:border-neutral-700/50 dark:bg-neutral-800">
             <ColorSelector
               value={activeColor}
               onChange={(color) => {
@@ -169,27 +169,27 @@ function EnvironmentActionsMenu({
         }
       />
       <Popover.Portal>
-        <Popover.Positioner side="bottom" align="end" sideOffset={6}>
-          <Popover.Popup className="w-44 rounded-lg border border-neutral-200 bg-white p-1 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
+        <Popover.Positioner side="bottom" align="end" sideOffset={4}>
+          <Popover.Popup className="w-44 rounded-md border border-neutral-800 bg-neutral-900 p-1 text-white shadow-2xl shadow-black/50 dark:border-neutral-700/50 dark:bg-neutral-800">
             <button
               type="button"
               onClick={() => {
                 setOpen(false);
                 onEdit();
               }}
-              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 transition-colors hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/[0.06]"
+              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-200 transition-colors hover:bg-neutral-800 hover:text-white dark:hover:bg-neutral-700/70"
             >
               <PencilSimpleIcon size={14} className="shrink-0 text-neutral-400" aria-hidden />
               <span>Edit environment</span>
             </button>
-            <div className="my-1 border-t border-neutral-200 dark:border-white/10" />
+            <div className="my-1 border-t border-neutral-800 dark:border-neutral-700/50" />
             <button
               type="button"
               onClick={() => {
                 setOpen(false);
                 onDelete();
               }}
-              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/50"
+              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-rose-400 transition-colors hover:bg-rose-950/60 hover:text-rose-300"
             >
               <TrashIcon size={14} className="shrink-0" aria-hidden />
               <span>Delete</span>

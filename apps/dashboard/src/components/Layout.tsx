@@ -182,14 +182,36 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [appSearch, setAppSearch] = useState('');
+  const [hoveredProjectId, setHoveredProjectId] = useState<string>(projectId);
+  const [envCache, setEnvCache] = useState<Record<string, { name: string; color?: string | null }[]>>({});
 
-  const envs = useAsync(() => (open ? api.environments().catch(() => []) : Promise.resolve([])), [open, projectId, envRevision]);
+  useEffect(() => {
+    setHoveredProjectId(projectId);
+  }, [projectId, open]);
+
+  const targetProjectId = hoveredProjectId || projectId;
+  const envs = useAsync(
+    () => (open ? api.environments(targetProjectId).catch(() => []) : Promise.resolve([])),
+    [open, targetProjectId, envRevision],
+  );
+
+  useEffect(() => {
+    if (!open || !envs.data) return;
+    setEnvCache((prev) => ({
+      ...prev,
+      [targetProjectId]: envs.data!.map((row) => ({ name: row.name, color: row.color })),
+    }));
+  }, [open, envs.data, targetProjectId]);
+
   const envItems = useMemo(() => {
+    const source = envs.data ?? envCache[targetProjectId] ?? [];
     const map = new Map<string, { name: string; color?: string | null }>();
-    for (const row of envs.data ?? []) map.set(row.name, { name: row.name, color: row.color });
-    if (environment !== undefined && !map.has(environment)) map.set(environment, { name: environment, color: null });
+    for (const row of source) map.set(row.name, { name: row.name, color: row.color });
+    if (targetProjectId === projectId && environment !== undefined && !map.has(environment)) {
+      map.set(environment, { name: environment, color: null });
+    }
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [envs.data, environment]);
+  }, [envs.data, envCache, targetProjectId, projectId, environment]);
 
   const list = projects.length ? projects : [{ id: projectId, name: projectId, host: undefined }];
   const filteredApps = useMemo(() => {
@@ -207,15 +229,17 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
     if (!open) setAppSearch('');
   }, [open]);
 
-  const onChangeProject = (nextId: string) => {
+  const onChangeProject = (nextId: string, nextEnv?: string | null) => {
     setOpen(false);
+    const resolvedEnv = nextEnv === undefined ? environment : nextEnv === null ? undefined : nextEnv;
+    if (nextEnv !== undefined) setEnvironment(resolvedEnv);
     if (nextId === projectId) return;
     setProjectId(nextId);
     const segments = pathname.split('/').filter(Boolean);
     if (segments.length >= 2) {
-      navigate(scopedPath(`/${segments[0]}`, nextId, range, environment), { replace: true });
+      navigate(scopedPath(`/${segments[0]}`, nextId, range, resolvedEnv), { replace: true });
     } else if (pathname === '/requests' && new URLSearchParams(search).has('route')) {
-      navigate(scopedPath('/requests', nextId, range, environment), { replace: true });
+      navigate(scopedPath('/requests', nextId, range, resolvedEnv), { replace: true });
     }
   };
 
@@ -294,14 +318,17 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
                       <div className="space-y-0.5">
                         {filteredApps.map((project) => {
                           const selected = project.id === projectId;
+                          const previewed = project.id === targetProjectId;
                           const letter = (project.name || project.id).trim().charAt(0).toUpperCase();
                           return (
                             <button
                               key={project.id}
                               type="button"
+                              onMouseEnter={() => setHoveredProjectId(project.id)}
+                              onFocus={() => setHoveredProjectId(project.id)}
                               onClick={() => onChangeProject(project.id)}
                               className={`group/app flex h-9 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm transition-colors ${
-                                selected
+                                previewed
                                   ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'
                                   : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white dark:hover:bg-neutral-700/50'
                               }`}
@@ -344,12 +371,9 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
                   <div className="space-y-0.5">
                     <button
                       type="button"
-                      onClick={() => {
-                        setEnvironment(undefined);
-                        setOpen(false);
-                      }}
+                      onClick={() => onChangeProject(targetProjectId, null)}
                       className={`ew-fade-in-up flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
-                        environment === undefined
+                        targetProjectId === projectId && environment === undefined
                           ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'
                           : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white dark:hover:bg-neutral-700/50'
                       }`}
@@ -358,20 +382,17 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
                         <span className="size-2 shrink-0 rounded-full bg-blue-500 dark:bg-emerald-500" aria-hidden />
                         <span className="truncate">All environments</span>
                       </span>
-                      {environment === undefined && <CheckIcon size={14} className="shrink-0 text-emerald-400" />}
+                      {targetProjectId === projectId && environment === undefined && <CheckIcon size={14} className="shrink-0 text-emerald-400" />}
                     </button>
                     {envItems.map((envItem, idx) => {
-                      const selected = environment === envItem.name;
+                      const selected = targetProjectId === projectId && environment === envItem.name;
                       const dotColor = envDotClass(envItem.name, envItem.color, idx);
                       return (
                         <button
-                          key={envItem.name}
+                          key={`${targetProjectId}-${envItem.name}`}
                           type="button"
                           style={{ animationDelay: `${Math.min(idx + 1, 6) * 40}ms` }}
-                          onClick={() => {
-                            setEnvironment(envItem.name);
-                            setOpen(false);
-                          }}
+                          onClick={() => onChangeProject(targetProjectId, envItem.name)}
                           className={`ew-fade-in-up flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
                             selected
                               ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'

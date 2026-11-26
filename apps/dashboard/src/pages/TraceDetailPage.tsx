@@ -1,4 +1,5 @@
-import { useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
 import {
@@ -21,7 +22,6 @@ import Waterfall, { SPAN_COLORS, SPAN_ICONS, SPAN_LABELS } from '@/components/Wa
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { cn } from '@cloudflare/kumo/utils';
@@ -61,6 +61,24 @@ function FormattedUrl({ url, className }: { url: string; className?: string }) {
   }
 }
 
+const SPAN_SHEET_WIDTH_KEY = 'nightwatch:sheet-width-ratio';
+const DEFAULT_SPAN_SHEET_RATIO = 0.36;
+const MIN_SPAN_SHEET_RATIO = 0.22;
+const MAX_SPAN_SHEET_RATIO = 0.58;
+
+function readSpanSheetRatio(): number {
+  try {
+    const raw = globalThis.localStorage?.getItem(SPAN_SHEET_WIDTH_KEY);
+    if (!raw) return DEFAULT_SPAN_SHEET_RATIO;
+    const n = Number.parseFloat(raw);
+    if (Number.isFinite(n)) return Math.min(Math.max(n, MIN_SPAN_SHEET_RATIO), MAX_SPAN_SHEET_RATIO);
+  } catch {
+    /* Ignore storage errors. */
+  }
+  return DEFAULT_SPAN_SHEET_RATIO;
+}
+
+/** 1:1 Nightwatch resizable right-aligned slide-over Sheet with ← / → / Escape keyboard navigation. */
 function SpanSheet({
   span,
   spans,
@@ -75,77 +93,152 @@ function SpanSheet({
   fallbackId: string;
 }) {
   const lastSpanId = useRef<string | null>(null);
+  const ratioRef = useRef<number>(readSpanSheetRatio());
+  const [widthRatio, setWidthRatio] = useState<number>(ratioRef.current);
+  const [resizing, setResizing] = useState(false);
+
   if (span) lastSpanId.current = span.id;
   const index = span ? spans.findIndex((s) => s.id === span.id) : -1;
   const prevSpan = index > 0 ? spans[index - 1] : null;
   const nextSpan = index >= 0 && index < spans.length - 1 ? spans[index + 1] : null;
 
-  return (
-    <Dialog.Root
-      open={span !== null}
-      onOpenChange={(open) => !open && onClose()}
-      onOpenChangeComplete={(open) => {
-        if (!open) (document.getElementById(`span-${lastSpanId.current}`) ?? document.getElementById(fallbackId))?.focus();
-      }}
-    >
-      <Dialog size="lg" className="max-h-[85vh] overflow-auto p-6 sm:p-8">
-        {span && (
-          <>
-            <div className="mb-6 flex items-start justify-between gap-4 border-b border-kumo-hairline pb-5">
-              <div className="min-w-0">
-                <Dialog.Title className="flex items-center gap-2.5 text-lg font-semibold text-kumo-strong">
-                  <span className={cn('size-2.5 shrink-0 rounded-full', SPAN_COLORS[span.type])} />
-                  {(() => {
-                    const SpanIcon = SPAN_ICONS[span.type];
-                    return <SpanIcon size={18} className="shrink-0 text-kumo-subtle" />;
-                  })()}
-                  <span>{SPAN_LABELS[span.type]}</span>
-                </Dialog.Title>
-                <Dialog.Description className="mt-1 font-mono text-xs text-kumo-subtle">
-                  {ms(span.duration_ms)} starting at +{ms(span.start_ms)}
-                </Dialog.Description>
-              </div>
-              <Dialog.Close render={(props) => <Button {...props} variant="ghost" shape="square" size="sm" icon={<XIcon />} aria-label="Close" />} />
+  const closeAndFocus = useCallback(() => {
+    onClose();
+    requestAnimationFrame(() => {
+      (document.getElementById(`span-${lastSpanId.current}`) ?? document.getElementById(fallbackId))?.focus();
+    });
+  }, [fallbackId, onClose]);
+
+  useEffect(() => {
+    if (!span) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeAndFocus();
+      } else if (e.key === 'ArrowLeft' && prevSpan) {
+        e.preventDefault();
+        onSelect(prevSpan);
+      } else if (e.key === 'ArrowRight' && nextSpan) {
+        e.preventDefault();
+        onSelect(nextSpan);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [span, prevSpan, nextSpan, onSelect, closeAndFocus]);
+
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (event: MouseEvent) => {
+      const next = Math.min(Math.max((window.innerWidth - event.clientX) / window.innerWidth, MIN_SPAN_SHEET_RATIO), MAX_SPAN_SHEET_RATIO);
+      ratioRef.current = next;
+      setWidthRatio(next);
+    };
+    const onUp = () => {
+      setResizing(false);
+      try {
+        localStorage.setItem(SPAN_SHEET_WIDTH_KEY, ratioRef.current.toString());
+      } catch {
+        /* Ignore storage errors. */
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+  }, [resizing]);
+
+  if (!span || typeof document === 'undefined') return null;
+
+  const SpanIcon = SPAN_ICONS[span.type];
+
+  return createPortal(
+    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={`${SPAN_LABELS[span.type]} span details`}>
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-[1px]" onClick={closeAndFocus} aria-hidden />
+      <div
+        style={{ width: `max(360px, ${widthRatio * 100}vw)` }}
+        className="fixed inset-y-0 right-0 z-50 flex max-w-[92vw] flex-col border-l border-neutral-200 bg-neutral-100 shadow-2xl dark:border-white/[0.08] dark:bg-neutral-900"
+      >
+        <div
+          onMouseDown={(event) => {
+            event.preventDefault();
+            setResizing(true);
+          }}
+          aria-hidden
+          className="absolute top-0 -left-2 z-50 hidden h-full w-4 cursor-col-resize md:block"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute top-1/2 -left-1.25 z-50 hidden h-9 w-2.25 -translate-y-1/2 rounded-full border border-neutral-300 bg-white shadow-xs md:block dark:border-neutral-600 dark:bg-neutral-900"
+        />
+
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-neutral-200 bg-white/80 pr-4 dark:border-white/[0.08] dark:bg-neutral-900">
+          <div className="flex h-full min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={closeAndFocus}
+              aria-label="Close span details"
+              className="flex h-full w-12 shrink-0 items-center justify-center border-r border-neutral-200 bg-neutral-100 text-neutral-600 transition-colors hover:bg-neutral-200 hover:text-neutral-900 dark:border-white/[0.08] dark:bg-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white"
+            >
+              <XIcon size={16} aria-hidden />
+            </button>
+            <span className={cn('size-2.5 shrink-0 rounded-full', SPAN_COLORS[span.type])} />
+            <SpanIcon size={16} className="shrink-0 text-neutral-500 dark:text-neutral-400" />
+            <span className="truncate font-medium text-neutral-900 dark:text-white">{SPAN_LABELS[span.type]}</span>
+          </div>
+          <span className="shrink-0 font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+            {ms(span.duration_ms)} · +{ms(span.start_ms)}
+          </span>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6 text-sm">
+          <div className="relative">
+            <pre className="whitespace-pre-wrap break-all rounded-lg border border-neutral-200 bg-white p-4 pr-12 font-mono text-xs leading-6 dark:border-white/[0.08] dark:bg-white/[0.03]">
+              {span.type === 'query' ? <Sql sql={span.label} /> : span.label}
+            </pre>
+            <CopyButton text={span.label} label="Copy span" className="absolute right-2.5 top-2.5" />
+          </div>
+
+          <DescriptionList className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
+            <DescriptionRow label="Start">+{ms(span.start_ms)}</DescriptionRow>
+            <DescriptionRow label="Duration">{ms(span.duration_ms)}</DescriptionRow>
+            {Object.entries(span.meta ?? {}).map(([k, v]) => (
+              <DescriptionRow key={k} label={k.replace(/_/g, ' ')}>
+                {k === 'sql_hash' ? (
+                  <Link className="text-kumo-link hover:underline" to={`/queries/${v}`}>{String(v)}</Link>
+                ) : (
+                  String(v)
+                )}
+              </DescriptionRow>
+            ))}
+          </DescriptionList>
+        </div>
+
+        {spans.length > 1 && index >= 0 && (
+          <div className="flex shrink-0 items-center justify-between border-t border-neutral-200 bg-white/80 px-5 py-3 dark:border-white/[0.08] dark:bg-neutral-900">
+            <span className="font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+              Span {index + 1} / {spans.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" icon={CaretLeftIcon} disabled={!prevSpan} onClick={() => prevSpan && onSelect(prevSpan)}>
+                Previous
+              </Button>
+              <Button variant="secondary" size="sm" disabled={!nextSpan} onClick={() => nextSpan && onSelect(nextSpan)}>
+                Next
+                <CaretRightIcon />
+              </Button>
             </div>
-            <div className="space-y-6 text-sm">
-              <div className="relative">
-                <pre className="whitespace-pre-wrap break-all rounded-xl border border-kumo-hairline bg-kumo-recessed p-4 pr-12 font-mono text-xs leading-6">
-                  {span.type === 'query' ? <Sql sql={span.label} /> : span.label}
-                </pre>
-                <CopyButton text={span.label} label="Copy span" className="absolute right-2.5 top-2.5" />
-              </div>
-              <DescriptionList className="rounded-lg border border-neutral-200 bg-neutral-50/50 p-4 dark:border-white/[0.08] dark:bg-white/[0.02]">
-                <DescriptionRow label="Start">+{ms(span.start_ms)}</DescriptionRow>
-                <DescriptionRow label="Duration">{ms(span.duration_ms)}</DescriptionRow>
-                {Object.entries(span.meta ?? {}).map(([k, v]) => (
-                  <DescriptionRow key={k} label={k.replace(/_/g, ' ')}>
-                    {k === 'sql_hash' ? (
-                      <Link className="text-kumo-link hover:underline" to={`/queries/${v}`}>{String(v)}</Link>
-                    ) : (
-                      String(v)
-                    )}
-                  </DescriptionRow>
-                ))}
-              </DescriptionList>
-              {spans.length > 1 && index >= 0 && (
-                <div className="flex items-center justify-between border-t border-kumo-hairline pt-4">
-                  <span className="text-xs tabular-nums text-kumo-subtle">Span {index + 1} of {spans.length}</span>
-                  <div className="flex items-center gap-2.5">
-                    <Button variant="secondary" size="sm" icon={CaretLeftIcon} disabled={!prevSpan} onClick={() => prevSpan && onSelect(prevSpan)}>
-                      Previous
-                    </Button>
-                    <Button variant="secondary" size="sm" disabled={!nextSpan} onClick={() => nextSpan && onSelect(nextSpan)}>
-                      Next
-                      <CaretRightIcon />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
+          </div>
         )}
-      </Dialog>
-    </Dialog.Root>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -211,12 +304,23 @@ export default function TraceDetailPage() {
     const list = spans.filter((s) => s.type === type);
     const total = list.reduce((sum, s) => sum + s.duration_ms, 0);
     if (!list.length) return <span className="text-neutral-400">0 EVENTS</span>;
+    const isFiltered = eventType === type;
     return (
-      <span>
-        {list.length} <span className="text-neutral-400">{list.length === 1 ? 'EVENT' : 'EVENTS'}</span>
-        {total > 0 && <span className="text-neutral-400"> / </span>}
-        {total > 0 && <span>{ms(total)}</span>}
-      </span>
+      <button
+        type="button"
+        onClick={() => updateView({ type: isFiltered ? null : type, span: null })}
+        className={cn(
+          'inline-flex items-center gap-1 rounded px-1 -mr-1 transition-colors hover:bg-neutral-100 dark:hover:bg-white/10',
+          isFiltered && 'bg-blue-50 text-blue-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+        )}
+        title={isFiltered ? 'Clear timeline filter' : `Filter timeline to ${SPAN_LABELS[type]}`}
+      >
+        <span>
+          {list.length} <span className="text-neutral-400">{list.length === 1 ? 'EVENT' : 'EVENTS'}</span>
+          {total > 0 && <span className="text-neutral-400"> / </span>}
+          {total > 0 && <span>{ms(total)}</span>}
+        </span>
+      </button>
     );
   };
 
@@ -236,12 +340,15 @@ export default function TraceDetailPage() {
 
       {/* 1:1 Capture `Show-CzNI7yfT.js` Direct Card with status-colored Globe + Method + URL + 3-col DescriptionList + Events */}
       <div className="grid overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-md shadow-black/[0.04] dark:border-white/[0.06] dark:bg-white/[0.02]">
-        <div className="border-b border-neutral-200/80 p-5 py-4 dark:border-white/5">
-          <div className="float-left mt-[3px] mr-1.5 flex items-center gap-1.5 font-mono text-sm font-semibold">
-            <GlobeIcon size={14} className={cn('shrink-0', globeTone)} aria-hidden />
-            {method && <span className="text-neutral-900 dark:text-white">{method}</span>}
+        <div className="flex items-start justify-between gap-3 border-b border-neutral-200/80 p-5 py-4 dark:border-white/5">
+          <div className="min-w-0 flex-1">
+            <div className="float-left mt-[3px] mr-1.5 flex items-center gap-1.5 font-mono text-sm font-semibold">
+              <GlobeIcon size={14} className={cn('shrink-0', globeTone)} aria-hidden />
+              {method && <span className="text-neutral-900 dark:text-white">{method}</span>}
+            </div>
+            <FormattedUrl url={trace.url ?? routePath} className="break-all" />
           </div>
-          <FormattedUrl url={routePath} className="break-all" />
+          <CopyButton text={trace.url ?? routePath} label="Copy URL" className="shrink-0" />
         </div>
 
         <div className="grid gap-10 p-5">

@@ -1,7 +1,7 @@
 import UserFilter from '@/components/UserFilter';
 import { useEffect, useId, useMemo, useState } from 'react';
 import LogInspector from '@/components/LogInspector';
-import { chartFooterDate } from '@/components/charts';
+import { chartFooterDate, localTzLabel } from '@/components/charts';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Popover } from '@cloudflare/kumo/components/popover';
 import { cn } from '@cloudflare/kumo/utils';
@@ -10,6 +10,7 @@ import { useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
 import { ErrorState, Loading, PageHeader, PaginationBar, Panel, SearchBox, SourceTag, UtcDate } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
+import { useLocalPreferences } from '@/lib/preferences';
 import { useRange } from '@/lib/range';
 import { inlineLogContext } from '@/lib/ui-helpers';
 
@@ -177,6 +178,7 @@ function LevelFilter({
 
 export default function LogsPage() {
   const { range } = useRange();
+  const { showUtc } = useLocalPreferences();
   const fallbackId = useId();
   const [params, setParams] = useSearchParams();
   const user = params.get('user') || undefined;
@@ -216,7 +218,8 @@ export default function LogsPage() {
       return next;
     });
 
-  const latestTimestamp = chartFooterDate(Date.now());
+  const latestTimestamp = chartFooterDate(Date.now(), showUtc);
+  const latestTz = showUtc ? 'UTC' : localTzLabel();
 
   return (
     <div id={fallbackId} tabIndex={-1} className="space-y-4 md:space-y-6">
@@ -349,7 +352,7 @@ export default function LogsPage() {
 
           {/* 1:1 Nightwatch `Index-D7SUa4GT.js` footer */}
           <div className="w-full rounded-md pt-16 pb-24 text-center font-mono text-sm uppercase text-neutral-600 dark:text-white/20">
-            Latest as of {latestTimestamp} UTC
+            Latest as of {latestTimestamp} {latestTz}
           </div>
         </section>
       )}

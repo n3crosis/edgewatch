@@ -10,6 +10,7 @@ import Link, { scopedPath } from '@/components/ScopedLink';
 import { BarChart, MetricChartCard, rangeFooterBounds } from '@/components/charts';
 import {
   CardTray,
+  CompactNumber,
   DescriptionList,
   DescriptionRow,
   Empty,
@@ -18,6 +19,7 @@ import {
   Loading,
   PageHeader,
   Panel,
+  RowActionLink,
   SectionBar,
   SourceTag,
   UtcDate,
@@ -91,13 +93,13 @@ export default function ExceptionDetailPage() {
             <DescriptionList className="md:gap-5">
               <DescriptionRow label="Last Seen"><UtcDate iso={data.last_seen} /></DescriptionRow>
               <DescriptionRow label="First Seen"><UtcDate iso={data.first_seen} /></DescriptionRow>
-              <DescriptionRow label="Impacted Users">{compact(data.users)}</DescriptionRow>
+              <DescriptionRow label="Impacted Users"><CompactNumber value={data.users} /></DescriptionRow>
               <DescriptionRow label="Occurrences">
                 <span className="inline-flex items-center gap-2">
-                  <span>{compact(data.count)}</span>
+                  <CompactNumber value={data.count} />
                   {data.unhandled_count !== undefined && (
                     <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-600 dark:bg-white/10 dark:text-neutral-300">
-                      {compact(data.unhandled_count)} unhandled
+                      <CompactNumber value={data.unhandled_count} /> unhandled
                     </span>
                   )}
                 </span>
@@ -159,6 +161,7 @@ export default function ExceptionDetailPage() {
                   <Table.Head>Source</Table.Head>
                   <Table.Head>Message</Table.Head>
                   <Table.Head className="text-right">User</Table.Head>
+                  <Table.Head className="w-12" />
                 </Table.Row>
               </Table.Header>
               <Table.Body>
@@ -188,6 +191,9 @@ export default function ExceptionDetailPage() {
                       ) : (
                         '—'
                       )}
+                    </Table.Cell>
+                    <Table.Cell className="text-right">
+                      <RowActionLink to={`/traces/${o.trace_id}`} label="Open trace" />
                     </Table.Cell>
                   </Table.Row>
                 ))}

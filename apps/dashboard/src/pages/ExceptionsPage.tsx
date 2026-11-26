@@ -7,6 +7,7 @@ import Link from '@/components/ScopedLink';
 import { BarChart, MetricChartCard, rangeFooterBounds } from '@/components/charts';
 import {
   CardTray,
+  CompactNumber,
   Empty,
   ErrorState,
   FloatingTablePanel,
@@ -24,6 +25,7 @@ import {
 } from '@/components/common';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Table } from '@cloudflare/kumo/components/table';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { api, useAsync } from '@/lib/api';
 import { bucketTime, compact } from '@/lib/format';
 import { useRange } from '@/lib/range';
@@ -219,8 +221,12 @@ export default function ExceptionsPage() {
                           )}
                         </div>
                       </Table.Cell>
-                      <Table.Cell className="text-right font-medium">{compact(e.count)}</Table.Cell>
-                      <Table.Cell className="text-right text-neutral-600 dark:text-neutral-400">{compact(e.users)}</Table.Cell>
+                      <Table.Cell className="text-right font-medium"><CompactNumber value={e.count} /></Table.Cell>
+                      <Table.Cell className="text-right text-neutral-600 dark:text-neutral-400">
+                        <Tooltip content={`${e.users.toLocaleString()} ${e.users === 1 ? 'user' : 'users'}`} asChild>
+                          <span className="cursor-default tabular-nums">{compact(e.users)}</span>
+                        </Tooltip>
+                      </Table.Cell>
                       <Table.Cell className="text-right">
                         <RowActionLink to={target} label={`Inspect ${e.class}`} />
                       </Table.Cell>

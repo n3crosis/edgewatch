@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ms } from '@/lib/format';
+import { useLocalPreferences } from '@/lib/preferences';
 import { useRange } from '@/lib/range';
 import type { Range } from '@/lib/types';
 
@@ -124,8 +125,18 @@ function useContainerWidth(defaultWidth = 513): [React.RefObject<HTMLDivElement 
   return [ref, width];
 }
 
-/** Formats a UTC timestamp exactly like the capture chart footer: `26 Nov 2026, 05:32:07`. */
-export function chartFooterDate(ts: number | string): string {
+/** Short browser timezone label (e.g. "PST", "UTC+8") when showing local timestamps. */
+export function localTzLabel(): string {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(new Date());
+    return parts.find((p) => p.type === 'timeZoneName')?.value ?? 'LOCAL';
+  } catch {
+    return 'LOCAL';
+  }
+}
+
+/** Formats a UTC or local timestamp matching Nightwatch chart footers: `26 Nov 2026, 05:32:07`. */
+export function chartFooterDate(ts: number | string, showUtc = true): string {
   return new Date(ts).toLocaleString('en-GB', {
     day: '2-digit',
     month: 'short',
@@ -134,7 +145,7 @@ export function chartFooterDate(ts: number | string): string {
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
-    timeZone: 'UTC',
+    timeZone: showUtc ? 'UTC' : undefined,
   });
 }
 
@@ -381,20 +392,29 @@ function HorizontalGrid() {
 }
 
 function FooterDates({ labels, bounds }: { labels: string[]; bounds?: [string, string] | null }) {
-  const start = bounds?.[0] ?? labels[0];
-  const end = bounds?.[1] ?? labels[labels.length - 1];
-  const hasUtc = Boolean(bounds);
+  const { showUtc } = useLocalPreferences();
+  const { range } = useRange();
+  const tzLabel = showUtc ? 'UTC' : localTzLabel();
+  const resolvedBounds = (() => {
+    if (!bounds) return null;
+    if (showUtc) return bounds;
+    const win = timeWindow(range);
+    return win ? ([chartFooterDate(win.since, false), chartFooterDate(win.now, false)] as [string, string]) : bounds;
+  })();
+  const start = resolvedBounds?.[0] ?? labels[0];
+  const end = resolvedBounds?.[1] ?? labels[labels.length - 1];
+  const hasTz = Boolean(resolvedBounds);
   if (!start) return null;
   return (
     <div className="mt-3 flex items-center justify-between gap-4 font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-400" aria-hidden>
       <span className="truncate">
         {start}
-        {hasUtc && <span className="ml-1 text-neutral-400 dark:text-neutral-500">UTC</span>}
+        {hasTz && <span className="ml-1 text-neutral-400 dark:text-neutral-500">{tzLabel}</span>}
       </span>
       {end && end !== start && (
         <span className="truncate text-right">
           {end}
-          {hasUtc && <span className="ml-1 text-neutral-400 dark:text-neutral-500">UTC</span>}
+          {hasTz && <span className="ml-1 text-neutral-400 dark:text-neutral-500">{tzLabel}</span>}
         </span>
       )}
     </div>
@@ -585,6 +605,7 @@ export function BarChart({
   hideFooter?: boolean;
 }) {
   const chartId = useId();
+  const { showUtc } = useLocalPreferences();
   const { hidden, labels: metricLabels } = useContext(ChartCardContext);
   const [containerRef, plotWidth] = useContainerWidth(513);
 
@@ -743,7 +764,11 @@ export function BarChart({
           <FloatingChartTooltip
             anchorX={anchorX}
             containerWidth={plotWidth}
-            label={hoveredDatum.ts ? `${chartFooterDate(hoveredDatum.ts)} UTC` : hoveredDatum.label}
+            label={
+              hoveredDatum.ts
+                ? `${chartFooterDate(hoveredDatum.ts, showUtc)} ${showUtc ? 'UTC' : localTzLabel()}`
+                : hoveredDatum.label
+            }
             rows={tooltipRows}
             total={hoveredVis.total.toLocaleString()}
           />
@@ -815,6 +840,7 @@ export function LineChart({
   hideFooter?: boolean;
 }) {
   const chartId = useId();
+  const { showUtc } = useLocalPreferences();
   const p95GradId = useId();
   const avgGradId = useId();
   const { hidden } = useContext(ChartCardContext);
@@ -994,8 +1020,8 @@ export function LineChart({
             containerWidth={plotWidth}
             label={
               timestamps?.[activeIdx]
-                ? `${chartFooterDate(timestamps[activeIdx])} UTC`
-                : labels[activeIdx] || (bounds ? `${bounds[0]} UTC` : undefined)
+                ? `${chartFooterDate(timestamps[activeIdx], showUtc)} ${showUtc ? 'UTC' : localTzLabel()}`
+                : labels[activeIdx] || (bounds ? `${bounds[0]} ${showUtc ? 'UTC' : localTzLabel()}` : undefined)
             }
             rows={tooltipRows}
           />

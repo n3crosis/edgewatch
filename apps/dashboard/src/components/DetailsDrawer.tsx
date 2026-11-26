@@ -4,15 +4,16 @@ import { ArrowUpRightIcon, DatabaseIcon, FileCodeIcon, GlobeIcon, XIcon } from '
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Link, { scopedPath } from './ScopedLink';
-import { BarChart, ChartSyncProvider, LineChart, MetricChartCard, durationRangeLabel, rangeFooterBounds } from './charts';
+import { bucketTimeSeries, BarChart, ChartSyncProvider, LineChart, MetricChartCard, durationRangeLabel, rangeFooterBounds } from './charts';
 import { HttpMethodText, Loading, Sql, StatusCodeText, UtcDate } from './common';
 import { api, useAsync } from '@/lib/api';
 import { useEnvironment } from '@/lib/environment';
+import type { EventPage } from '@/lib/events';
 import { bucketTime, compact, ms } from '@/lib/format';
 import { useLayoutScroll } from '@/lib/preferences';
 import { useProject } from '@/lib/project';
 import { useRange } from '@/lib/range';
-import type { RequestGroup } from '@/lib/types';
+import type { EventGroup, RequestGroup } from '@/lib/types';
 
 /** 1:1 Nightwatch `DrawerCard-CFISQYH2.js` slide-over quick-peek sheet. */
 function DetailsDrawerFrame({
@@ -414,6 +415,114 @@ export function QueryDetailsDrawer({
             </span>
           </DrawerExecutionCard>
         ))
+      )}
+    </DetailsDrawerFrame>
+  );
+}
+
+/** 1:1 Nightwatch event quick-peek drawer for Jobs, Commands, Scheduled Tasks, Outgoing Requests, Mail, and Notifications. */
+export function EventDetailsDrawer({
+  page,
+  group,
+  user,
+  onClose,
+}: {
+  page: EventPage;
+  group: EventGroup | null;
+  user?: string;
+  onClose: () => void;
+}) {
+  const { range } = useRange();
+  const { scrollToTop } = useLayoutScroll();
+
+  const detail = useAsync(
+    () => (group ? api.eventRows(page.path, group.key, range, user) : Promise.resolve(null)),
+    [page.path, group?.key, range, user],
+  );
+
+  if (!group) return null;
+
+  const PageIcon = page.icon;
+  const rows = detail.data ?? [];
+  const viewHref = `${page.path}/${encodeURIComponent(group.key)}${user ? `?user=${encodeURIComponent(user)}` : ''}`;
+  const timed = bucketTimeSeries(rows, range, {
+    timestamp: (r) => r.timestamp,
+    value: () => 1,
+    highlight: (r) =>
+      r.status === 'failed' || Boolean(r.failed) || (r.exit_code !== undefined && r.exit_code !== null && Number(r.exit_code) !== 0) || (r.status_code !== undefined && r.status_code !== null && Number(r.status_code) >= 400)
+        ? 1
+        : 0,
+    buckets: 24,
+  });
+
+  const avgMs = group.avg_ms != null ? Number(group.avg_ms) : null;
+  const maxMs = group.max_ms != null ? Number(group.max_ms) : null;
+
+  return (
+    <DetailsDrawerFrame
+      open
+      onClose={onClose}
+      viewHref={viewHref}
+      title={page.title}
+      loading={detail.loading}
+      countBadge={
+        <span className="inline-flex h-5 items-center rounded bg-neutral-200/80 px-1.5 font-mono text-[11px] font-medium tabular-nums text-neutral-700 dark:bg-white/10 dark:text-neutral-200">
+          {compact(group.count)}
+        </span>
+      }
+      titleCard={
+        <div className="flex items-center gap-2 overflow-hidden">
+          <PageIcon size={15} className="shrink-0 text-neutral-500 dark:text-neutral-400" aria-hidden />
+          <span className="truncate font-mono text-neutral-800 dark:text-neutral-200">{group.key}</span>
+        </div>
+      }
+      charts={
+        rows.length > 0 ? (
+          <MetricChartCard
+            title={page.title}
+            value={compact(group.count)}
+            metrics={
+              avgMs !== null || maxMs !== null
+                ? [
+                    { label: 'AVG', value: avgMs !== null ? ms(avgMs) : '—', tone: 'charcoal' },
+                    { label: 'P95', value: maxMs !== null ? ms(maxMs) : '—', tone: 'alert' },
+                  ]
+                : undefined
+            }
+          >
+            <BarChart height={140} bounds={rangeFooterBounds(range)} series={timed.barSeries} unit="events" />
+          </MetricChartCard>
+        ) : undefined
+      }
+    >
+      {rows.length === 0 ? (
+        <div className="py-6 text-center font-mono text-xs text-neutral-500">No recent executions in this window</div>
+      ) : (
+        rows.slice(0, 10).map((row, idx) => {
+          const isError =
+            row.status === 'failed' ||
+            Boolean(row.failed) ||
+            (row.exit_code !== undefined && row.exit_code !== null && Number(row.exit_code) !== 0) ||
+            (row.status_code !== undefined && row.status_code !== null && Number(row.status_code) >= 500);
+          return (
+            <DrawerExecutionCard
+              key={`${row.trace_id}-${idx}`}
+              href={`/traces/${row.trace_id}`}
+              hasError={isError}
+              timestamp={row.timestamp}
+              durationMs={Number(row.duration_ms ?? 0)}
+              onNavigate={() => {
+                onClose();
+                scrollToTop();
+              }}
+            >
+              <PageIcon size={14} className="shrink-0 text-neutral-500" aria-hidden />
+              <span className="truncate text-neutral-700 dark:text-neutral-300">
+                {String(row.command ?? row.url ?? row.subject ?? row.channel ?? row.status ?? row.trace_name ?? row.trace_id)}
+              </span>
+            </DrawerExecutionCard>
+          );
+        })
       )}
     </DetailsDrawerFrame>
   );

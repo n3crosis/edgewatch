@@ -4,6 +4,7 @@ import { cn } from '@cloudflare/kumo/utils';
 import { timeWindow } from '@edgewatch/shared/time-window';
 import { CalendarBlankIcon, CaretDownIcon, XIcon } from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
+import { useLocalPreferences } from '@/lib/preferences';
 import { useRange } from '@/lib/range';
 import type { Range } from '@/lib/types';
 
@@ -45,9 +46,9 @@ const formatPrettyWindow = (range: Range, utc: boolean) => {
 /** 1:1 Nightwatch time range picker (`Qr` & `Zr` in `AuthenticatedLayout-CUJ0-ea8.js`). */
 export default function RangePicker() {
   const { range, setRange } = useRange();
+  const { showUtc, setShowUtc } = useLocalPreferences();
   const isCustom = range.startsWith('custom:');
   const [open, setOpen] = useState(false);
-  const [showUtc, setShowUtc] = useState(true);
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [error, setError] = useState('');
@@ -150,7 +151,8 @@ export default function RangePicker() {
         />
         <Popover.Portal>
           <Popover.Positioner side="bottom" align="end" sideOffset={8}>
-            <Popover.Popup className="w-fit rounded-xl border border-neutral-200 bg-white p-4 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
+            {/* 1:1 Nightwatch `.dropdown dark` custom range popover */}
+            <Popover.Popup className="w-fit rounded-md border border-neutral-800 bg-neutral-900 p-4 text-white shadow-2xl shadow-black/50 dark:border-neutral-700/50 dark:bg-neutral-800">
               <form
                 className="space-y-5"
                 onSubmit={(event) => {
@@ -167,8 +169,8 @@ export default function RangePicker() {
                   setRange(value as Range);
                 }}
               >
-                {/* Exact Nightwatch UTC / Local segmented toggle */}
-                <div className="flex h-8 items-center rounded-md border border-neutral-200 bg-neutral-100 p-0.5 dark:border-white/5 dark:bg-white/[0.03]">
+                {/* Exact Nightwatch UTC / Local segmented toggle synced with LocalPreferences */}
+                <div className="flex h-8 items-center rounded-md bg-white/[0.04] p-0.5">
                   {(['utc', 'local'] as const).map((tz) => {
                     const active = (tz === 'utc') === showUtc;
                     return (
@@ -177,10 +179,10 @@ export default function RangePicker() {
                         type="button"
                         onClick={() => setShowUtc(tz === 'utc')}
                         className={cn(
-                          'flex h-full flex-1 items-center justify-center rounded text-xs font-medium uppercase transition-colors',
+                          'flex h-full flex-1 items-center justify-center rounded-md font-mono text-xs font-medium uppercase transition-colors',
                           active
-                            ? 'bg-white text-neutral-900 shadow-xs dark:bg-neutral-700 dark:text-white'
-                            : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white',
+                            ? 'border border-neutral-600 bg-neutral-700 text-white'
+                            : 'text-neutral-400 hover:bg-neutral-700/50 hover:text-neutral-200',
                         )}
                       >
                         {tz}
@@ -190,28 +192,28 @@ export default function RangePicker() {
                 </div>
 
                 <label className="block w-60 space-y-1.5">
-                  <span className="block px-1 text-xs font-medium text-neutral-700 dark:text-neutral-300">Starting date</span>
+                  <span className="block px-1 text-xs font-medium text-neutral-300">Starting date</span>
                   <input
                     required
                     type="datetime-local"
-                    className="block h-10 w-full rounded-lg border border-neutral-200 bg-white px-3 font-mono text-xs text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-white"
+                    className="block h-10 w-full rounded-md border border-neutral-700 bg-neutral-950/60 px-3 font-mono text-xs text-white outline-none [color-scheme:dark] focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     value={start}
                     onChange={(event) => setStart(event.target.value)}
                   />
                 </label>
 
                 <label className="block w-60 space-y-1.5">
-                  <span className="block px-1 text-xs font-medium text-neutral-700 dark:text-neutral-300">Ending date</span>
+                  <span className="block px-1 text-xs font-medium text-neutral-300">Ending date</span>
                   <input
                     required
                     type="datetime-local"
-                    className="block h-10 w-full rounded-lg border border-neutral-200 bg-white px-3 font-mono text-xs text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-white"
+                    className="block h-10 w-full rounded-md border border-neutral-700 bg-neutral-950/60 px-3 font-mono text-xs text-white outline-none [color-scheme:dark] focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     value={end}
                     onChange={(event) => setEnd(event.target.value)}
                   />
                 </label>
 
-                {error && <p role="alert" className="w-60 text-xs text-kumo-danger">{error}</p>}
+                {error && <p role="alert" className="w-60 text-xs text-rose-400">{error}</p>}
 
                 <Button type="submit" variant="primary" className="w-full justify-center">
                   Apply

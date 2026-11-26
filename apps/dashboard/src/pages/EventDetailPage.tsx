@@ -7,6 +7,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { BarChart, LineChart, MetricChartCard, bucketTimeSeries, durationRangeLabel, rangeFooterBounds } from '@/components/charts';
 import {
   CardTray,
+  CompactNumber,
   DescriptionList,
   DescriptionRow,
   Empty,
@@ -21,6 +22,7 @@ import {
   SectionBar,
   SegmentedToggle,
   StatusCodeText,
+  UrlFormatDisplay,
   UtcDate,
   useRowNavigate,
 } from '@/components/common';
@@ -216,7 +218,7 @@ export default function EventDetailPage({ page }: { page: EventPage }) {
               <DescriptionList>
                 <DescriptionRow label="ID">{key}</DescriptionRow>
                 {lastSeenIso && <DescriptionRow label="Last Seen"><UtcDate iso={lastSeenIso} /></DescriptionRow>}
-                <DescriptionRow label="Requests">{compact(data.length)}</DescriptionRow>
+                <DescriptionRow label="Requests"><CompactNumber value={data.length} /></DescriptionRow>
                 <DescriptionRow label="Avg Duration">{avgMs > 0 ? ms(avgMs) : '—'}</DescriptionRow>
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                   <dt className="font-mono text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
@@ -437,9 +439,13 @@ export default function EventDetailPage({ page }: { page: EventPage }) {
                       <Table.Cell className="max-w-lg">
                         <div className="flex min-w-0 items-center gap-2">
                           <GlobeIcon size={13} className="shrink-0 text-neutral-400 max-md:hidden" aria-hidden />
-                          <Link className="truncate text-neutral-900 hover:underline dark:text-white" to={`/traces/${r.trace_id}`}>
-                            {url}
-                          </Link>
+                          {r.url ? (
+                            <UrlFormatDisplay url={String(r.url)} className="text-neutral-900 dark:text-white" />
+                          ) : (
+                            <Link className="truncate text-neutral-900 hover:underline dark:text-white" to={`/traces/${r.trace_id}`}>
+                              {url}
+                            </Link>
+                          )}
                         </div>
                       </Table.Cell>
                       <Table.Cell className="text-center font-mono font-semibold">

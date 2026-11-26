@@ -1376,6 +1376,7 @@ export function SearchBox({
 }) {
   const [draft, setDraft] = useState(value);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setDraft(value);
@@ -1383,6 +1384,23 @@ export function SearchBox({
 
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  // Pressing `/` outside any text field focuses the page's SearchBox.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) {
+        return;
+      }
+      if (!inputRef.current) return;
+      e.preventDefault();
+      inputRef.current.focus();
+      inputRef.current.select();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   const commit = (next: string, immediate = false) => {
@@ -1401,6 +1419,7 @@ export function SearchBox({
         <MagnifyingGlassIcon size={14} className="text-neutral-400 dark:text-neutral-500" />
       </InputGroup.Addon>
       <InputGroup.Input
+        ref={inputRef}
         value={draft}
         onChange={(e) => commit(e.target.value)}
         onKeyDown={(e) => {
@@ -1411,7 +1430,7 @@ export function SearchBox({
         aria-label={placeholder}
         className="h-8 text-sm"
       />
-      {draft && (
+      {draft ? (
         <InputGroup.Addon align="end">
           <button
             type="button"
@@ -1421,6 +1440,12 @@ export function SearchBox({
           >
             <XIcon size={12} />
           </button>
+        </InputGroup.Addon>
+      ) : (
+        <InputGroup.Addon align="end" className="hidden sm:flex">
+          <kbd className="rounded border border-neutral-200 px-1 py-0.5 font-mono text-[10px] leading-none text-neutral-400 dark:border-white/10 dark:text-neutral-500">
+            /
+          </kbd>
         </InputGroup.Addon>
       )}
     </InputGroup>

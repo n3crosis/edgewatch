@@ -6,6 +6,7 @@ import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Textarea } from '@cloudflare/kumo/components/input';
 import { Table } from '@cloudflare/kumo/components/table';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { useKumoToastManager } from '@cloudflare/kumo/components/toast';
 import { cn } from '@cloudflare/kumo/utils';
 import {
@@ -20,6 +21,7 @@ import {
 import { useParams, useSearchParams } from 'react-router-dom';
 import Link, { scopedPath } from '@/components/ScopedLink';
 import {
+  CompactNumber,
   Empty,
   ErrorState,
   FloatingTablePanel,
@@ -36,13 +38,12 @@ import {
   useRowNavigate,
 } from '@/components/common';
 import { api, USING_MOCK, useAsync } from '@/lib/api';
-import { ago, compact } from '@/lib/format';
+import { compact } from '@/lib/format';
 import { useRange, rangeLabel } from '@/lib/range';
 import type { IssueStatus } from '@/lib/types';
 
 const QUICK_REASONS = ['Fixed in latest deploy', 'Transient upstream error', 'Expected behavior'] as const;
 const statuses: IssueStatus[] = ['open', 'resolved', 'ignored'];
-const date = (value: number) => new Date(value).toLocaleString();
 const statusVariant = (status: IssueStatus): 'error' | 'success' | 'secondary' =>
   status === 'open' ? 'error' : status === 'resolved' ? 'success' : 'secondary';
 const statusLabel = (status: string) => status.charAt(0).toUpperCase() + status.slice(1);
@@ -300,10 +301,16 @@ export default function IssuesPage() {
                       </p>
                     </Table.Cell>
                     <Table.Cell className="text-right text-neutral-600 dark:text-neutral-400">
-                      {count > 0 ? compact(count) : '—'}
+                      {count > 0 ? <CompactNumber value={count} /> : '—'}
                     </Table.Cell>
                     <Table.Cell className="text-right text-neutral-600 dark:text-neutral-400">
-                      {users > 0 ? compact(users) : '—'}
+                      {users > 0 ? (
+                        <Tooltip asChild content={`${users.toLocaleString()} ${users === 1 ? 'user' : 'users'}`}>
+                          <span className="cursor-default tabular-nums">{compact(users)}</span>
+                        </Tooltip>
+                      ) : (
+                        '—'
+                      )}
                     </Table.Cell>
                     <Table.Cell className="text-right text-neutral-500 max-md:hidden dark:text-neutral-400">
                       <TimeAgo iso={new Date(issue.first_seen).toISOString()} />
@@ -575,14 +582,14 @@ export function IssueDetailPage() {
                 <dl className="space-y-3 px-4 py-4 text-sm">
                   <div className="flex items-center justify-between gap-2">
                     <dt className="text-neutral-500 dark:text-neutral-400">First seen</dt>
-                    <dd className="font-medium text-neutral-900 dark:text-white" title={date(issue.first_seen)}>
-                      {ago(new Date(issue.first_seen).toISOString())}
+                    <dd className="font-medium text-neutral-900 dark:text-white">
+                      <TimeAgo iso={new Date(issue.first_seen).toISOString()} />
                     </dd>
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <dt className="text-neutral-500 dark:text-neutral-400">Last seen</dt>
-                    <dd className="font-medium text-neutral-900 dark:text-white" title={date(issue.last_seen)}>
-                      {ago(new Date(issue.last_seen).toISOString())}
+                    <dd className="font-medium text-neutral-900 dark:text-white">
+                      <TimeAgo iso={new Date(issue.last_seen).toISOString()} />
                     </dd>
                   </div>
                 </dl>
@@ -603,7 +610,7 @@ export function IssueDetailPage() {
                         to={excUrl}
                         className="inline-flex items-center gap-1 font-mono font-medium tabular-nums text-neutral-900 hover:underline dark:text-white"
                       >
-                        <span>{compact(impact.occurrences)}</span>
+                        <CompactNumber value={impact.occurrences} />
                         <ArrowUpRightIcon size={13} className="text-neutral-400" aria-hidden />
                       </Link>
                     </dd>
@@ -611,7 +618,7 @@ export function IssueDetailPage() {
                   <div className="flex items-center justify-between gap-2">
                     <dt className="text-neutral-500 dark:text-neutral-400">Impacted users</dt>
                     <dd className="font-mono font-medium tabular-nums text-neutral-900 dark:text-white">
-                      {compact(impact.users)}
+                      <CompactNumber value={impact.users} />
                     </dd>
                   </div>
                 </dl>

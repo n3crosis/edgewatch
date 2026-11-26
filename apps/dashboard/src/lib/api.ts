@@ -105,7 +105,12 @@ function mockRequestTrend(filters: TraceFilters): RequestTrend {
 }
 
 export const api = {
-  environments: () => USING_MOCK ? delay(mock.environments()) : get<{ data: EnvironmentInfo[] }>('/environments').then((result) => result.data),
+  environments: (projectIdOverride?: string) =>
+    USING_MOCK
+      ? delay(mock.environments())
+      : projectIdOverride && projectIdOverride !== activeProjectId()
+        ? rootRequest<{ data: EnvironmentInfo[] }>(`/v1/projects/${encodeURIComponent(projectIdOverride)}/environments`).then((result) => result.data)
+        : get<{ data: EnvironmentInfo[] }>('/environments').then((result) => result.data),
   createEnvironment: (input: { name: string; color?: string; url?: string | null }) =>
     USING_MOCK
       ? delay(mock.createEnvironment(input))
