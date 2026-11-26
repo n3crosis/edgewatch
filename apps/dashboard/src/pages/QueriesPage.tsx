@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { groupListState, groupListLink, updateGroupList } from '@/lib/group-list';
 import Link from '@/components/ScopedLink';
+import { QueryDetailsDrawer } from '@/components/DetailsDrawer';
 import { BarChart, LineChart, MetricChartCard, durationRangeLabel, rangeFooterBounds } from '@/components/charts';
 import {
   CardTray,
@@ -158,6 +159,7 @@ export default function QueriesPage() {
   const { range } = useRange();
   const rowNav = useRowNavigate();
   const [params, setParams] = useSearchParams();
+  const [previewHash, setPreviewHash] = useState<string | null>(null);
   const { q, sort, offset } = groupListState(params);
   const connection = params.get('connection') ?? '';
   const update = (patch: Record<string, string>) => setParams((previous) => updateGroupList(previous, patch));
@@ -322,7 +324,13 @@ export default function QueriesPage() {
                       <Table.Cell className="text-right">
                         <DurationHover value={row.p95_ms} avg={row.avg_ms} p95={row.p95_ms} max={row.max_ms} />
                       </Table.Cell>
-                      <Table.Cell className="text-right"><RowActionLink to={target} label="Inspect query" /></Table.Cell>
+                      <Table.Cell className="text-right">
+                        <RowActionLink
+                          to={target}
+                          label="Inspect query"
+                          onPreview={() => setPreviewHash(row.sql_hash)}
+                        />
+                      </Table.Cell>
                     </Table.Row>
                   );
                 })}
@@ -331,6 +339,8 @@ export default function QueriesPage() {
           </FloatingTablePanel>
         )}
       </div>
+
+      <QueryDetailsDrawer sqlHash={previewHash} onClose={() => setPreviewHash(null)} />
     </div>
   );
 }

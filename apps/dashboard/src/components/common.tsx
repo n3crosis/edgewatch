@@ -26,6 +26,7 @@ import {
   CheckIcon,
   CopyIcon,
   MagnifyingGlassIcon,
+  SidebarSimpleIcon,
   TerminalIcon,
   TrayIcon,
   WarningCircleIcon,
@@ -637,18 +638,48 @@ export function ErrorCount({ count }: { count: number }) {
   );
 }
 
-/** 1:1 Capture right-aligned table row action button (`[↗]`, matching `Table-yTpK8UQF.js`). */
-export function RowActionLink({ to, label = 'View' }: { to: string; label?: string }) {
+/** 1:1 Nightwatch `Table-DS6Cy-yG.js` right-aligned row action pill (`[Preview] [View ↗]`). */
+export function RowActionLink({
+  to,
+  label = 'View',
+  onPreview,
+}: {
+  to: string;
+  label?: string;
+  onPreview?: () => void;
+}) {
   return (
     <div className="inline-flex items-center justify-end">
-      <Link
-        to={to}
-        aria-label={label}
-        onClick={(e) => e.stopPropagation()}
-        className="inline-flex size-6 items-center justify-center rounded-sm border border-neutral-200/80 bg-neutral-50/70 text-neutral-500 transition-colors hover:border-blue-500 hover:bg-white hover:text-blue-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-neutral-400 dark:hover:border-white/20 dark:hover:text-white"
-      >
-        <ArrowUpRightIcon size={13} aria-hidden />
-      </Link>
+      <div className="inline-flex items-center rounded-sm border border-neutral-200/70 bg-neutral-50/70 text-neutral-500 transition-colors hover:border-neutral-300 dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-neutral-400 dark:hover:border-white/20">
+        {onPreview && (
+          <Tooltip content="Preview" asChild>
+            <button
+              type="button"
+              aria-label="Preview"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreview();
+              }}
+              className="inline-flex size-6 items-center justify-center rounded-l-sm transition-colors hover:bg-white hover:text-blue-600 dark:hover:bg-white/[0.06] dark:hover:text-emerald-400"
+            >
+              <SidebarSimpleIcon size={13} aria-hidden />
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip content="View" asChild>
+          <Link
+            to={to}
+            aria-label={label}
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              'inline-flex size-6 items-center justify-center transition-colors hover:bg-white hover:text-blue-600 dark:hover:bg-white/[0.06] dark:hover:text-white',
+              onPreview ? 'rounded-r-sm border-l border-neutral-200/70 dark:border-white/[0.08]' : 'rounded-sm',
+            )}
+          >
+            <ArrowUpRightIcon size={13} aria-hidden />
+          </Link>
+        </Tooltip>
+      </div>
     </div>
   );
 }
@@ -960,6 +991,148 @@ export function DurationHover({
             </div>
           ))}
         </dl>
+      }
+    />
+  );
+}
+
+/** 1:1 Nightwatch `Total-D-CPdEcd.js` status count with hover card showing exact count, % of total, and progress bar. */
+export function StatusCountHover({
+  value,
+  total,
+  variant = 'default',
+  to,
+}: {
+  value: number;
+  total: number;
+  variant?: 'default' | 'warning' | 'error';
+  to?: string;
+}) {
+  if (value === 0) {
+    return <span className="font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-500">0</span>;
+  }
+  const pct = total > 0 ? Math.min(100, (value / total) * 100) : 0;
+  const textTone =
+    variant === 'warning'
+      ? 'text-amber-600 dark:text-amber-400'
+      : variant === 'error'
+        ? 'text-rose-600 dark:text-rose-400'
+        : 'text-neutral-900 dark:text-neutral-100';
+  const barTone =
+    variant === 'warning'
+      ? 'bg-amber-500 dark:bg-amber-400'
+      : variant === 'error'
+        ? 'bg-rose-500 dark:bg-rose-400'
+        : 'bg-neutral-200';
+
+  const countNode = (
+    <span className={cn('inline-flex items-center gap-1.5 font-mono text-xs font-medium tabular-nums', textTone)}>
+      {variant === 'warning' && <WarningIcon size={12} weight="fill" className="shrink-0 text-amber-500" aria-hidden />}
+      {variant === 'error' && <WarningCircleIcon size={12} weight="fill" className="shrink-0 text-rose-500" aria-hidden />}
+      <span>{compact(value)}</span>
+    </span>
+  );
+
+  const trigger = to ? (
+    <Link
+      to={to}
+      onClick={(e) => e.stopPropagation()}
+      className="inline-flex items-center border-b border-dashed border-transparent py-[2px] transition-colors hover:border-neutral-400 dark:hover:border-white/70"
+    >
+      {countNode}
+    </Link>
+  ) : (
+    countNode
+  );
+
+  return (
+    <HoverPopover
+      delayMs={200}
+      popupClassName="min-w-[180px]"
+      trigger={trigger}
+      content={
+        <div className="flex flex-col gap-2.5 p-3 font-mono">
+          <div className="flex items-center justify-between gap-6">
+            <span className={cn('text-sm/none font-medium tabular-nums', variant === 'default' ? 'text-white' : textTone)}>
+              {value.toLocaleString()}
+            </span>
+            <span className="text-xs text-neutral-300 tabular-nums">
+              {Math.round(pct)}% of {total.toLocaleString()}
+            </span>
+          </div>
+          <div className="h-0.5 w-full overflow-hidden rounded-full bg-neutral-700 dark:bg-neutral-900">
+            <div className={cn('h-full', barTone)} style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      }
+    />
+  );
+}
+
+function extractUrlPath(raw: string): string {
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.pathname}${parsed.search}${parsed.hash}` || '/';
+  } catch {
+    return raw;
+  }
+}
+
+/** 1:1 Nightwatch `UrlFormatDisplay-CfhTexHD.js`: displays PATH or full URL with interactive copy + global toggle popover. */
+export function UrlFormatDisplay({ url, className }: { url: string; className?: string }) {
+  const { urlFormat, setUrlFormat } = useLocalPreferences();
+  const path = extractUrlPath(url);
+  const shown = urlFormat === 'path' ? path : url;
+
+  return (
+    <HoverPopover
+      delayMs={350}
+      popupClassName="max-w-sm"
+      trigger={
+        <span className={cn('truncate font-mono whitespace-nowrap', className)}>
+          {shown}
+        </span>
+      }
+      content={
+        <div className="min-w-[260px] font-mono">
+          <div className="grid gap-3.5 p-3.5 pr-4">
+            <div className="grid gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs/none text-neutral-400">PATH</span>
+                <MiniCopyButton value={path} label="Copy path" />
+              </div>
+              <span className="break-all text-xs/snug text-white">{path}</span>
+            </div>
+            <div className="grid gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs/none text-neutral-400">URL</span>
+                <MiniCopyButton value={url} label="Copy URL" />
+              </div>
+              <span className="break-all text-xs/snug text-white">{url}</span>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+            <span className="text-xs/none text-neutral-400">DEFAULT</span>
+            <div className="flex overflow-hidden rounded-md border border-white/20 bg-neutral-900">
+              {(['path', 'full'] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setUrlFormat(opt);
+                  }}
+                  className={cn(
+                    'flex w-13 items-center justify-center rounded-sm px-1 py-1 text-[11px] transition-colors',
+                    urlFormat === opt ? 'bg-white text-neutral-900 font-medium' : 'bg-transparent text-neutral-400 hover:bg-neutral-800',
+                  )}
+                >
+                  {opt === 'path' ? 'PATH' : 'URL'}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       }
     />
   );

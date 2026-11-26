@@ -1,9 +1,11 @@
 import { withUser } from '@/lib/user-activity';
 import UserFilter from '@/components/UserFilter';
+import { RouteDetailsDrawer } from '@/components/DetailsDrawer';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Table } from '@cloudflare/kumo/components/table';
 import { GlobeIcon } from '@phosphor-icons/react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
 import { BarChart, LineChart, MetricChartCard, durationRangeLabel, rangeFooterBounds } from '@/components/charts';
@@ -12,7 +14,6 @@ import {
   CompactNumber,
   DurationHover,
   Empty,
-  ErrorCount,
   ErrorState,
   FloatingTablePanel,
   HttpMethodText,
@@ -25,20 +26,27 @@ import {
   SearchBox,
   SectionBar,
   SegmentedToggle,
+  SortableLabel,
   StatusCodeText,
+  StatusCountHover,
+  UrlFormatDisplay,
   UtcDate,
-  WarningCount,
   useRowNavigate,
 } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
 import { bucketTime, compact, ms } from '@/lib/format';
-import type { TraceFilters } from '@/lib/types';
+import type { RequestGroup, TraceFilters } from '@/lib/types';
 import { useRange } from '@/lib/range';
+
+type RouteSortCol = 'method' | 'route' | 'ok' | '4xx' | '5xx' | 'requests' | 'avg_ms' | 'p95_ms';
 
 export default function RequestsPage() {
   const { range } = useRange();
   const rowNav = useRowNavigate();
   const [params, setParams] = useSearchParams();
+  const [previewRoute, setPreviewRoute] = useState<RequestGroup | null>(null);
+  const [sortCol, setSortCol] = useState<RouteSortCol>('requests');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const user = params.get('user') || undefined;
   const route = params.get('route');
   const routeKind = (params.get('route_kind') ?? (route === '[unnamed]' ? 'unknown' : 'name')) as TraceFilters['route_kind'];
@@ -93,6 +101,41 @@ export default function RequestsPage() {
   const durationHeadline = durationRangeLabel(
     route === null && groupRows.length ? groupRows.flatMap((r) => [r.avg_ms, r.p95_ms ?? 0]) : p95Series,
   );
+
+  const onSort = (col: RouteSortCol) => {
+    if (sortCol === col) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortCol(col);
+      setSortDir(col === 'method' || col === 'route' ? 'asc' : 'desc');
+    }
+  };
+
+  const sortedGroupRows = useMemo(() => {
+    const list = [...groupRows];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    list.sort((a, b) => {
+      switch (sortCol) {
+        case 'method':
+          return dir * a.method.localeCompare(b.method);
+        case 'route':
+          return dir * a.route.localeCompare(b.route);
+        case 'ok':
+          return dir * ((a.status_2xx + a.status_3xx) - (b.status_2xx + b.status_3xx));
+        case '4xx':
+          return dir * (a.status_4xx - b.status_4xx);
+        case '5xx':
+          return dir * (a.status_5xx - b.status_5xx);
+        case 'avg_ms':
+          return dir * (a.avg_ms - b.avg_ms);
+        case 'p95_ms':
+          return dir * ((a.p95_ms ?? 0) - (b.p95_ms ?? 0));
+        default:
+          return dir * (a.requests - b.requests);
+      }
+    });
+    return list;
+  }, [groupRows, sortCol, sortDir]);
 
   return (
     <div className="space-y-4 md:space-y-6 xl:space-y-10">
@@ -236,20 +279,39 @@ export default function RequestsPage() {
               <Table>
                 <Table.Header>
                   <Table.Row>
-                    <Table.Head className="w-24">Method</Table.Head>
-                    <Table.Head>Path</Table.Head>
-                    <Table.Head className="text-right">1/2/3xx</Table.Head>
-                    <Table.Head className="text-right">4xx</Table.Head>
-                    <Table.Head className="text-right">5xx</Table.Head>
-                    <Table.Head className="text-right">Total</Table.Head>
-                    <Table.Head className="text-right">Avg</Table.Head>
-                    <Table.Head className="text-right">P95</Table.Head>
-                    <Table.Head className="w-12" />
+                    <Table.Head className="w-24">
+                      <SortableLabel align="left" active={sortCol === 'method'} direction={sortDir} onClick={() => onSort('method')}>Method</SortableLabel>
+                    </Table.Head>
+                    <Table.Head>
+                      <SortableLabel align="left" active={sortCol === 'route'} direction={sortDir} onClick={() => onSort('route')}>Path</SortableLabel>
+                    </Table.Head>
+                    <Table.Head className="text-right">
+                      <SortableLabel active={sortCol === 'ok'} direction={sortDir} onClick={() => onSort('ok')}>1/2/3xx</SortableLabel>
+                    </Table.Head>
+                    <Table.Head className="text-right">
+                      <SortableLabel active={sortCol === '4xx'} direction={sortDir} onClick={() => onSort('4xx')}>4xx</SortableLabel>
+                    </Table.Head>
+                    <Table.Head className="text-right">
+                      <SortableLabel active={sortCol === '5xx'} direction={sortDir} onClick={() => onSort('5xx')}>5xx</SortableLabel>
+                    </Table.Head>
+                    <Table.Head className="text-right">
+                      <SortableLabel active={sortCol === 'requests'} direction={sortDir} onClick={() => onSort('requests')}>Total</SortableLabel>
+                    </Table.Head>
+                    <Table.Head className="text-right">
+                      <SortableLabel active={sortCol === 'avg_ms'} direction={sortDir} onClick={() => onSort('avg_ms')}>Avg</SortableLabel>
+                    </Table.Head>
+                    <Table.Head className="text-right">
+                      <SortableLabel active={sortCol === 'p95_ms'} direction={sortDir} onClick={() => onSort('p95_ms')}>P95</SortableLabel>
+                    </Table.Head>
+                    <Table.Head className="w-16" />
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {groupRows.map((r) => {
-                    const target = withUser(`/requests?${new URLSearchParams({ route: r.route, route_kind: r.route_kind, method: r.method })}`, user);
+                  {sortedGroupRows.map((r) => {
+                    const baseParams = { route: r.route, route_kind: r.route_kind, method: r.method };
+                    const target = withUser(`/requests?${new URLSearchParams(baseParams)}`, user);
+                    const targetStatus = (family: string) =>
+                      withUser(`/requests?${new URLSearchParams({ ...baseParams, status: family })}`, user);
                     const okCount = r.status_2xx + r.status_3xx;
                     return (
                       <Table.Row key={JSON.stringify([r.method, r.route_kind, r.route])} onClick={rowNav(target)} className="cursor-pointer">
@@ -267,9 +329,15 @@ export default function RequestsPage() {
                             )}
                           </div>
                         </Table.Cell>
-                        <Table.Cell className="text-right"><CompactNumber value={okCount} /></Table.Cell>
-                        <Table.Cell className="text-right"><WarningCount count={r.status_4xx} /></Table.Cell>
-                        <Table.Cell className="text-right"><ErrorCount count={r.status_5xx} /></Table.Cell>
+                        <Table.Cell className="text-right">
+                          <StatusCountHover value={okCount} total={r.requests} to={targetStatus('2xx')} />
+                        </Table.Cell>
+                        <Table.Cell className="text-right">
+                          <StatusCountHover value={r.status_4xx} total={r.requests} variant="warning" to={targetStatus('4xx')} />
+                        </Table.Cell>
+                        <Table.Cell className="text-right">
+                          <StatusCountHover value={r.status_5xx} total={r.requests} variant="error" to={targetStatus('5xx')} />
+                        </Table.Cell>
                         <Table.Cell className="text-right font-medium"><CompactNumber value={r.requests} /></Table.Cell>
                         <Table.Cell className="text-right">
                           <DurationHover value={r.avg_ms} avg={r.avg_ms} p95={r.p95_ms} />
@@ -277,7 +345,13 @@ export default function RequestsPage() {
                         <Table.Cell className="text-right">
                           <DurationHover value={r.p95_ms} avg={r.avg_ms} p95={r.p95_ms} />
                         </Table.Cell>
-                        <Table.Cell className="text-right"><RowActionLink to={target} label={`Open ${r.route}`} /></Table.Cell>
+                        <Table.Cell className="text-right">
+                          <RowActionLink
+                            to={target}
+                            label={`Open ${r.route}`}
+                            onPreview={() => setPreviewRoute(r)}
+                          />
+                        </Table.Cell>
                       </Table.Row>
                     );
                   })}
@@ -334,7 +408,11 @@ export default function RequestsPage() {
                       <Table.Cell className="max-w-lg">
                         <div className="flex items-center gap-2.5">
                           <GlobeIcon size={14} className="shrink-0 text-neutral-400" aria-hidden />
-                          <Link className="truncate text-neutral-900 hover:underline dark:text-neutral-100" to={target}>{rowPath}</Link>
+                          {t.url ? (
+                            <UrlFormatDisplay url={t.url} className="text-neutral-900 dark:text-neutral-100" />
+                          ) : (
+                            <Link className="truncate text-neutral-900 hover:underline dark:text-neutral-100" to={target}>{rowPath}</Link>
+                          )}
                         </div>
                       </Table.Cell>
                       <Table.Cell className="text-right"><StatusCodeText status={t.status_code} source={t.execution_source} /></Table.Cell>
@@ -348,6 +426,8 @@ export default function RequestsPage() {
           </FloatingTablePanel>
         )}
       </div>
+
+      <RouteDetailsDrawer routeGroup={previewRoute} user={user} onClose={() => setPreviewRoute(null)} />
     </div>
   );
 }
