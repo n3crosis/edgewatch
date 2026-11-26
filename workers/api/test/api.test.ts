@@ -1070,3 +1070,10 @@ describe('GET /healthz', () => {
     expect(((await unmigrated.json()) as Report).checks.schema?.error).toBe('schema_missing');
   });
 });
+
+it('sets security headers on responses', async () => {
+  const res = await app.fetch(new Request('https://api.edgewatch.test/health'), env as unknown as Env);
+  expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+  expect(res.headers.get('x-frame-options')).toBe('DENY');
+});

@@ -30,6 +30,13 @@ interface TraceRow {
 
 type AppEnv = { Bindings: Env; Variables: ObservedVariables & { project: string | null } };
 const app = new Hono<AppEnv>();
+
+app.use('*', async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Referrer-Policy', 'no-referrer');
+  c.header('X-Frame-Options', 'DENY');
+});
 app.use('*', observe('api'));
 app.onError(onError('api'));
 app.notFound(notFound);

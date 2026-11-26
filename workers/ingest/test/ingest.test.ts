@@ -519,3 +519,10 @@ describe('GET /healthz', () => {
     expect(((await res.json()) as { checks: Record<string, { error?: string }> }).checks.config?.error).toBe('not_configured');
   });
 });
+
+it('sets security headers on responses', async () => {
+  const res = await app.fetch(new Request('https://ingest.edgewatch.test/health'), env as unknown as Env);
+  expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+  expect(res.headers.get('x-frame-options')).toBe('DENY');
+});

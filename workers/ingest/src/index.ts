@@ -42,6 +42,13 @@ export interface ProjectQuota {
 }
 
 const app = new Hono<{ Bindings: Env; Variables: ObservedVariables }>();
+
+app.use('*', async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Referrer-Policy', 'no-referrer');
+  c.header('X-Frame-Options', 'DENY');
+});
 app.use('*', observe('ingest'));
 app.onError(onError('ingest'));
 app.notFound(notFound);
