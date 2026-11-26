@@ -14,7 +14,7 @@ beforeEach(() => {
   fetchMock.mockReset().mockResolvedValue(new Response('{"data":[],"next_offset":null}'));
   vi.stubGlobal('location', { origin: 'https://dashboard.example.test' });
   vi.stubGlobal('fetch', fetchMock);
-  saveReadKey('ew_read_fixture', false);
+  saveReadKey('ew_read_fixture');
   setActiveEnvironment('staging');
 });
 afterEach(() => {

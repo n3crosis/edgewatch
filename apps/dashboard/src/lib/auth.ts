@@ -2,8 +2,9 @@ import { useSyncExternalStore } from 'react';
 import { API_URL } from './config';
 
 /**
- * The read key is never built into the bundle: the owner enters it once and it stays in this browser
- * (sessionStorage, or localStorage with "remember on this device"). A 401 from the API clears it.
+ * The read key is never built into the bundle, a URL or a log line: the owner enters it once and it lives in
+ * sessionStorage (memory when storage is unavailable), sent only as an Authorization header. Sign-out and any
+ * 401 clear it, as does closing the tab. Keys a previous version kept in localStorage are removed, not read.
  */
 const STORAGE_KEY = 'edgewatch.read_key';
 const listeners = new Set<() => void>();
@@ -42,7 +43,12 @@ export async function refreshSession() {
   setSessionUser(data?.user ?? null);
 }
 export async function signOut() {
-  await accountRequest('logout', {});
+  try {
+    await accountRequest('logout', {});
+  } catch (e) {
+    clearReadKey(); // the session cookie may still be live, but the read key never outlives a sign-out attempt
+    throw e;
+  }
   setSessionUser(null);
 }
 
@@ -55,8 +61,20 @@ const storage = (kind: 'sessionStorage' | 'localStorage'): Storage | undefined =
 };
 const emit = () => listeners.forEach((fn) => fn());
 
+const KEY_FORMAT = /^ew_[a-z]{2,8}_[A-Za-z0-9_-]{1,256}$/;
+
+/** Normalizes a pasted key (surrounding whitespace, a "Bearer " prefix) and returns it only if it has the EdgeWatch key shape. */
+export function sanitizeReadKey(raw: string | null | undefined): string | null {
+  const key = (raw ?? '').trim().replace(/^bearer\s+/i, '');
+  return KEY_FORMAT.test(key) ? key : null;
+}
+
 export function readKey(): string | null {
-  return memory ?? storage('sessionStorage')?.getItem(STORAGE_KEY) ?? storage('localStorage')?.getItem(STORAGE_KEY) ?? null;
+  storage('localStorage')?.removeItem(STORAGE_KEY);
+  const stored = memory ?? storage('sessionStorage')?.getItem(STORAGE_KEY) ?? null;
+  const key = sanitizeReadKey(stored);
+  if (stored !== null && !key) forget();
+  return key;
 }
 
 function forget() {
@@ -65,12 +83,17 @@ function forget() {
   storage('localStorage')?.removeItem(STORAGE_KEY);
 }
 
-export function saveReadKey(key: string, remember: boolean): void {
+/** Stores a key for this tab only; returns false (and stores nothing) when the key is malformed. */
+export function saveReadKey(raw: string): boolean {
   forget();
-  const target = storage(remember ? 'localStorage' : 'sessionStorage');
-  if (target) target.setItem(STORAGE_KEY, key);
-  else memory = key;
+  const key = sanitizeReadKey(raw);
+  if (key) {
+    const target = storage('sessionStorage');
+    if (target) target.setItem(STORAGE_KEY, key);
+    else memory = key;
+  }
   emit();
+  return key !== null;
 }
 
 export function clearReadKey(): void {
@@ -102,7 +125,9 @@ export async function fetchApi(url: string | URL, init: RequestInit = {}, fetchI
 /** Checks a key against /v1/projects before storing it. Returns an error message, or null when the key works. */
 export async function verifyReadKey(apiUrl: string, key: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
   if (!key.trim()) return 'Enter a read key.';
-  const res = await fetchImpl(`${apiUrl}/v1/projects`, { headers: { authorization: `Bearer ${key.trim()}` } }).catch(() => null);
+  const clean = sanitizeReadKey(key);
+  if (!clean) return 'That is not an EdgeWatch key. Paste the full key (ew_read_...) without spaces.';
+  const res = await fetchImpl(`${apiUrl}/v1/projects`, { headers: { authorization: `Bearer ${clean}` } }).catch(() => null);
   if (!res) return `Could not reach the EdgeWatch API at ${apiUrl}.`;
   if (res.status === 401) return 'That key was not accepted. Use an active read key (ew_read_...).';
   if (!res.ok) return `The API answered HTTP ${res.status}. Try again.`;
