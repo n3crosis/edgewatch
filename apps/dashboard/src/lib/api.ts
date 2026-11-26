@@ -1,21 +1,31 @@
 import type { GroupPage, QuerySort, HandledFilter } from './group-list';
 import { useEnvironment } from './environment';
 import { environmentParams } from './environment-scope';
-import { timeWindow } from '@edgewatch/shared/time-window';
+import { RELATIVE_WINDOWS, timeWindow } from '@edgewatch/shared/time-window';
 import { useEffect, useRef, useState } from 'react';
 import * as mock from './mock';
 import { activeProjectId, useProject } from './project';
 import { useRange } from './range';
-import type { RequestTrend, Issue, IssueDetail, IssueStatus, RequestGroup, RequestGroups, DeadLetter, UsageDay, EventList, EventRow, ExceptionDetail, ExceptionGroup, Overview, Paginated, PipelineHealth, QueryDetail, QueryGroup, Range, TraceDetail, TraceFilters, TraceSummary } from './types';
+import type { EnvironmentInfo, RequestTrend, Issue, IssueDetail, IssueStatus, RequestGroup, RequestGroups, DeadLetter, UsageDay, EventList, EventRow, ExceptionDetail, ExceptionGroup, Overview, Paginated, PipelineHealth, QueryDetail, QueryGroup, Range, TraceDetail, TraceFilters, TraceSummary } from './types';
+import type { ProjectInfo } from './project';
 
 import { fetchApi, UnauthorizedError } from './auth';
 import { API_URL, USING_MOCK } from './config';
 
 export { API_URL, USING_MOCK };
 
+function wireRange(value: string | undefined): string | undefined {
+  if (value === '14d' || value === '30d') {
+    const now = Date.now();
+    return `custom:${now - RELATIVE_WINDOWS[value]}:${now}`;
+  }
+  return value;
+}
+
 async function get<T>(path: string, params: Record<string, string | undefined> = {}, init: RequestInit = {}): Promise<T> {
   const url = new URL(`${API_URL}/v1/projects/${encodeURIComponent(activeProjectId())}${path}`, globalThis.location?.origin);
-  Object.entries(environmentParams(path, params)).forEach(([k, v]) => v !== undefined && (v !== 'all' || ['q', 'route', 'user', 'server', 'environment'].includes(k)) && url.searchParams.set(k, v));
+  const normalized = params.range ? { ...params, range: wireRange(params.range) } : params;
+  Object.entries(environmentParams(path, normalized)).forEach(([k, v]) => v !== undefined && (v !== 'all' || ['q', 'route', 'user', 'server', 'environment'].includes(k)) && url.searchParams.set(k, v));
   const res = await fetchApi(url, init).catch((e: unknown) => {
     throw e instanceof UnauthorizedError ? e : new Error(`Could not reach the EdgeWatch API at ${url.origin}.`);
   });
@@ -35,6 +45,15 @@ export function apiErrorMessage(status: number, body: string): string {
   const record = typeof parsed === 'object' && parsed !== null ? (parsed as { error?: { message?: unknown }; message?: unknown; request_id?: unknown }) : {};
   const message = typeof record.error?.message === 'string' ? record.error.message : typeof record.message === 'string' ? record.message : `Request failed (HTTP ${status}).`;
   return typeof record.request_id === 'string' ? `${message} Request ID: ${record.request_id}` : message;
+}
+
+async function rootRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const url = new URL(`${API_URL}${path}`, globalThis.location?.origin);
+  const res = await fetchApi(url, init).catch((e: unknown) => {
+    throw e instanceof UnauthorizedError ? e : new Error(`Could not reach the EdgeWatch API at ${url.origin}.`);
+  });
+  if (!res.ok) throw new Error(apiErrorMessage(res.status, await res.text().catch(() => '')));
+  return res.json() as Promise<T>;
 }
 
 const delay = <T,>(value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), 120));
@@ -86,7 +105,31 @@ function mockRequestTrend(filters: TraceFilters): RequestTrend {
 }
 
 export const api = {
-  environments: () => USING_MOCK ? delay(mock.environments()) : get<{ data: { name: string; traces: number }[] }>('/environments').then((result) => result.data),
+  environments: () => USING_MOCK ? delay(mock.environments()) : get<{ data: EnvironmentInfo[] }>('/environments').then((result) => result.data),
+  createEnvironment: (input: { name: string; color?: string; url?: string | null }) =>
+    USING_MOCK
+      ? delay(mock.createEnvironment(input))
+      : get<EnvironmentInfo>('/environments', {}, { method: 'POST', body: JSON.stringify(input) }),
+  updateEnvironment: (name: string, patch: { color?: string; url?: string | null }) =>
+    USING_MOCK
+      ? delay(mock.updateEnvironment(name, patch))
+      : get<EnvironmentInfo>(`/environments/${encodeURIComponent(name)}`, {}, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteEnvironment: (name: string) =>
+    USING_MOCK
+      ? delay(mock.deleteEnvironment(name))
+      : get<{ ok: true; name: string }>(`/environments/${encodeURIComponent(name)}`, {}, { method: 'DELETE' }),
+  createProject: (input: { id?: string; name: string; mint_ingest_key?: boolean }) =>
+    USING_MOCK
+      ? delay(mock.createProject(input))
+      : rootRequest<ProjectInfo & { ingest_key?: string }>('/v1/projects', { method: 'POST', body: JSON.stringify(input) }),
+  renameProject: (id: string, name: string) =>
+    USING_MOCK
+      ? delay(mock.renameProject(id, name))
+      : rootRequest<ProjectInfo>(`/v1/projects/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteProject: (id: string) =>
+    USING_MOCK
+      ? delay(mock.deleteProject(id))
+      : rootRequest<{ ok: true; id: string }>(`/v1/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   requestTrend: (filters: TraceFilters) => USING_MOCK ? delay(mockRequestTrend(filters)) : get<RequestTrend>('/requests/trend', { ...filters }),
   issues: (range: Range, status: string, q: string, offset: number) => USING_MOCK
     ? delay<{ data: Issue[]; next_offset: number | null }>({ data: [], next_offset: null })
@@ -99,7 +142,7 @@ export const api = {
   logEntry: (id: string, range: Range, user?: string) => USING_MOCK ? delay(mock.logEntry(id, range, user)) : get<EventRow | null>(`/log-entries/${encodeURIComponent(id)}`, { range, user }),
   requests: (range: Range, q = '', offset = 0, user?: string) => USING_MOCK ? delay(mockRequests(range, q, offset, user)) : get<RequestGroups>('/requests', { range, q, offset: String(offset), user }),
   permissions: () => (USING_MOCK ? delay({ can_manage: true }) : get<{ can_manage: boolean }>('/permissions')),
-  overview: (range: Range) => (USING_MOCK ? delay(mock.overview(range)) : get<Overview>('/overview', { range })),
+  overview: (range: Range, user?: string) => (USING_MOCK ? delay(mock.overview(range, user)) : get<Overview>('/overview', { range, user })),
   traces: (filters: TraceFilters, cursor: string | null) =>
     USING_MOCK ? delay(mock.traces(filters, cursor)) : get<Paginated<TraceSummary>>('/traces', { ...filters, cursor: cursor ?? undefined }),
   trace: (id: string) => (USING_MOCK ? delay(mock.trace(id)) : get<TraceDetail | null>(`/traces/${id}`)),
@@ -130,6 +173,10 @@ export const api = {
   deadLetters: () => (USING_MOCK ? delay<DeadLetter[]>([]) : get<{ data: DeadLetter[] }>('/dead-letters').then((r) => r.data)),
   replayDeadLetters: (ids?: string[]) =>
     USING_MOCK ? delay({ requested: 0 }) : get<{ requested: number }>('/dead-letters/replay', {}, { method: 'POST', body: JSON.stringify(ids ? { ids } : {}) }),
+  updateProjectSettings: (patch: { daily_record_quota?: number | null; retention_days?: number | null }) =>
+    USING_MOCK
+      ? delay({ id: activeProjectId(), daily_record_quota: patch.daily_record_quota ?? null, retention_days: patch.retention_days ?? null })
+      : get<{ id: string; daily_record_quota: number | null; retention_days: number | null }>('/settings', {}, { method: 'PUT', body: JSON.stringify(patch) }),
 };
 
 /** Loads data for `deps`; manual refreshes silently re-fetch while keeping current data on screen. */

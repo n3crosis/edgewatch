@@ -1,131 +1,164 @@
 import { Button } from '@cloudflare/kumo/components/button';
 import { Popover } from '@cloudflare/kumo/components/popover';
-import { Tooltip } from '@cloudflare/kumo/components/tooltip';
+import { cn } from '@cloudflare/kumo/utils';
 import { timeWindow } from '@edgewatch/shared/time-window';
-import { CalendarBlankIcon, CaretDownIcon, CheckIcon, ClockIcon } from '@phosphor-icons/react';
+import { CalendarBlankIcon, CaretDownIcon, XIcon } from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
 import { useRange } from '@/lib/range';
 import type { Range } from '@/lib/types';
 
+/** Exact Nightwatch presets (`Xr` in `AuthenticatedLayout-CUJ0-ea8.js`). */
 const RANGES: { value: Range; label: string }[] = [
   { value: '1h', label: '1H' },
-  { value: '6h', label: '6H' },
   { value: '24h', label: '24H' },
   { value: '7d', label: '7D' },
+  { value: '14d', label: '14D' },
+  { value: '30d', label: '30D' },
 ];
 
-const QUICK_PRESETS = [
-  { label: 'Last 15m', ms: 15 * 60_000 },
-  { label: 'Last 30m', ms: 30 * 60_000 },
-  { label: 'Last 12h', ms: 12 * 3600_000 },
-  { label: 'Last 3d', ms: 3 * 86_400_000 },
-] as const;
-
-const localInput = (ms: number) => {
+const toInputValue = (ms: number, utc: boolean) => {
   const date = new Date(ms);
-  return new Date(ms - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+  const shifted = utc ? date : new Date(ms - date.getTimezoneOffset() * 60_000);
+  return shifted.toISOString().slice(0, 16);
 };
 
-const shortWindow = (range: Range) => {
+const fromInputValue = (value: string, utc: boolean) => {
+  if (!value) return NaN;
+  return utc ? Date.parse(`${value}:00Z`) : new Date(value).getTime();
+};
+
+const formatPrettyWindow = (range: Range, utc: boolean) => {
   const win = timeWindow(range);
   if (!win) return 'Custom';
-  const fmt = (ts: number) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  return `${fmt(win.since)} – ${fmt(win.now)}`;
+  const fmt = (ts: number) =>
+    new Date(ts).toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: utc ? 'UTC' : undefined,
+    });
+  return `${fmt(win.since)} - ${fmt(win.now)}`;
 };
 
+/** 1:1 Nightwatch time range picker (`Qr` & `Zr` in `AuthenticatedLayout-CUJ0-ea8.js`). */
 export default function RangePicker() {
   const { range, setRange } = useRange();
   const isCustom = range.startsWith('custom:');
   const [open, setOpen] = useState(false);
+  const [showUtc, setShowUtc] = useState(true);
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const window = timeWindow(range);
-    if (!window) return;
-    setStart(localInput(window.since));
-    setEnd(localInput(window.now));
+    const win = timeWindow(range);
+    if (!win) return;
+    setStart(toInputValue(win.since, showUtc));
+    setEnd(toInputValue(win.now, showUtc));
     setError('');
-  }, [range]);
+  }, [range, showUtc]);
 
-  const applyPreset = (durationMs: number) => {
-    const now = Date.now();
-    const value = `custom:${now - durationMs}:${now}`;
-    if (!timeWindow(value)) return;
-    setError('');
+  const clearCustom = () => {
     setOpen(false);
-    setRange(value as Range);
+    setRange('24h');
   };
 
   return (
     <div
       role="group"
       aria-label="Time range"
-      className="flex h-8 items-center gap-px rounded-lg border border-neutral-200 bg-white p-0.5 dark:border-white/[0.08] dark:bg-white/[0.03]"
+      className={cn(
+        'flex h-8 items-center gap-px rounded-lg border p-0.5',
+        isCustom
+          ? 'border-blue-500 bg-blue-600 text-white'
+          : 'border-neutral-200 bg-white dark:border-white/5 dark:bg-white/3',
+      )}
     >
-      {RANGES.map((item) => {
-        const active = !isCustom && range === item.value;
-        return (
+      {isCustom ? (
+        <>
+          <span className="whitespace-nowrap pl-3 font-mono text-xs">{formatPrettyWindow(range, showUtc)}</span>
           <button
-            key={item.value}
             type="button"
-            aria-pressed={active}
-            onClick={() => {
-              setOpen(false);
-              setRange(item.value);
-            }}
-            className={`h-full min-w-8 rounded-md border px-2.5 font-mono text-xs transition-colors ${
-              active
-                ? 'border-blue-500 bg-blue-600 text-white'
-                : 'border-transparent text-neutral-600 hover:bg-blue-50 hover:text-blue-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white'
-            }`}
+            onClick={clearCustom}
+            title="Clear custom date range"
+            aria-label="Clear custom date range"
+            className="ml-2 mr-1 rounded-full bg-white/20 p-0.5 transition-colors hover:bg-white/30"
           >
-            {item.label}
+            <XIcon size={12} aria-hidden />
           </button>
-        );
-      })}
+        </>
+      ) : (
+        RANGES.map((item) => {
+          const active = range === item.value;
+          return (
+            <button
+              key={item.value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => {
+                setOpen(false);
+                setRange(item.value);
+              }}
+              className={cn(
+                'h-full min-w-8 rounded-md border px-2.5 font-mono text-xs transition-colors',
+                active
+                  ? 'border-blue-500 bg-blue-600 text-white dark:text-white'
+                  : 'border-transparent text-neutral-600 hover:bg-blue-100 hover:text-blue-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white',
+              )}
+            >
+              {item.label}
+            </button>
+          );
+        })
+      )}
+
       <Popover.Root open={open} onOpenChange={setOpen}>
-        <Tooltip asChild content={isCustom ? shortWindow(range) : 'Choose a custom time window'}>
-          <Popover.Trigger
-            render={
-              <button
-                type="button"
-                aria-label="Custom range"
-                aria-pressed={isCustom}
-                className={`group flex h-full items-center gap-1 rounded-md border px-2 font-mono text-xs transition-colors ${
+        <Popover.Trigger
+          render={
+            <button
+              type="button"
+              aria-label="Custom range"
+              aria-pressed={isCustom}
+              className={cn(
+                'group flex h-full items-center gap-1 rounded-md px-2 py-1 text-xs transition-all dark:hover:bg-white/10',
+                open && (isCustom ? 'bg-white/10' : 'bg-neutral-100 dark:bg-white/10'),
+                isCustom ? 'hover:bg-white/10' : 'hover:bg-neutral-100',
+              )}
+            >
+              <CalendarBlankIcon
+                size={12}
+                className={cn(
                   isCustom
-                    ? 'border-blue-500 bg-blue-600 text-white'
-                    : 'border-transparent text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/10 dark:hover:text-white'
-                }`}
-              >
-                <CalendarBlankIcon size={13} aria-hidden />
-                {isCustom && <span className="hidden max-w-44 truncate sm:inline">{shortWindow(range)}</span>}
-                <CaretDownIcon size={11} aria-hidden />
-              </button>
-            }
-          />
-        </Tooltip>
+                    ? 'text-white group-hover:text-white'
+                    : 'text-neutral-400 group-hover:text-neutral-900 dark:text-neutral-500 dark:group-hover:text-white',
+                )}
+                aria-hidden
+              />
+              <CaretDownIcon
+                size={12}
+                className={cn(
+                  isCustom
+                    ? 'text-neutral-200 group-hover:text-white'
+                    : 'text-neutral-500 group-hover:text-neutral-900 dark:text-neutral-500 dark:group-hover:text-white',
+                )}
+                aria-hidden
+              />
+            </button>
+          }
+        />
         <Popover.Portal>
-          <Popover.Positioner side="bottom" align="end" sideOffset={10}>
-            <Popover.Popup className="w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-neutral-200 bg-white p-5 shadow-xl shadow-black/10 dark:border-white/10 dark:bg-neutral-900">
-              <Popover.Title className="text-base font-semibold text-neutral-900 dark:text-white">Custom time window</Popover.Title>
-              <Popover.Description className="mt-1 text-xs leading-relaxed text-neutral-500 dark:text-neutral-400">
-                Pick a quick preset or enter exact bounds in your local timezone.
-              </Popover.Description>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {QUICK_PRESETS.map((preset) => (
-                  <Button key={preset.label} type="button" size="sm" variant="secondary" icon={ClockIcon} onClick={() => applyPreset(preset.ms)}>
-                    {preset.label}
-                  </Button>
-                ))}
-              </div>
+          <Popover.Positioner side="bottom" align="end" sideOffset={8}>
+            <Popover.Popup className="w-fit rounded-xl border border-neutral-200 bg-white p-4 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
               <form
-                className="mt-4 space-y-4 border-t border-neutral-200 pt-4 dark:border-white/[0.08]"
+                className="space-y-5"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  const value = `custom:${new Date(start).getTime()}:${new Date(end).getTime()}`;
-                  if (!timeWindow(value)) {
+                  const fromMs = fromInputValue(start, showUtc);
+                  const toMs = fromInputValue(end, showUtc);
+                  const value = `custom:${fromMs}:${toMs}`;
+                  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || !timeWindow(value)) {
                     setError('Choose a valid start time before the end time.');
                     return;
                   }
@@ -134,33 +167,55 @@ export default function RangePicker() {
                   setRange(value as Range);
                 }}
               >
-                <label className="block space-y-1.5">
-                  <span className="font-mono text-[11px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Start (local time)</span>
+                {/* Exact Nightwatch UTC / Local segmented toggle */}
+                <div className="flex h-8 items-center rounded-md border border-neutral-200 bg-neutral-100 p-0.5 dark:border-white/5 dark:bg-white/[0.03]">
+                  {(['utc', 'local'] as const).map((tz) => {
+                    const active = (tz === 'utc') === showUtc;
+                    return (
+                      <button
+                        key={tz}
+                        type="button"
+                        onClick={() => setShowUtc(tz === 'utc')}
+                        className={cn(
+                          'flex h-full flex-1 items-center justify-center rounded text-xs font-medium uppercase transition-colors',
+                          active
+                            ? 'bg-white text-neutral-900 shadow-xs dark:bg-neutral-700 dark:text-white'
+                            : 'text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white',
+                        )}
+                      >
+                        {tz}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <label className="block w-60 space-y-1.5">
+                  <span className="block px-1 text-xs font-medium text-neutral-700 dark:text-neutral-300">Starting date</span>
                   <input
                     required
                     type="datetime-local"
-                    step="1"
-                    className="block h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 font-mono text-xs text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-white"
+                    className="block h-10 w-full rounded-lg border border-neutral-200 bg-white px-3 font-mono text-xs text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-white"
                     value={start}
                     onChange={(event) => setStart(event.target.value)}
                   />
                 </label>
-                <label className="block space-y-1.5">
-                  <span className="font-mono text-[11px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">End (local time)</span>
+
+                <label className="block w-60 space-y-1.5">
+                  <span className="block px-1 text-xs font-medium text-neutral-700 dark:text-neutral-300">Ending date</span>
                   <input
                     required
                     type="datetime-local"
-                    step="1"
-                    className="block h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 font-mono text-xs text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-white"
+                    className="block h-10 w-full rounded-lg border border-neutral-200 bg-white px-3 font-mono text-xs text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-white"
                     value={end}
                     onChange={(event) => setEnd(event.target.value)}
                   />
                 </label>
-                {error && <p role="alert" className="text-xs text-kumo-danger">{error}</p>}
-                <div className="flex justify-end gap-2.5 pt-1">
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-                  <Button type="submit" size="sm" variant="primary" icon={CheckIcon}>Apply window</Button>
-                </div>
+
+                {error && <p role="alert" className="w-60 text-xs text-kumo-danger">{error}</p>}
+
+                <Button type="submit" variant="primary" className="w-full justify-center">
+                  Apply
+                </Button>
               </form>
             </Popover.Popup>
           </Popover.Positioner>

@@ -2,6 +2,7 @@ import { activeEnvironment } from './environment-scope';
 import { timeWindow } from '@edgewatch/shared/time-window';
 import { percentile } from './format';
 import type {
+  EnvironmentInfo,
   ExceptionDetail,
   ExceptionGroup,
   Overview,
@@ -16,6 +17,13 @@ import type {
   TraceFilters,
   TraceSummary,
 } from './types';
+
+function matchesUser(rowUser: string | null | undefined, filter?: string): boolean {
+  if (filter === undefined) return true;
+  if (filter === 'type:authenticated') return Boolean(rowUser);
+  if (filter === 'type:guest') return !rowUser;
+  return rowUser === filter;
+}
 
 function mulberry32(seed: number) {
   return () => {
@@ -198,8 +206,8 @@ function createDataset(profile: MockProject) {
 
   const isError = (t: TraceSummary) => (t.execution_source === 'request' ? (t.status_code ?? 0) >= 500 : t.exception_count > 0);
 
-  function overview(range: Range): Overview {
-    const items = inRange(range);
+  function overview(range: Range, user?: string): Overview {
+    const items = inRange(range).filter((t) => matchesUser(t.summary.user, user));
     const requests = items.filter((t) => t.summary.execution_source === 'request');
     const buckets = 24;
     const { since, width } = timeWindow(range, NOW)!;
@@ -249,7 +257,7 @@ function createDataset(profile: MockProject) {
       const route = filters.route_kind ? t.route || t.route_path || '[unnamed]' : t.route ?? '[unnamed]';
       if (filters.route !== undefined && route !== filters.route) return false;
       if (filters.route_kind && routeKind !== filters.route_kind) return false;
-      if (filters.user !== undefined && t.user !== filters.user) return false;
+      if (!matchesUser(t.user, filters.user)) return false;
       if (environment !== undefined && t.environment !== environment) return false;
       if (filters.server !== undefined && t.server !== filters.server) return false;
       if (filters.method && (t.method ?? 'UNKNOWN') !== filters.method) return false;
@@ -311,7 +319,7 @@ function createDataset(profile: MockProject) {
   }
 
   function exceptions(range: Range = '24h', user?: string): ExceptionGroup[] {
-    const items = inRange(range).filter((t) => t.exception && (user === undefined || t.summary.user === user));
+    const items = inRange(range).filter((t) => t.exception && matchesUser(t.summary.user, user));
     return EXCEPTIONS.map((e): ExceptionGroup | null => {
       const hits = items.filter((t) => t.exception?.group === e.group);
       if (hits.length === 0) return null;
@@ -334,7 +342,7 @@ function createDataset(profile: MockProject) {
   function exception(group: string, range: Range = '24h', user?: string): ExceptionDetail | null {
     const summary = exceptions(range, user).find((e) => e.group === group);
     if (!summary) return null;
-    const hits = inRange(range).filter((t) => t.exception?.group === group && (user === undefined || t.summary.user === user));
+    const hits = inRange(range).filter((t) => t.exception?.group === group && matchesUser(t.summary.user, user));
     return {
       ...summary,
       stack: [
@@ -545,7 +553,7 @@ function createDataset(profile: MockProject) {
     const needle = params.q?.toLowerCase();
     const list = allEvents(path).filter(
       (e) =>
-        Date.parse(e.timestamp) >= since && Date.parse(e.timestamp) <= now && (params.user === undefined || e.user === params.user) &&
+        Date.parse(e.timestamp) >= since && Date.parse(e.timestamp) <= now && matchesUser(typeof e.user === 'string' ? e.user : null, params.user) &&
         Object.entries(spec.filters ?? {}).every(([param, value]) => !params[param] || params[param] === 'all' || String(value(e)) === params[param]) &&
         (!needle || spec.search.some((col) => String(e[col] ?? '').toLowerCase().includes(needle))),
     );
@@ -558,13 +566,13 @@ function createDataset(profile: MockProject) {
   function eventRows(path: string, key: string, range: Range = '24h', user?: string): EventRow[] | null {
     if (!MOCK_SPECS[path]) return null;
     const { since, now } = timeWindow(range, NOW)!;
-    const rows = allEvents(path).filter((e) => e.key === key && (user === undefined || e.user === user) && Date.parse(e.timestamp) >= since && Date.parse(e.timestamp) <= now).slice(0, 50);
+    const rows = allEvents(path).filter((e) => e.key === key && matchesUser(typeof e.user === 'string' ? e.user : null, user) && Date.parse(e.timestamp) >= since && Date.parse(e.timestamp) <= now).slice(0, 50);
     return rows.length ? rows.map(({ key: _k, ...r }) => r) : null;
   }
 
   function logEntries(range: Range, level: string, q: string, cursor: string | null, user?: string): Paginated<EventRow> {
     const { since, now } = timeWindow(range, NOW)!;
-    const rows = allEvents('/logs').filter((row) => (user === undefined || row.user === user) && Date.parse(row.timestamp) >= since && Date.parse(row.timestamp) <= now
+    const rows = allEvents('/logs').filter((row) => matchesUser(typeof row.user === 'string' ? row.user : null, user) && Date.parse(row.timestamp) >= since && Date.parse(row.timestamp) <= now
       && (level === 'all' || row.level === level) && String(row.message).toLowerCase().includes(q.toLowerCase()));
     const offset = Number(cursor) || 0;
     return { data: rows.slice(offset, offset + 50), next_cursor: rows.length > offset + 50 ? String(offset + 50) : null };
@@ -572,16 +580,77 @@ function createDataset(profile: MockProject) {
 
   function logEntry(id: string, range: Range, user?: string): EventRow | null {
     const { since, now } = timeWindow(range, NOW)!;
-    const row = allEvents('/logs').find((row) => String(row.id) === id && (user === undefined || row.user === user) && Date.parse(row.timestamp) >= since && Date.parse(row.timestamp) <= now);
+    const row = allEvents('/logs').find((row) => String(row.id) === id && matchesUser(typeof row.user === 'string' ? row.user : null, user) && Date.parse(row.timestamp) >= since && Date.parse(row.timestamp) <= now);
     return row ? { ...row, project_id: profile.id, execution_available: 1 } : null;
   }
 
-  function environments() {
+  const configuredEnvs = new Map<string, { color: string; url: string | null }>([
+    ['production', { color: 'emerald', url: `https://${profile.host}` }],
+    ['staging', { color: 'amber', url: `https://staging.${profile.host}` }],
+  ]);
+  const removedEnvs = new Set<string>();
+
+  function environments(): EnvironmentInfo[] {
     const counts = new Map<string, number>();
-    for (const { summary } of TRACES) if (summary.environment) counts.set(summary.environment, (counts.get(summary.environment) ?? 0) + 1);
-    return [...counts].map(([name, traces]) => ({ name, traces })).sort((a, b) => a.name.localeCompare(b.name));
+    for (const { summary } of TRACES) {
+      if (summary.environment && !removedEnvs.has(summary.environment)) {
+        counts.set(summary.environment, (counts.get(summary.environment) ?? 0) + 1);
+      }
+    }
+    const merged = new Map<string, EnvironmentInfo>();
+    for (const [name, meta] of configuredEnvs) {
+      merged.set(name, { name, traces: counts.get(name) ?? 0, color: meta.color, url: meta.url, configured: true });
+    }
+    for (const [name, traces] of counts) {
+      if (!merged.has(name)) merged.set(name, { name, traces, color: null, url: null, configured: false });
+    }
+    return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
-  return { overview, traces, trace, exceptions, exception, queries, query, events, eventRows, environments, logEntries, logEntry };
+
+  function createEnvironment(input: { name: string; color?: string; url?: string | null }): EnvironmentInfo {
+    const name = input.name.trim();
+    if (configuredEnvs.has(name)) throw new Error(`Environment "${name}" already exists.`);
+    removedEnvs.delete(name);
+    const color = input.color || 'blue';
+    const url = input.url?.trim() || null;
+    configuredEnvs.set(name, { color, url });
+    return environments().find((e) => e.name === name) ?? { name, traces: 0, color, url, configured: true };
+  }
+
+  function updateEnvironment(name: string, patch: { color?: string; url?: string | null }): EnvironmentInfo {
+    const prev = configuredEnvs.get(name) ?? { color: 'blue', url: null };
+    const next = {
+      color: patch.color ?? prev.color,
+      url: patch.url !== undefined ? (patch.url?.trim() || null) : prev.url,
+    };
+    removedEnvs.delete(name);
+    configuredEnvs.set(name, next);
+    return environments().find((e) => e.name === name) ?? { name, traces: 0, ...next, configured: true };
+  }
+
+  function deleteEnvironment(name: string): { ok: true; name: string } {
+    configuredEnvs.delete(name);
+    removedEnvs.add(name);
+    return { ok: true, name };
+  }
+
+  return {
+    overview,
+    traces,
+    trace,
+    exceptions,
+    exception,
+    queries,
+    query,
+    events,
+    eventRows,
+    environments,
+    createEnvironment,
+    updateEnvironment,
+    deleteEnvironment,
+    logEntries,
+    logEntry,
+  };
 }
 
 type Dataset = ReturnType<typeof createDataset>;
@@ -603,6 +672,32 @@ function ds(): Dataset {
 }
 
 export const environments: Dataset['environments'] = () => ds().environments();
+export const createEnvironment: Dataset['createEnvironment'] = (...a) => ds().createEnvironment(...a);
+export const updateEnvironment: Dataset['updateEnvironment'] = (...a) => ds().updateEnvironment(...a);
+export const deleteEnvironment: Dataset['deleteEnvironment'] = (...a) => ds().deleteEnvironment(...a);
+
+export function createProject(input: { id?: string; name: string }) {
+  const name = input.name.trim();
+  const id = (input.id?.trim() || name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+|[-._]+$/g, '')) || 'app';
+  if (MOCK_PROJECTS.some((p) => p.id === id)) throw new Error(`An application with ID "${id}" already exists.`);
+  MOCK_PROJECTS.push({ id, name, host: `${id}.example.com`, kind: 'api', seed: id.length * 1013 + 7, volume: 220, servers: ['web-1'] });
+  return { id, name, daily_record_quota: null, retention_days: null, last_seen: null, ingest_key: `ew_live_demo_${id}_7f3a8d1c2e9b` };
+}
+
+export function renameProject(id: string, name: string) {
+  const target = MOCK_PROJECTS.find((p) => p.id === id);
+  if (!target) throw new Error('Application not found.');
+  target.name = name.trim();
+  return { id: target.id, name: target.name, daily_record_quota: null, retention_days: null };
+}
+
+export function deleteProject(id: string) {
+  const idx = MOCK_PROJECTS.findIndex((p) => p.id === id);
+  if (idx < 0) throw new Error('Application not found.');
+  MOCK_PROJECTS.splice(idx, 1);
+  datasets.delete(id);
+  return { ok: true as const, id };
+}
 export const overview: Dataset['overview'] = (...a) => ds().overview(...a);
 export const traces: Dataset['traces'] = (...a) => ds().traces(...a);
 export const trace: Dataset['trace'] = (...a) => ds().trace(...a);

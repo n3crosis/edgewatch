@@ -203,3 +203,13 @@ export interface IssueDetail {
 }
 
 export interface RequestTrend { since: string; until: string; series: Overview['series'] }
+
+export type EnvironmentColor = 'emerald' | 'blue' | 'amber' | 'rose' | 'violet' | 'cyan' | 'orange' | 'pink' | 'neutral';
+
+export interface EnvironmentInfo {
+  name: string;
+  traces: number;
+  color?: EnvironmentColor | string | null;
+  url?: string | null;
+  configured?: boolean;
+}

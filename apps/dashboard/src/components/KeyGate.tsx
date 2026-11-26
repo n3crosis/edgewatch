@@ -4,7 +4,6 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Input } from '@cloudflare/kumo/components/input';
 import { LayerCard } from '@cloudflare/kumo/components/layer-card';
-import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import {
   ArrowClockwiseIcon,
   BroadcastIcon,
@@ -12,18 +11,15 @@ import {
   EyeIcon,
   EyeSlashIcon,
   InfoIcon,
-  MoonIcon,
   RocketLaunchIcon,
   SignInIcon,
   SparkleIcon,
-  SunIcon,
   UserPlusIcon,
   WarningCircleIcon,
 } from '@phosphor-icons/react';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { accountRequest, refreshSession, setSessionUser, useSessionStatus, useSessionUser } from '@/lib/auth';
 import { USING_MOCK } from '@/lib/config';
-import { useTheme } from '@/lib/theme';
 
 type Mode = 'login' | 'setup' | 'invite';
 
@@ -48,7 +44,7 @@ export default function KeyGate({ children }: { children: ReactNode }) {
   if (USING_MOCK) return children;
   if (checking) {
     return (
-      <div role="status" className="ew-dot-grid grid min-h-full place-items-center bg-neutral-100 p-8 dark:bg-neutral-900">
+      <div role="status" className="ew-dot-grid grid min-h-full place-items-center bg-neutral-100 p-8 dark:bg-neutral-800">
         <div className="flex flex-col items-center gap-3 text-sm text-neutral-500 dark:text-neutral-400">
           <BroadcastIcon size={24} weight="bold" className="text-neutral-900 dark:text-white" />
           <span className="font-mono text-xs uppercase tracking-widest">Checking session…</span>
@@ -58,7 +54,7 @@ export default function KeyGate({ children }: { children: ReactNode }) {
   }
   if (unavailable) {
     return (
-      <div className="ew-dot-grid grid min-h-full place-items-center bg-neutral-100 p-8 dark:bg-neutral-900">
+      <div className="ew-dot-grid grid min-h-full place-items-center bg-neutral-100 p-8 dark:bg-neutral-800">
         <LayerCard className="w-full max-w-md rounded-xl border border-neutral-200 bg-white p-8 text-center shadow-2xl shadow-black/[0.08] dark:border-neutral-800 dark:bg-neutral-900">
           <WarningCircleIcon size={32} className="mx-auto text-kumo-danger" />
           <h1 className="mt-4 text-lg font-semibold text-kumo-strong">Could not connect to EdgeWatch</h1>
@@ -147,8 +143,6 @@ function SignIn() {
   const [remember, setRemember] = useState(entry.mode === 'setup');
   const [busy, setBusy] = useState(false);
   const toasts = useKumoToastManager();
-  const { theme, toggle } = useTheme();
-  const themeLabel = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
 
   const needsSetupToken = mode === 'setup' && (setupTokenRequired || (entry.fromLink && entry.mode === 'setup'));
   const needsInviteToken = mode === 'invite' && !(entry.fromLink && entry.mode === 'invite' && token);
@@ -188,16 +182,10 @@ function SignIn() {
   const passwordReady = password.length >= 8;
 
   return (
-    <div className="ew-dot-grid relative flex min-h-full flex-col items-center justify-center bg-neutral-100 px-6 py-12 dark:bg-neutral-900">
-      <div className="fixed right-5 top-5 z-30">
-        <Tooltip asChild content={themeLabel}>
-          <Button variant="ghost" shape="square" size="sm" icon={theme === 'dark' ? SunIcon : MoonIcon} aria-label={themeLabel} onClick={toggle} />
-        </Tooltip>
-      </div>
-
-      {/* Centered brand mark above card, matching capture */}
-      <div className="z-10 mb-8 flex items-center gap-3 text-neutral-900 dark:text-neutral-200">
-        <BroadcastIcon size={22} weight="bold" />
+    /* 1:1 Nightwatch `GuestLayout-BNE8LsrV.js` + `SignIn-WdV4eG9v.js` */
+    <div className="ew-dot-grid relative flex min-h-screen flex-col items-center justify-center bg-neutral-100 px-6 py-12 dark:bg-neutral-800">
+      <div className="z-10 -mt-10 flex items-center gap-4 text-neutral-900 dark:text-neutral-300">
+        <BroadcastIcon size={20} weight="bold" />
         <span className="font-mono text-sm font-semibold uppercase tracking-[0.24em]">EdgeWatch</span>
         {mode === 'setup' && (
           <Badge variant="info">
@@ -209,17 +197,18 @@ function SignIn() {
 
       <form
         onSubmit={submit}
-        className="relative z-20 flex w-full max-w-md flex-col gap-7 rounded-xl border border-neutral-200 bg-white p-8 shadow-2xl shadow-black/[0.08] dark:border-neutral-800 dark:bg-neutral-900/90"
+        className="relative z-20 mt-10 flex w-full flex-col space-y-12 overflow-hidden rounded-xl border border-neutral-200 bg-white p-8 shadow-2xl backdrop-blur-sm sm:max-w-md md:mt-12 dark:border-neutral-800 dark:bg-neutral-900/50 dark:bg-[radial-gradient(100%_80%_at_50%_0%,rgba(30,30,30,0.3)_0%,#151515_100%)]"
         data-testid="account-gate"
       >
-        {/* Signature top notch handle */}
-        <div className="mx-auto h-3 w-12 rounded-full border border-neutral-300 bg-neutral-200/60 dark:border-white/15 dark:bg-black/80" aria-hidden />
+        <div className="flex h-3.5 w-12 flex-col self-center rounded-full border border-neutral-300 bg-neutral-300/50 dark:border-white/15 dark:bg-black/90" aria-hidden />
 
-        <h1 className="text-center text-2xl font-semibold tracking-tight text-neutral-900 sm:text-3xl dark:text-white">
-          {title}
-        </h1>
+        <div className="flex flex-col items-center gap-2">
+          <h1 className="text-center text-2xl leading-9 font-semibold text-neutral-900 md:text-3xl dark:text-white">
+            {title}
+          </h1>
+        </div>
 
-        <div className="flex flex-col gap-5">
+        <div className="space-y-8">
           {mode === 'invite' && entry.fromLink && entry.mode === 'invite' && token && (
             <div className="flex items-center gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300">
               <CheckCircleIcon size={16} className="shrink-0" />
@@ -231,7 +220,7 @@ function SignIn() {
               label="Email"
               type="email"
               autoFocus
-              autoComplete="username"
+              autoComplete="email"
               placeholder="Enter email"
               required
               maxLength={254}
@@ -305,36 +294,39 @@ function SignIn() {
             />
           )}
           <Checkbox label="Remember me" checked={remember} onCheckedChange={(value) => setRemember(value === true)} />
-        </div>
 
-        <Button
-          type="submit"
-          variant="primary"
-          icon={mode === 'login' ? SignInIcon : mode === 'setup' ? RocketLaunchIcon : UserPlusIcon}
-          className="h-11 w-full justify-center rounded-lg"
-          loading={busy}
-          disabled={busy}
-        >
-          {mode === 'login' ? 'Sign in' : mode === 'setup' ? 'Create owner account' : 'Join workspace'}
-        </Button>
+          <div className="flex flex-col items-center gap-4">
+            <Button
+              type="submit"
+              variant="primary"
+              icon={mode === 'login' ? SignInIcon : mode === 'setup' ? RocketLaunchIcon : UserPlusIcon}
+              className="h-11 w-full justify-center rounded-lg"
+              loading={busy}
+              disabled={busy}
+            >
+              {mode === 'login' ? 'Sign in' : mode === 'setup' ? 'Create owner account' : 'Join workspace'}
+            </Button>
 
-        {(mode !== 'login' || setupRequired) && (
-          <div className="border-t border-neutral-200 pt-4 dark:border-white/[0.08]">
-            {mode === 'login' ? (
-              <Button type="button" variant="ghost" size="sm" className="w-full justify-center" onClick={() => setMode('setup')}>
-                Set up owner account
-              </Button>
-            ) : (
-              <Button type="button" variant="ghost" size="sm" className="w-full justify-center" onClick={() => setMode('login')}>
-                Already have an account? Sign in
-              </Button>
+            {(mode !== 'login' || setupRequired) && (
+              <div className="w-full pt-2">
+                {mode === 'login' ? (
+                  <Button type="button" variant="ghost" size="sm" className="w-full justify-center" onClick={() => setMode('setup')}>
+                    Set up owner account
+                  </Button>
+                ) : (
+                  <Button type="button" variant="ghost" size="sm" className="w-full justify-center" onClick={() => setMode('login')}>
+                    Already have an account? Sign in
+                  </Button>
+                )}
+              </div>
             )}
           </div>
-        )}
+        </div>
       </form>
 
-      <div className="z-10 mt-8 font-mono text-[11px] uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-        EdgeWatch · Application Monitoring
+      <div className="absolute bottom-0 left-1/2 z-10 flex -translate-x-1/2 items-center gap-3 py-8 font-mono text-xs font-light uppercase text-neutral-900 opacity-50 dark:text-white/50">
+        <BroadcastIcon size={16} aria-hidden />
+        <span>EdgeWatch</span>
       </div>
     </div>
   );

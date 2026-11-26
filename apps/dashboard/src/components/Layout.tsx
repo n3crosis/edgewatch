@@ -1,28 +1,23 @@
 import { useKumoToastManager } from '@cloudflare/kumo/components/toast';
-import { EnvironmentProvider, useEnvironment } from '@/lib/environment';
+import { envDotClass, EnvironmentProvider, useEnvironment } from '@/lib/environment';
 import Link, { scopedPath } from './ScopedLink';
-import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Popover } from '@cloudflare/kumo/components/popover';
-import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import {
   ArrowsLeftRightIcon,
   BugIcon,
   CaretUpDownIcon,
   CheckIcon,
   DatabaseIcon,
-  FlaskIcon,
+  DotsThreeIcon,
   FolderSimpleIcon,
   GaugeIcon,
-  GitBranchIcon,
   KeyIcon,
   ListIcon,
-  MagnifyingGlassIcon,
   MoonIcon,
-  PlugIcon,
-  QueueIcon,
   SignOutIcon,
+  SlidersHorizontalIcon,
   SunIcon,
   WarningOctagonIcon,
   XIcon,
@@ -44,12 +39,10 @@ const NAV = [
   { to: '/', label: 'Dashboard', icon: GaugeIcon, end: true },
   { to: '/issues', label: 'Issues', icon: WarningOctagonIcon },
   { to: '/requests', label: 'Requests', icon: ArrowsLeftRightIcon },
-  { to: '/traces', label: 'Traces', icon: GitBranchIcon },
   { to: '/exceptions', label: 'Exceptions', icon: BugIcon },
   { to: '/queries', label: 'Queries', icon: DatabaseIcon },
   ...EVENT_PAGES.map((p) => ({ to: p.path, label: p.nav, icon: p.icon, end: false })),
-  { to: '/pipeline', label: 'Pipeline', icon: QueueIcon },
-  { to: '/setup', label: 'Setup', icon: PlugIcon },
+  { to: '/setup', label: 'Settings', icon: SlidersHorizontalIcon },
   { to: '/accounts', label: 'Accounts', icon: KeyIcon },
 ];
 
@@ -61,20 +54,19 @@ const KEYWORDS: Record<string, string[]> = {
   '/': ['overview', 'home'],
   '/issues': ['problems', 'triage'],
   '/requests': ['routes', 'http'],
-  '/traces': ['executions', 'spans', 'waterfall'],
   '/exceptions': ['errors'],
   '/queries': ['sql', 'database', 'slow'],
-  '/pipeline': ['queue', 'dead letters', 'usage', 'health'],
-  '/setup': ['install', 'keys'],
+  '/setup': ['settings', 'install', 'keys'],
   '/accounts': ['members', 'invitations', 'users', 'access'],
 };
 
 const TOP_NAV = NAV.filter((item) => ['/', '/issues'].includes(item.to));
 
+/** Exact Nightwatch sidebar sections (`hi()` in `AuthenticatedLayout-CUJ0-ea8.js`). */
 const NAV_SECTIONS = [
   {
     label: 'Activity',
-    items: ['/requests', '/traces', '/jobs', '/commands', '/scheduled-tasks', '/exceptions', '/queries', '/notifications', '/mail', '/cache', '/outgoing-requests']
+    items: ['/requests', '/jobs', '/commands', '/scheduled-tasks', '/exceptions', '/queries', '/notifications', '/mail', '/cache', '/outgoing-requests']
       .map((path) => NAV.find((item) => item.to === path))
       .filter((item): item is (typeof NAV)[number] => Boolean(item)),
   },
@@ -84,13 +76,11 @@ const NAV_SECTIONS = [
       .map((path) => NAV.find((item) => item.to === path))
       .filter((item): item is (typeof NAV)[number] => Boolean(item)),
   },
-  {
-    label: 'Manage',
-    items: ['/pipeline', '/setup', '/accounts']
-      .map((path) => NAV.find((item) => item.to === path))
-      .filter((item): item is (typeof NAV)[number] => Boolean(item)),
-  },
 ];
+
+const BOTTOM_NAV = ['/setup', '/accounts']
+  .map((path) => NAV.find((item) => item.to === path))
+  .filter((item): item is (typeof NAV)[number] => Boolean(item));
 
 function PaletteHost({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
   const { range } = useRange();
@@ -124,8 +114,8 @@ function NavItem({ to, label, icon: Icon, end, badge }: (typeof NAV)[number] & {
       aria-current={active ? 'page' : undefined}
       className={
         active
-          ? 'group relative flex h-9 w-full items-center gap-2.5 rounded-md border border-neutral-200 bg-white px-2.5 text-sm font-medium text-neutral-900 shadow-sm shadow-black/[0.04] transition-colors dark:border-white/[0.08] dark:bg-white/[0.05] dark:text-white'
-          : 'group relative flex h-9 w-full items-center gap-2.5 rounded-md border border-transparent px-2.5 text-sm text-neutral-500 transition-colors hover:bg-neutral-100/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/[0.03] dark:hover:text-white'
+          ? 'group relative flex h-9 w-full items-center gap-3 rounded-md border border-neutral-200 bg-white px-2 pr-0.5 text-sm font-normal text-neutral-900 shadow-lg shadow-black/[0.04] transition-colors dark:border-white/[0.05] dark:bg-white/[0.05] dark:text-white'
+          : 'group relative flex h-9 w-full items-center gap-3 rounded-md border border-transparent px-2 pr-0.5 text-sm text-neutral-500 transition-colors hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white'
       }
     >
       <Icon
@@ -141,7 +131,7 @@ function NavItem({ to, label, icon: Icon, end, badge }: (typeof NAV)[number] & {
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {badge !== undefined && badge > 0 && (
         <span
-          className={`inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded px-1 font-sans text-[11px] leading-none font-medium tabular-nums ${
+          className={`mr-2 inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded px-1 font-sans text-[11px] leading-none font-medium tabular-nums ${
             active
               ? 'bg-neutral-600 text-neutral-100 dark:bg-neutral-600 dark:text-white'
               : 'bg-black/[0.07] text-neutral-700 dark:bg-white/10 dark:text-neutral-200'
@@ -154,23 +144,31 @@ function NavItem({ to, label, icon: Icon, end, badge }: (typeof NAV)[number] & {
   );
 }
 
+/** 1:1 Nightwatch top-left Application + Environment switcher (`bi` & `vi` in `AuthenticatedLayout-CUJ0-ea8.js`). */
 function ProjectHeaderSwitcher({ onClose }: { onClose?: () => void }) {
   const { projectId, projects, setProjectId } = useProject();
   const { range } = useRange();
-  const { environment } = useEnvironment();
+  const { environment, setEnvironment, envRevision } = useEnvironment();
   const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+
+  const envs = useAsync(() => (open ? api.environments().catch(() => []) : Promise.resolve([])), [open, projectId, envRevision]);
+  const envItems = useMemo(() => {
+    const map = new Map<string, { name: string; color?: string | null }>();
+    for (const row of envs.data ?? []) map.set(row.name, { name: row.name, color: row.color });
+    if (environment !== undefined && !map.has(environment)) map.set(environment, { name: environment, color: null });
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [envs.data, environment]);
 
   const list = projects.length ? projects : [{ id: projectId, name: projectId, host: undefined }];
   const active = list.find((p) => p.id === projectId) ?? list[0];
   const initial = (active?.name || projectId || 'E').trim().charAt(0).toUpperCase();
 
-  const onChange = (nextId: string) => {
+  const onChangeProject = (nextId: string) => {
     setOpen(false);
     if (nextId === projectId) return;
     setProjectId(nextId);
-    // Avoid stranding users on a project-specific detail URL (e.g. /traces/:id) when switching projects.
     const segments = pathname.split('/').filter(Boolean);
     if (segments.length >= 2) {
       navigate(scopedPath(`/${segments[0]}`, nextId, range, environment), { replace: true });
@@ -180,69 +178,121 @@ function ProjectHeaderSwitcher({ onClose }: { onClose?: () => void }) {
   };
 
   return (
-    <div className="flex h-14 shrink-0 items-center border-b border-neutral-200 dark:border-white/[0.06]">
+    <div className="flex h-12 shrink-0 items-center border-b border-neutral-200 md:h-14 dark:border-white/[0.05]">
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger
           render={
             <button
               type="button"
               data-testid="project-switcher"
-              aria-label="Switch project"
-              className="group flex h-full min-w-0 flex-1 items-center justify-between gap-2.5 px-3 text-left transition-colors hover:bg-neutral-50 dark:hover:bg-white/[0.02] focus-visible:outline-2 focus-visible:outline-kumo-link"
+              aria-label="Switch project and environment"
+              className="group relative flex h-full min-w-0 flex-1 items-center justify-between gap-2.5 px-2 py-2 pr-4 text-left transition-all hover:bg-white dark:hover:bg-white/[0.01] focus-visible:outline-2 focus-visible:outline-kumo-link"
             >
               <span className="flex min-w-0 items-center gap-2.5">
                 <span className="grid size-8 shrink-0 place-items-center rounded-md border border-neutral-200/80 bg-neutral-100 text-xs font-semibold text-neutral-800 dark:border-white/10 dark:bg-neutral-800 dark:text-neutral-200">
                   {initial}
                 </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm/tight font-medium text-neutral-900 dark:text-white">
+                <span className="flex min-w-0 flex-col font-medium">
+                  <span className="truncate text-sm/none text-neutral-900 dark:text-white">
                     {active.name}
                   </span>
-                  <span className="mt-0.5 block truncate text-xs text-neutral-500 dark:text-neutral-400">
+                  <span className="mt-0.5 truncate text-xs text-neutral-500 dark:text-neutral-400">
                     {environment || 'All environments'}
                   </span>
                 </span>
               </span>
-              <CaretUpDownIcon size={15} className="shrink-0 text-neutral-400 transition-colors group-hover:text-blue-600 dark:group-hover:text-neutral-200" aria-hidden />
+              <CaretUpDownIcon size={16} className="shrink-0 text-neutral-600 transition-colors group-hover:text-blue-600 dark:text-neutral-500 dark:group-hover:text-neutral-300" aria-hidden />
             </button>
           }
         />
         <Popover.Portal>
-          <Popover.Positioner side="bottom" align="start" sideOffset={6}>
-            <Popover.Popup className="w-60 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-lg shadow-black/10 dark:border-white/10 dark:bg-neutral-900">
-              <div className="px-2.5 py-1.5 font-mono text-[10px] font-medium uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                Projects
-              </div>
-              <div className="space-y-0.5">
-                {list.map((project) => {
-                  const selected = project.id === projectId;
-                  const letter = (project.name || project.id).trim().charAt(0).toUpperCase();
-                  return (
+          <Popover.Positioner side="bottom" align="start" sideOffset={4}>
+            <Popover.Popup className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-0 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
+              <div className="flex max-h-[420px] flex-col sm:flex-row">
+                {/* Projects column */}
+                <div className="w-60 shrink-0 overflow-y-auto p-2">
+                  <div className="px-2 pb-1.5 pt-1 text-xs font-medium text-neutral-400 dark:text-neutral-500">
+                    Applications
+                  </div>
+                  <div className="space-y-0.5">
+                    {list.map((project) => {
+                      const selected = project.id === projectId;
+                      const letter = (project.name || project.id).trim().charAt(0).toUpperCase();
+                      return (
+                        <button
+                          key={project.id}
+                          type="button"
+                          onClick={() => onChangeProject(project.id)}
+                          className={`flex h-9 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm transition-colors ${
+                            selected
+                              ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-white/[0.08] dark:text-white'
+                              : 'text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.04] dark:hover:text-white'
+                          }`}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="grid size-5 shrink-0 place-items-center rounded bg-neutral-200/70 text-[11px] font-semibold text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200">
+                              {letter}
+                            </span>
+                            <span className="truncate leading-tight">{project.name}</span>
+                          </span>
+                          {selected && <CheckIcon size={14} className="shrink-0 text-blue-600 dark:text-emerald-500" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Environments column (exact Nightwatch 2-pane switcher) */}
+                <div className="w-56 shrink-0 overflow-y-auto border-t border-neutral-200 p-2 sm:border-l sm:border-t-0 dark:border-neutral-700/50">
+                  <div className="px-2 pb-1.5 pt-1 text-xs font-medium text-neutral-400 dark:text-neutral-500">
+                    Environments
+                  </div>
+                  <div className="space-y-0.5">
                     <button
-                      key={project.id}
                       type="button"
-                      onClick={() => onChange(project.id)}
-                      className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
-                        selected
+                      onClick={() => {
+                        setEnvironment(undefined);
+                        setOpen(false);
+                      }}
+                      className={`flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
+                        environment === undefined
                           ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-white/[0.08] dark:text-white'
                           : 'text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.04] dark:hover:text-white'
                       }`}
                     >
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        <span className="grid size-6 shrink-0 place-items-center rounded bg-neutral-200/70 text-[11px] font-semibold text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200">
-                          {letter}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate leading-tight">{project.name}</span>
-                          {project.name !== project.id && (
-                            <span className="block truncate font-mono text-[11px] text-neutral-400">{project.id}</span>
-                          )}
-                        </span>
+                      <span className="flex items-center gap-2.5 truncate">
+                        <span className="size-2 shrink-0 rounded-full bg-blue-600 dark:bg-emerald-500" aria-hidden />
+                        <span className="truncate">All environments</span>
                       </span>
-                      {selected && <CheckIcon size={14} className="shrink-0 text-blue-600 dark:text-emerald-500" />}
+                      {environment === undefined && <CheckIcon size={14} className="shrink-0 text-blue-600 dark:text-emerald-500" />}
                     </button>
-                  );
-                })}
+                    {envItems.map((envItem, idx) => {
+                      const selected = environment === envItem.name;
+                      const dotColor = envDotClass(envItem.name, envItem.color, idx);
+                      return (
+                        <button
+                          key={envItem.name}
+                          type="button"
+                          onClick={() => {
+                            setEnvironment(envItem.name);
+                            setOpen(false);
+                          }}
+                          className={`flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
+                            selected
+                              ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-white/[0.08] dark:text-white'
+                              : 'text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.04] dark:hover:text-white'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2.5 truncate">
+                            <span className={`size-2 shrink-0 rounded-full ${dotColor}`} aria-hidden />
+                            <span className="truncate">{envItem.name}</span>
+                          </span>
+                          {selected && <CheckIcon size={14} className="shrink-0 text-blue-600 dark:text-emerald-500" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </Popover.Popup>
           </Popover.Positioner>
@@ -269,67 +319,82 @@ function ProjectLabel() {
   );
 }
 
-function ThemeToggle() {
-  const { theme, toggle } = useTheme();
-  const label = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
-  return (
-    <Tooltip asChild content={label}>
-      <Button variant="ghost" shape="square" size="sm" icon={theme === 'dark' ? SunIcon : MoonIcon} aria-label={label} onClick={toggle} data-testid="theme-toggle" />
-    </Tooltip>
-  );
-}
-
+/** 1:1 Nightwatch sidebar footer (`AuthenticatedLayout-CUJ0-ea8.js`): avatar + name + `···` menu. */
 function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
   const user = useSessionUser();
-  const displayName = user?.name || user?.email || 'Account';
+  const { theme, toggle } = useTheme();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const displayName = user?.name || user?.email || (USING_MOCK ? 'Demo' : 'Account');
   const initial = displayName.trim().charAt(0).toUpperCase();
+
   return (
-    <div className="mt-auto border-t border-neutral-200 px-3 py-2.5 dark:border-white/[0.06]">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          {USING_MOCK ? (
-            <Tooltip asChild content="VITE_API_URL is not set: showing generated seed data.">
-              <span data-testid="data-source" className="inline-flex">
-                <Badge variant="warning">
-                  <FlaskIcon />
-                  Seed data
-                </Badge>
-              </span>
-            </Tooltip>
-          ) : user ? (
-            <div className="flex min-w-0 items-center gap-2.5">
-              <span className="grid size-7 shrink-0 place-items-center rounded-md border border-neutral-200/80 bg-neutral-100 text-xs font-medium text-neutral-800 dark:border-white/10 dark:bg-neutral-800 dark:text-neutral-200">
-                {initial}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm/tight font-medium text-neutral-900 dark:text-white">{displayName}</div>
-                <div className="truncate text-[11px] capitalize text-neutral-500 dark:text-neutral-400">{user.role}</div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <ThemeToggle />
-          {!USING_MOCK && (
-            <Tooltip asChild content="Sign out">
-              <Button
-                variant="ghost"
-                shape="square"
-                size="sm"
-                icon={SignOutIcon}
-                aria-label="Sign out"
-                onClick={onSignOut}
-                data-testid="sign-out"
-              />
-            </Tooltip>
-          )}
-        </div>
+    <div className="sticky bottom-0 z-10 w-full shrink-0 border-t border-neutral-200 p-1.5 dark:border-white/[0.05]">
+      <div className="flex items-center gap-0.5">
+        <Link
+          to="/accounts"
+          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md p-2 transition-colors hover:bg-neutral-200/70 dark:hover:bg-white/10"
+        >
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-neutral-200 text-xs font-medium text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200">
+            {initial}
+          </span>
+          <span className="truncate text-sm text-neutral-900 dark:text-white">{displayName}</span>
+        </Link>
+
+        <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
+          <Popover.Trigger
+            render={
+              <button
+                type="button"
+                aria-label="Account and appearance menu"
+                className="flex size-8 shrink-0 items-center justify-center rounded-lg p-1 text-neutral-500 outline-none transition-colors hover:bg-neutral-200/70 dark:text-neutral-400 dark:hover:bg-white/10"
+              >
+                <DotsThreeIcon size={18} weight="bold" aria-hidden />
+              </button>
+            }
+          />
+          <Popover.Portal>
+            <Popover.Positioner side="top" align="end" sideOffset={6}>
+              <Popover.Popup className="w-48 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
+                <button
+                  type="button"
+                  data-testid="theme-toggle"
+                  onClick={() => {
+                    toggle();
+                    setMenuOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.06] dark:hover:text-white"
+                >
+                  {theme === 'dark' ? (
+                    <SunIcon size={15} className="shrink-0 text-neutral-500" aria-hidden />
+                  ) : (
+                    <MoonIcon size={15} className="shrink-0 text-neutral-500" aria-hidden />
+                  )}
+                  <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+                </button>
+                {!USING_MOCK && (
+                  <button
+                    type="button"
+                    data-testid="sign-out"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onSignOut();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.06] dark:hover:text-white"
+                  >
+                    <SignOutIcon size={15} className="shrink-0 text-neutral-500" aria-hidden />
+                    <span>Logout</span>
+                  </button>
+                )}
+              </Popover.Popup>
+            </Popover.Positioner>
+          </Popover.Portal>
+        </Popover.Root>
       </div>
     </div>
   );
 }
 
-function Sidebar({ onClose, onOpenPalette, onSignOut }: { onClose?: () => void; onOpenPalette: () => void; onSignOut: () => void }) {
+function Sidebar({ onClose, onSignOut }: { onClose?: () => void; onSignOut: () => void }) {
   const { range } = useRange();
   const openIssues = useAsync(
     () => (USING_MOCK ? Promise.resolve(null) : api.issues(range, 'open', '', 0).catch(() => null)),
@@ -341,41 +406,23 @@ function Sidebar({ onClose, onOpenPalette, onSignOut }: { onClose?: () => void; 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-transparent">
       <ProjectHeaderSwitcher onClose={onClose} />
-      <div className="px-2.5 pt-2.5">
-        <button
-          type="button"
-          onClick={() => {
-            onClose?.();
-            onOpenPalette();
-          }}
-          aria-label="Search"
-          aria-keyshortcuts="Meta+K Control+K"
-          data-testid="palette-toggle"
-          className="flex h-8 w-full items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-neutral-50/80 px-2.5 text-xs text-neutral-500 transition-colors hover:border-blue-400 hover:bg-white hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-kumo-link dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-neutral-400 dark:hover:border-white/15 dark:hover:text-white"
-        >
-          <span className="flex items-center gap-2">
-            <MagnifyingGlassIcon size={13} aria-hidden />
-            <span>Search…</span>
-          </span>
-          <kbd className="rounded border border-neutral-200 bg-white px-1.5 py-0.5 font-mono text-[10px] leading-none text-neutral-500 dark:border-white/10 dark:bg-neutral-800 dark:text-neutral-400">
-            ⌘K
-          </kbd>
-        </button>
-      </div>
-      <nav className="flex-1 overflow-y-auto px-2 py-2.5" aria-label="Main">
-        <div className="space-y-0.5">
+      <nav className="flex flex-1 flex-col overflow-y-auto md:pt-1" aria-label="Main">
+        <div className="flex w-full flex-col p-1.5">
           {TOP_NAV.map((item) => (
             <NavItem key={item.to} {...item} badge={item.to === '/issues' ? issueCount : undefined} />
           ))}
-        </div>
-        {NAV_SECTIONS.map((section) => (
-          <div key={section.label} className="mt-4 space-y-0.5">
-            <div className="px-2.5 pb-1 text-xs font-semibold text-neutral-500 dark:text-neutral-500">
-              {section.label}
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.label} className="flex flex-col">
+              <div className="px-2 pt-4 pb-1 text-xs font-semibold text-neutral-500 dark:text-neutral-500">
+                {section.label}
+              </div>
+              {section.items.map((item) => <NavItem key={item.to} {...item} />)}
             </div>
-            {section.items.map((item) => <NavItem key={item.to} {...item} />)}
-          </div>
-        ))}
+          ))}
+        </div>
+        <div className="mt-6 flex w-full flex-col gap-0.5 px-1.5 pb-4">
+          {BOTTOM_NAV.map((item) => <NavItem key={item.to} {...item} />)}
+        </div>
       </nav>
       <SidebarFooter onSignOut={onSignOut} />
     </div>
@@ -414,9 +461,9 @@ export default function Layout() {
         Skip to content
       </a>
       <div className="flex h-full bg-neutral-50 dark:bg-neutral-900">
-        {/* Desktop: fixed 228px sidebar matching capture width & crisp white rail. Mobile: slide-over drawer. */}
-        <aside className="hidden w-[228px] shrink-0 flex-col border-r border-neutral-200 bg-white lg:flex dark:border-white/[0.06] dark:bg-neutral-950/35">
-          <Sidebar onOpenPalette={() => setPaletteOpen(true)} onSignOut={handleSignOut} />
+        {/* Desktop: fixed 228px sidebar matching Nightwatch AuthenticatedLayout 1:1 */}
+        <aside className="hidden w-[228px] shrink-0 flex-col border-r border-neutral-200 bg-white lg:flex dark:border-white/[0.05] dark:bg-transparent">
+          <Sidebar onSignOut={handleSignOut} />
         </aside>
         <Dialog.Root open={menuOpen} onOpenChange={setMenuOpen} onOpenChangeComplete={(open) => {
           if (!open) document.querySelector<HTMLButtonElement>('[data-testid="menu-toggle"]')?.focus();
@@ -424,17 +471,16 @@ export default function Layout() {
           <Dialog className="max-h-[90dvh] w-72 max-w-[85vw] overflow-y-auto p-0">
             <Dialog.Title className="sr-only">Navigation</Dialog.Title>
             <Dialog.Description className="sr-only">Choose a project and dashboard page.</Dialog.Description>
-            <Sidebar onClose={() => setMenuOpen(false)} onOpenPalette={() => setPaletteOpen(true)} onSignOut={handleSignOut} />
+            <Sidebar onClose={() => setMenuOpen(false)} onSignOut={handleSignOut} />
           </Dialog>
         </Dialog.Root>
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Mobile-only navigation header; desktop puts title + telemetry controls on ONE unified PageHeader row */}
-          <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-neutral-200 bg-white px-4 lg:hidden dark:border-white/[0.06] dark:bg-neutral-900">
+          <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-neutral-200 bg-white px-4 lg:hidden dark:border-white/[0.05] dark:bg-neutral-900">
             <Button variant="ghost" shape="square" size="sm" icon={ListIcon} aria-label="Open menu" onClick={() => setMenuOpen(true)} data-testid="menu-toggle" />
             <ProjectLabel />
           </header>
-          <main id={mainId} className="min-w-0 flex-1 overflow-y-auto px-5 py-5 sm:px-8 lg:px-10 lg:py-6">
-            <div className="mx-auto w-full max-w-[1440px]">
+          <main id={mainId} className="relative min-w-0 flex-1 overflow-x-clip overflow-y-auto">
+            <div className="ew-container min-h-full pt-1 pb-12 md:pt-5">
               <PageBoundary key={pathname}>
                 <Suspense fallback={<Loading />}><Outlet /></Suspense>
               </PageBoundary>

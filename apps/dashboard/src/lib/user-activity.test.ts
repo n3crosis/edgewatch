@@ -39,3 +39,15 @@ it('filters demo event summaries, occurrences, exceptions and logs by exact capt
   }
   expect(mock.exceptions('7d', 'not-captured')).toEqual([]);
 });
+
+it('filters demo overview and traces by type:authenticated and type:guest', () => {
+  mock.setMockProject(mock.MOCK_PROJECTS[0].id);
+  const total = mock.overview('24h').requests;
+  const authOverview = mock.overview('24h', 'type:authenticated');
+  const guestOverview = mock.overview('24h', 'type:guest');
+  expect(authOverview.requests).toBeGreaterThan(0);
+  expect(guestOverview.requests).toBeGreaterThan(0);
+  expect(authOverview.requests + guestOverview.requests).toBe(total);
+  expect(mock.traces({ range: '24h', user: 'type:authenticated' }, null, 200).data.every((row) => Boolean(row.user))).toBe(true);
+  expect(mock.traces({ range: '24h', user: 'type:guest' }, null, 200).data.every((row) => !row.user)).toBe(true);
+});

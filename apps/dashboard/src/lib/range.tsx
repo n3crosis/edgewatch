@@ -26,7 +26,7 @@ export function RangeProvider({ children }: { children: ReactNode }) {
   const { projectId } = useProject();
   const [fallbackRange, setFallbackRange] = useState<Range>('24h');
   const value = params.get('range');
-  const range: Range = value && (['1h', '6h', '24h', '7d'].includes(value) || (value.startsWith('custom:') && timeWindow(value))) ? value as Range : fallbackRange;
+  const range: Range = value && (['1h', '6h', '24h', '7d', '14d', '30d'].includes(value) || (value.startsWith('custom:') && timeWindow(value))) ? value as Range : fallbackRange;
   const setRange = (r: Range) => {
     setFallbackRange(r);
     setParams((previous) => {

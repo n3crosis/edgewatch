@@ -85,4 +85,26 @@ describe('demo environment isolation', () => {
     expect(mock.traces().data).toEqual([]);
     expect(mock.events('/logs', '24h').data).toEqual([]);
   });
+
+  it('supports adding, updating, and removing environments and applications in demo mode', () => {
+    mock.setMockProject(mock.MOCK_PROJECTS[0].id);
+    const added = mock.createEnvironment({ name: 'qa-preview', color: 'violet', url: 'https://qa.example.com' });
+    expect(added.name).toBe('qa-preview');
+    expect(added.color).toBe('violet');
+    expect(mock.environments().some((env) => env.name === 'qa-preview')).toBe(true);
+
+    const updated = mock.updateEnvironment('qa-preview', { color: 'rose', url: null });
+    expect(updated.color).toBe('rose');
+    expect(updated.url).toBeNull();
+
+    mock.deleteEnvironment('qa-preview');
+    expect(mock.environments().some((env) => env.name === 'qa-preview')).toBe(false);
+
+    const createdApp = mock.createProject({ name: 'Test App', id: 'test-app-unit' });
+    expect(createdApp.id).toBe('test-app-unit');
+    expect(createdApp.ingest_key).toMatch(/^ew_live_/);
+    expect(mock.renameProject('test-app-unit', 'Renamed App').name).toBe('Renamed App');
+    expect(mock.deleteProject('test-app-unit').ok).toBe(true);
+    expect(mock.MOCK_PROJECTS.some((p) => p.id === 'test-app-unit')).toBe(false);
+  });
 });

@@ -4,7 +4,14 @@ import { fetchApi } from './auth';
 import { API_URL, USING_MOCK } from './config';
 import { MOCK_PROJECTS, setMockProject } from './mock';
 
-export interface ProjectInfo { id: string; name: string; host?: string; last_seen?: string | null }
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  host?: string;
+  last_seen?: string | null;
+  daily_record_quota?: number | null;
+  retention_days?: number | null;
+}
 
 const DEFAULT_PROJECT = (import.meta.env.VITE_PROJECT_ID as string | undefined) || (USING_MOCK ? MOCK_PROJECTS[0].id : 'demo');
 const STORAGE_KEY = 'edgewatch.project';
@@ -15,8 +22,18 @@ try { current = globalThis.localStorage?.getItem(STORAGE_KEY) || DEFAULT_PROJECT
 setMockProject(current);
 export const activeProjectId = () => current;
 
-interface ProjectState { projectId: string; projects: ProjectInfo[]; setProjectId: (id: string) => void }
-const ProjectContext = createContext<ProjectState>({ projectId: current, projects: [], setProjectId: () => {} });
+interface ProjectState {
+  projectId: string;
+  projects: ProjectInfo[];
+  setProjectId: (id: string) => void;
+  refreshProjects: () => void;
+}
+const ProjectContext = createContext<ProjectState>({
+  projectId: current,
+  projects: [],
+  setProjectId: () => {},
+  refreshProjects: () => {},
+});
 
 async function loadProjects(): Promise<ProjectInfo[]> {
   if (USING_MOCK) return MOCK_PROJECTS.map(({ id, name, host }) => ({ id, name, host }));
@@ -38,6 +55,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   setMockProject(projectId);
   useEffect(() => { if (explicitProject) setState(explicitProject); }, [explicitProject]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [reloadTick, setReloadTick] = useState(0);
+  const refreshProjects = () => setReloadTick((n) => n + 1);
 
   const setProjectId = (id: string) => {
     current = id;
@@ -55,9 +74,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       if (!explicitProject && list.length && !list.some((p) => p.id === current)) setProjectId(list[0].id);
     });
     return () => { cancelled = true; };
-  }, [explicitProject]);
+  }, [explicitProject, reloadTick]);
 
-  return <ProjectContext.Provider value={{ projectId, projects, setProjectId }}>{children}</ProjectContext.Provider>;
+  return <ProjectContext.Provider value={{ projectId, projects, setProjectId, refreshProjects }}>{children}</ProjectContext.Provider>;
 }
 
 export const useProject = () => useContext(ProjectContext);
