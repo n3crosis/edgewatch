@@ -1,256 +1,359 @@
-import { useEnvironment } from '@/lib/environment';
-import { useProject } from '@/lib/project';
-import { scopedPath } from '@/components/ScopedLink';
-import { timeWindow } from '@edgewatch/shared/time-window';
 import Link from '@/components/ScopedLink';
-import { BarChart, Legend, LineChart } from '@/components/charts';
-import { Empty, ErrorState, Loading, MethodBadge, PageHeader, PageSkeleton, Panel, Sql, Stat, useRowNavigate } from '@/components/common';
+import { BarChart, LineChart, MetricChartCard, rangeFooterBounds } from '@/components/charts';
+import { CardTray, ErrorState, MethodBadge, PageHeader, PageSkeleton, Sql } from '@/components/common';
 import { Badge } from '@cloudflare/kumo/components/badge';
-import { Button, LinkButton } from '@cloudflare/kumo/components/button';
-import { Table } from '@cloudflare/kumo/components/table';
 import {
-  ArrowRightIcon,
-  ArrowsLeftRightIcon,
-  BugIcon,
+  AppWindowIcon,
   CheckCircleIcon,
   DatabaseIcon,
-  PlugIcon,
   PulseIcon,
-  TimerIcon,
-  WarningCircleIcon,
+  UsersIcon,
 } from '@phosphor-icons/react';
 import { api, useAsync } from '@/lib/api';
-import { bucketTime, compact, ms, percent } from '@/lib/format';
+import { bucketTime, compact, ms } from '@/lib/format';
 import { useRange, rangeLabel } from '@/lib/range';
-
-function ViewAll({ to, label = 'View all' }: { to: string; label?: string }) {
-  return (
-    <Link to={to} className="inline-flex items-center gap-1 text-xs font-medium text-kumo-link hover:underline">
-      <span>{label}</span>
-      <ArrowRightIcon size={12} aria-hidden />
-    </Link>
-  );
-}
+import { splitClassName } from '@/lib/ui-helpers';
+import type { ReactNode } from 'react';
 
 function splitRoute(route: string): { method: string | null; path: string } {
   const match = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i.exec(route);
   return match ? { method: match[1].toUpperCase(), path: match[2] } : { method: null, path: route };
 }
 
+function StatusCard({
+  badge,
+  headline,
+  viewTo,
+  children,
+}: {
+  badge: string;
+  headline: string;
+  viewTo: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      data-slot="card"
+      className="flex flex-col justify-between overflow-hidden rounded-lg border border-neutral-200 bg-white p-5 shadow-md shadow-black/[0.04] dark:border-white/[0.06] dark:bg-white/[0.02] dark:shadow-black/20"
+    >
+      <div>
+        <span className="inline-block rounded bg-neutral-100 px-2 py-0.5 font-mono text-[11px] font-medium uppercase tracking-wider text-neutral-600 dark:bg-white/10 dark:text-neutral-300">
+          {badge}
+        </span>
+        <h3 className="mt-4 text-lg font-semibold leading-snug tracking-tight text-neutral-900 dark:text-white">
+          {headline}
+        </h3>
+        <div className="mt-4">{children}</div>
+      </div>
+      <div className="mt-5 flex justify-end">
+        <Link
+          to={viewTo}
+          className="inline-flex h-7 items-center rounded-md border border-neutral-200 bg-white px-2.5 text-xs font-medium text-neutral-700 transition-colors hover:border-blue-500 hover:text-neutral-900 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-neutral-300 dark:hover:border-white/15 dark:hover:text-white"
+        >
+          View
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 export default function OverviewPage() {
-  const { range, setRange } = useRange();
-  const { projectId } = useProject();
-  const { environment, setEnvironment } = useEnvironment();
-  const rowNav = useRowNavigate();
+  const { range } = useRange();
   const { data, error, loading, fetching } = useAsync(() => api.overview(range), [range], { keepPreviousData: true });
   const exceptions = useAsync(() => api.exceptions(range), [range], { keepPreviousData: true });
   const queries = useAsync(() => api.queries(range), [range], { keepPreviousData: true });
+  const jobs = useAsync(() => api.events('/jobs', range), [range], { keepPreviousData: true });
+  const users = useAsync(() => api.events('/users', range), [range], { keepPreviousData: true });
 
   if (error) return <ErrorState error={error} />;
   if (loading || !data) return <PageSkeleton />;
-  if (data.requests === 0 && data.exceptions === 0) {
-    return (
-      <>
-        <PageHeader title="Dashboard" subtitle={`Application health over the ${rangeLabel(range)}`} />
-        <Panel>
-          <Empty
-            icon={<PulseIcon size={36} className="text-kumo-subtle" />}
-            description={
-              environment
-                ? `No telemetry arrived for ${environment} in this window. Try switching environments or widening the time range.`
-                : "Point the Laravel Nightwatch agent at this project's ingest URL and telemetry will appear here within seconds."
-            }
-            action={
-              <div className="flex flex-wrap items-center justify-center gap-2.5">
-                {environment && (
-                  <Button variant="secondary" onClick={() => setEnvironment(undefined)}>
-                    All environments
-                  </Button>
-                )}
-                {range !== '7d' && (
-                  <Button variant="secondary" onClick={() => setRange('7d')}>
-                    Try last 7d
-                  </Button>
-                )}
-                <LinkButton href={scopedPath('/setup', projectId, range, environment)} variant="primary" icon={PlugIcon}>
-                  Connect an app
-                </LinkButton>
-              </div>
-            }
-          >
-            {`No traffic in the ${rangeLabel(range)}`}
-          </Empty>
-        </Panel>
-      </>
-    );
-  }
 
-  const win = timeWindow(range);
-  const windowMinutes = Math.max(1 / 60, win ? (win.width * 24) / 60000 : 1440);
-  const rpm = data.requests / windowMinutes;
-  const peakLatency = Math.max(0, ...data.series.map((s) => s.p95_ms));
-  const maxRouteRequests = Math.max(1, ...data.top_routes.map((r) => r.requests));
+  const bounds = rangeFooterBounds(range);
+  const windowLabel = rangeLabel(range);
+  const totalErrors = data.series.reduce((sum, s) => sum + s.errors, 0);
+  const okRequests = Math.max(0, data.requests - totalErrors);
+  const nonZeroP95 = data.series.filter((s) => s.p95_ms > 0);
+  const avgDuration = nonZeroP95.length ? nonZeroP95.reduce((sum, s) => sum + s.p95_ms, 0) / nonZeroP95.length : 0;
+
+  const slowRoutes = data.top_routes.filter((r) => r.p95_ms > 500);
+  const jobsSummary = jobs.data?.summary ?? {};
+  const jobsRows = jobs.data?.data ?? [];
+  const jobsAttempts = Number(jobsSummary.attempts ?? 0);
+  const jobsFailed = Number(jobsSummary.failed ?? 0);
+  const jobsReleased = Number(jobsSummary.released ?? 0);
+  const jobsProcessed = Math.max(0, jobsAttempts - jobsFailed - jobsReleased);
+  const jobsBarSeries = jobsRows.slice(0, 12).map((j) => ({
+    label: splitClassName(j.key).short,
+    value: Number(j.attempts ?? j.count ?? 0),
+    warn: Number(j.released ?? 0),
+    highlight: Number(j.failed ?? 0),
+  }));
+
+  const usersSummary = users.data?.summary ?? {};
+  const usersRows = users.data?.data ?? [];
+  const authUsersCount = Number(usersSummary.users ?? usersRows.length);
+  const userTracesCount = Number(usersSummary.traces ?? 0);
+  const userExceptionsCount = Number(usersSummary.exceptions ?? 0);
+  const usersBarSeries = usersRows.slice(0, 12).map((u) => ({
+    label: u.name ? String(u.name) : `#${u.key}`,
+    value: Number(u.count ?? 0),
+    highlight: Number(u.exceptions ?? 0),
+  }));
+
+  const slowestQueries = queries.data ? [...queries.data].sort((a, b) => b.p95_ms - a.p95_ms).slice(0, 3) : [];
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Dashboard" subtitle={`Application health over the ${rangeLabel(range)}`} />
+      <PageHeader title="Dashboard" />
 
-      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
-        <Stat label="Requests" icon={<ArrowsLeftRightIcon size={14} />} value={compact(data.requests)} hint={`${rpm.toFixed(1)} / min`} to="/requests" />
-        <Stat
-          label="Error rate"
-          icon={<WarningCircleIcon size={14} />}
-          value={percent(data.error_rate)}
-          tone={data.error_rate > 0.01 ? 'bad' : 'good'}
-          hint="5xx responses"
-          to="/traces?source=request&status=5xx"
-        />
-        <Stat
-          label="p95 response time"
-          icon={<TimerIcon size={14} />}
-          value={ms(data.p95_ms)}
-          tone={data.p95_ms > 500 ? 'warn' : 'default'}
-          hint={`95% faster · peak ${ms(peakLatency)}`}
-          to="/traces?source=request&min_duration_ms=500"
-        />
-        <Stat
-          label="Exceptions"
-          icon={<BugIcon size={14} />}
-          value={compact(data.exceptions)}
-          tone={data.exceptions > 0 ? 'bad' : 'good'}
-          hint={data.exceptions > 0 ? 'recorded in window' : 'none recorded'}
-          to="/exceptions"
-        />
-        <Stat
-          label="Slow queries"
-          icon={<DatabaseIcon size={14} />}
-          value={compact(data.slow_queries)}
-          hint="> 100ms"
-          tone={data.slow_queries > 0 ? 'warn' : 'good'}
-          to="/queries?sort=p95_ms"
-        />
-      </section>
+      {/* Tray 1: Activity (Requests + Duration) matching capture Dashboard 1:1 */}
+      <CardTray
+        title="Activity"
+        icon={<PulseIcon size={13} />}
+        action={{ to: '/requests', label: 'Requests' }}
+      >
+        <div className="grid grid-cols-1 gap-2 [&>*]:min-w-0 xl:grid-cols-2">
+          <MetricChartCard
+            fetching={!loading && fetching}
+            title="Requests"
+            value={compact(data.requests)}
+            metrics={[
+              { label: '1/2/3/4XX', value: compact(okRequests), tone: 'neutral' },
+              { label: '5XX', value: compact(totalErrors), tone: 'error' },
+            ]}
+          >
+            <BarChart
+              bounds={bounds}
+              series={data.series.map((s) => ({ label: bucketTime(s.ts, range), value: s.requests, highlight: s.errors }))}
+            />
+          </MetricChartCard>
+          <MetricChartCard
+            fetching={!loading && fetching}
+            title="Duration"
+            value={data.p95_ms > 0 ? ms(data.p95_ms) : '—'}
+            metrics={[
+              { label: 'AVG', value: avgDuration > 0 ? ms(avgDuration) : '—', tone: 'charcoal' },
+              { label: 'P95', value: data.p95_ms > 0 ? ms(data.p95_ms) : '—', tone: 'alert' },
+            ]}
+          >
+            <LineChart
+              bounds={bounds}
+              values={data.series.map((s) => s.p95_ms)}
+              labels={data.series.map((s) => bucketTime(s.ts, range))}
+              format={ms}
+            />
+          </MetricChartCard>
+        </div>
+      </CardTray>
 
-      <section className="grid grid-cols-1 gap-6 [&>*]:min-w-0 xl:grid-cols-2">
-        <Panel
-          fetching={!loading && fetching}
-          title="Requests & errors"
-          actions={<Legend items={[{ label: 'Requests', className: 'bg-kumo-brand/65' }, { label: 'Errors', className: 'bg-kumo-danger' }]} />}
-        >
-          <div className="p-6">
-            <BarChart series={data.series.map((s) => ({ label: bucketTime(s.ts, range), value: s.requests, highlight: s.errors }))} />
-          </div>
-        </Panel>
-        <Panel
-          fetching={!loading && fetching}
-          title="p95 latency"
-          actions={<span className="text-xs tabular-nums text-kumo-subtle">peak {ms(peakLatency)}</span>}
-        >
-          <div className="p-6">
-            <LineChart values={data.series.map((s) => s.p95_ms)} labels={data.series.map((s) => bucketTime(s.ts, range))} format={ms} />
-          </div>
-        </Panel>
-      </section>
-
-      <section className="grid grid-cols-1 gap-6 [&>*]:min-w-0 xl:grid-cols-3">
-        <Panel fetching={!loading && fetching} title="Top routes" className="xl:col-span-2" actions={<ViewAll to="/requests" label="All routes" />}>
-          {data.top_routes.length === 0 ? (
-            <Empty icon={<ArrowsLeftRightIcon size={32} className="text-kumo-subtle" />}>No routes recorded in this window.</Empty>
-          ) : (
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>Route</Table.Head>
-                  <Table.Head className="text-right">Requests</Table.Head>
-                  <Table.Head className="text-right">p95</Table.Head>
-                  <Table.Head className="text-right">Errors</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {data.top_routes.map((r) => {
-                  const { method, path } = splitRoute(r.route);
-                  const share = Math.max(4, Math.round((r.requests / maxRouteRequests) * 100));
-                  const target = `/traces?${new URLSearchParams({ q: r.route, source: 'request' })}`;
-                  return (
-                    <Table.Row key={r.route} onClick={rowNav(target)} className="cursor-pointer transition-colors hover:bg-kumo-tint/50">
-                      <Table.Cell className="max-w-md">
-                        <Link title={r.route} to={target} className="inline-flex max-w-full items-center gap-2.5 hover:underline">
-                          {method && <MethodBadge method={method} />}
-                          <span className="truncate font-mono text-xs text-kumo-strong">{path}</span>
-                        </Link>
-                      </Table.Cell>
-                      <Table.Cell className="text-right tabular-nums">
-                        <div className="inline-flex flex-col items-end gap-1.5">
-                          <span className="font-medium">{compact(r.requests)}</span>
-                          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-kumo-fill">
-                            <div className="h-full rounded-full bg-kumo-brand/70" style={{ width: `${share}%` }} />
-                          </div>
-                        </div>
-                      </Table.Cell>
-                      <Table.Cell className={`text-right font-mono text-xs tabular-nums ${r.p95_ms > 500 ? 'font-medium text-kumo-warning' : ''}`}>
-                        {ms(r.p95_ms)}
-                      </Table.Cell>
-                      <Table.Cell className={`text-right font-mono text-xs tabular-nums ${r.error_rate > 0.01 ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}`}>
-                        {percent(r.error_rate)}
-                      </Table.Cell>
-                    </Table.Row>
-                  );
-                })}
-              </Table.Body>
-            </Table>
-          )}
-        </Panel>
-
-        <div className="space-y-6">
-          <Panel fetching={!exceptions.loading && exceptions.fetching} title="Top exceptions" actions={<ViewAll to="/exceptions" />}>
-            {exceptions.error ? (
-              <ErrorState error={exceptions.error} />
-            ) : exceptions.loading && !exceptions.data ? (
-              <Loading rows={3} />
-            ) : exceptions.data?.length === 0 ? (
-              <Empty icon={<CheckCircleIcon size={32} className="text-kumo-success" />}>No exceptions</Empty>
+      {/* Tray 2: Application (Exceptions CardStatus + Top Routes + Jobs MetricChartCard) */}
+      <CardTray
+        title="Application"
+        icon={<AppWindowIcon size={13} />}
+        action={{ to: '/jobs', label: 'Jobs' }}
+      >
+        <div className="grid grid-cols-1 gap-2 [&>*]:min-w-0 md:grid-cols-2 xl:grid-cols-3">
+          <StatusCard
+            badge="Exceptions"
+            headline={
+              data.exceptions === 0
+                ? `No exceptions reported in the ${windowLabel}.`
+                : `${compact(data.exceptions)} exception${data.exceptions === 1 ? '' : 's'} reported in the ${windowLabel}.`
+            }
+            viewTo="/exceptions"
+          >
+            {data.exceptions === 0 || !exceptions.data?.length ? (
+              <div className="flex justify-center py-6">
+                <div className="grid size-24 place-items-center rounded-full border-2 border-dashed border-emerald-400/70 text-emerald-500">
+                  <CheckCircleIcon size={32} />
+                </div>
+              </div>
             ) : (
-              <div className="divide-y divide-kumo-hairline">
-                {exceptions.data?.slice(0, 3).map((e) => (
-                  <Link key={e.group} to={`/exceptions/${e.group}`} className="block px-6 py-4 transition-colors hover:bg-kumo-tint/60">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="truncate font-mono text-xs font-medium text-kumo-danger">{e.class.split('\\').pop()}</span>
-                      <Badge variant={e.handled ? 'secondary' : 'error'} className="shrink-0 tabular-nums">{e.count}×</Badge>
+              <div className="space-y-2">
+                {exceptions.data.slice(0, 3).map((e) => (
+                  <Link
+                    key={e.group}
+                    to={`/exceptions/${e.group}`}
+                    className="block rounded-md border border-neutral-200/80 bg-neutral-50/40 px-3 py-2 transition-colors hover:border-blue-500 hover:bg-white dark:border-white/[0.07] dark:bg-white/[0.02] dark:hover:border-white/20"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-mono text-xs font-medium text-kumo-danger">
+                        {splitClassName(e.class).short}
+                      </span>
+                      <Badge variant={e.handled ? 'secondary' : 'error'} className="shrink-0 tabular-nums">
+                        {compact(e.count)}×
+                      </Badge>
                     </div>
-                    <div title={e.message} className="mt-1.5 truncate text-xs text-kumo-subtle">{e.message}</div>
+                    <div title={e.message} className="mt-0.5 truncate text-xs text-kumo-subtle">
+                      {e.message}
+                    </div>
                   </Link>
                 ))}
               </div>
             )}
-          </Panel>
+          </StatusCard>
 
-          <Panel fetching={!queries.loading && queries.fetching} title="Slowest queries" actions={<ViewAll to="/queries" />}>
-            {queries.error ? (
-              <ErrorState error={queries.error} />
-            ) : queries.loading && !queries.data ? (
-              <Loading rows={3} />
-            ) : queries.data?.length === 0 ? (
-              <Empty icon={<DatabaseIcon size={32} className="text-kumo-subtle" />}>No queries</Empty>
+          <StatusCard
+            badge="Routes"
+            headline={
+              data.top_routes.length === 0
+                ? `No routes recorded in the ${windowLabel}.`
+                : slowRoutes.length > 0
+                  ? `${slowRoutes.length} slow route${slowRoutes.length === 1 ? '' : 's'} (>500ms) in the ${windowLabel}.`
+                  : `${data.top_routes.length} active route${data.top_routes.length === 1 ? '' : 's'} in the ${windowLabel}.`
+            }
+            viewTo="/requests"
+          >
+            {data.top_routes.length === 0 ? (
+              <div className="flex justify-center py-6">
+                <div className="grid size-24 place-items-center rounded-full border-2 border-dashed border-neutral-200 text-neutral-400 dark:border-white/10">
+                  <PulseIcon size={28} />
+                </div>
+              </div>
             ) : (
-              <div className="divide-y divide-kumo-hairline">
-                {queries.data &&
-                  [...queries.data].sort((a, b) => b.p95_ms - a.p95_ms).slice(0, 3).map((q) => (
-                    <Link key={q.sql_hash} to={`/queries/${q.sql_hash}`} className="block px-6 py-4 transition-colors hover:bg-kumo-tint/60">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="min-w-0 truncate"><Sql sql={q.sql} /></span>
-                        <span className="shrink-0 font-mono text-xs font-medium tabular-nums text-kumo-warning">{ms(q.p95_ms)}</span>
-                      </div>
-                      <div className="mt-1.5 flex items-center justify-between text-xs text-kumo-subtle">
-                        <span className="font-mono">{q.connection}</span>
-                        <span className="tabular-nums">{compact(q.calls)} calls</span>
-                      </div>
+              <div className="space-y-2">
+                {data.top_routes.slice(0, 4).map((r) => {
+                  const { method, path } = splitRoute(r.route);
+                  const target = `/traces?${new URLSearchParams({ q: r.route, source: 'request' })}`;
+                  return (
+                    <Link
+                      key={r.route}
+                      to={target}
+                      className="flex items-center justify-between gap-2 rounded-md border border-neutral-200/80 bg-neutral-50/40 px-3 py-2 transition-colors hover:border-blue-500 hover:bg-white dark:border-white/[0.07] dark:bg-white/[0.02] dark:hover:border-white/20"
+                    >
+                      <span className="inline-flex min-w-0 items-center gap-2">
+                        {method && <MethodBadge method={method} />}
+                        <span title={r.route} className="truncate font-mono text-xs text-neutral-900 dark:text-white">
+                          {path}
+                        </span>
+                      </span>
+                      <span
+                        className={`shrink-0 font-mono text-xs tabular-nums ${
+                          r.p95_ms > 500 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-400'
+                        }`}
+                      >
+                        {ms(r.p95_ms)}
+                      </span>
                     </Link>
-                  ))}
+                  );
+                })}
               </div>
             )}
-          </Panel>
+          </StatusCard>
+
+          <MetricChartCard
+            fetching={!jobs.loading && jobs.fetching}
+            title="Jobs"
+            value={compact(jobsAttempts)}
+            metrics={[
+              { label: 'FAILED', value: compact(jobsFailed), tone: 'error' },
+              { label: 'PROCESSED', value: compact(jobsProcessed), tone: 'neutral' },
+              { label: 'RELEASED', value: compact(jobsReleased), tone: 'alert' },
+            ]}
+          >
+            <BarChart bounds={bounds} series={jobsBarSeries} unit="attempts" />
+          </MetricChartCard>
         </div>
-      </section>
+      </CardTray>
+
+      {/* Tray 3: Users & Database */}
+      <CardTray
+        title="Users"
+        icon={<UsersIcon size={13} />}
+        action={{ to: '/users', label: 'Users' }}
+      >
+        <div className="grid grid-cols-1 gap-2 [&>*]:min-w-0 md:grid-cols-2 xl:grid-cols-3">
+          <MetricChartCard
+            fetching={!users.loading && users.fetching}
+            title="Authenticated Users"
+            value={compact(authUsersCount)}
+            metrics={[
+              { label: 'TRACES', value: compact(userTracesCount), tone: 'success' },
+              { label: 'EXCEPTIONS', value: compact(userExceptionsCount), tone: 'error' },
+            ]}
+          >
+            <BarChart bounds={bounds} series={usersBarSeries} unit="traces" />
+          </MetricChartCard>
+
+          <StatusCard
+            badge="Queries"
+            headline={
+              data.slow_queries > 0
+                ? `${compact(data.slow_queries)} slow quer${data.slow_queries === 1 ? 'y' : 'ies'} (>100ms).`
+                : slowestQueries.length > 0
+                  ? `No slow queries (>100ms) in the ${windowLabel}.`
+                  : `No queries recorded in the ${windowLabel}.`
+            }
+            viewTo="/queries"
+          >
+            {slowestQueries.length === 0 ? (
+              <div className="flex justify-center py-6">
+                <div className="grid size-24 place-items-center rounded-full border-2 border-dashed border-emerald-400/70 text-emerald-500">
+                  <DatabaseIcon size={28} />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {slowestQueries.map((q) => (
+                  <Link
+                    key={q.sql_hash}
+                    to={`/queries/${q.sql_hash}`}
+                    className="block rounded-md border border-neutral-200/80 bg-neutral-50/40 px-3 py-2 transition-colors hover:border-blue-500 hover:bg-white dark:border-white/[0.07] dark:bg-white/[0.02] dark:hover:border-white/20"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate">
+                        <Sql sql={q.sql} />
+                      </span>
+                      <span className="shrink-0 font-mono text-xs font-medium tabular-nums text-amber-600 dark:text-amber-400">
+                        {ms(q.p95_ms)}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between font-mono text-[11px] text-neutral-500 dark:text-neutral-400">
+                      <span>{q.connection}</span>
+                      <span>{compact(q.calls)} calls</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </StatusCard>
+
+          <StatusCard
+            badge="Active Users"
+            headline={
+              usersRows.length > 0
+                ? `${compact(authUsersCount)} active user${authUsersCount === 1 ? '' : 's'} in the ${windowLabel}.`
+                : `No authenticated users in the ${windowLabel}.`
+            }
+            viewTo="/users"
+          >
+            {usersRows.length === 0 ? (
+              <div className="flex justify-center py-6">
+                <div className="grid size-24 place-items-center rounded-full border-2 border-dashed border-neutral-200 text-neutral-400 dark:border-white/10">
+                  <UsersIcon size={28} />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {usersRows.slice(0, 4).map((u) => (
+                  <Link
+                    key={u.key}
+                    to={`/users/${encodeURIComponent(u.key)}`}
+                    className="flex items-center justify-between gap-2 rounded-md border border-neutral-200/80 bg-neutral-50/40 px-3 py-2 transition-colors hover:border-blue-500 hover:bg-white dark:border-white/[0.07] dark:bg-white/[0.02] dark:hover:border-white/20"
+                  >
+                    <span className="min-w-0 truncate text-xs font-medium text-neutral-900 dark:text-white">
+                      {u.name ? String(u.name) : `User #${u.key}`}
+                    </span>
+                    <span className="shrink-0 font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+                      {compact(Number(u.count ?? 0))} traces
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </StatusCard>
+        </div>
+      </CardTray>
     </div>
   );
 }

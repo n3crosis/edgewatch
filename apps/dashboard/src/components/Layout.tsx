@@ -1,18 +1,16 @@
 import { useKumoToastManager } from '@cloudflare/kumo/components/toast';
-import EnvironmentPicker from './EnvironmentPicker';
 import { EnvironmentProvider, useEnvironment } from '@/lib/environment';
-import { environmentScopedPath } from '@/lib/environment-scope';
-import { scopedPath } from './ScopedLink';
+import Link, { scopedPath } from './ScopedLink';
 import { Badge } from '@cloudflare/kumo/components/badge';
-import { Button, LinkButton } from '@cloudflare/kumo/components/button';
+import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import RangePicker from './RangePicker';
+import { Popover } from '@cloudflare/kumo/components/popover';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import {
-  ArrowClockwiseIcon,
   ArrowsLeftRightIcon,
-  BroadcastIcon,
   BugIcon,
+  CaretUpDownIcon,
+  CheckIcon,
   DatabaseIcon,
   FlaskIcon,
   FolderSimpleIcon,
@@ -26,7 +24,6 @@ import {
   QueueIcon,
   SignOutIcon,
   SunIcon,
-  UserCircleIcon,
   WarningOctagonIcon,
   XIcon,
 } from '@phosphor-icons/react';
@@ -35,11 +32,10 @@ import CommandPalette from './CommandPalette';
 import { isPaletteShortcut, type PaletteCommand } from '@/lib/command-palette';
 import PageBoundary from './PageBoundary';
 import { Loading } from './common';
-import { Select } from '@cloudflare/kumo/components/select';
 import { Outlet, useLocation, useMatch, useNavigate, useResolvedPath } from 'react-router-dom';
 import { useTheme } from '@/lib/theme';
 import { EVENT_PAGES } from '@/lib/events';
-import { USING_MOCK } from '@/lib/api';
+import { api, USING_MOCK, useAsync } from '@/lib/api';
 import { signOut, useSessionUser } from '@/lib/auth';
 import { ProjectProvider, useProject } from '@/lib/project';
 import { RangeProvider, useRange } from '@/lib/range';
@@ -73,12 +69,27 @@ const KEYWORDS: Record<string, string[]> = {
   '/accounts': ['members', 'invitations', 'users', 'access'],
 };
 
+const TOP_NAV = NAV.filter((item) => ['/', '/issues'].includes(item.to));
+
 const NAV_SECTIONS = [
-  { label: 'Overview', items: NAV.filter((item) => ['/', '/issues'].includes(item.to)) },
-  { label: 'HTTP & Code', items: NAV.filter((item) => ['/requests', '/traces', '/exceptions', '/queries', '/logs'].includes(item.to)) },
-  { label: 'Background & Services', items: NAV.filter((item) => ['/jobs', '/scheduled-tasks', '/commands', '/outgoing-requests', '/cache', '/mail', '/notifications'].includes(item.to)) },
-  { label: 'Audience', items: NAV.filter((item) => ['/users'].includes(item.to)) },
-  { label: 'Manage', items: NAV.filter((item) => ['/pipeline', '/setup', '/accounts'].includes(item.to)) },
+  {
+    label: 'Activity',
+    items: ['/requests', '/traces', '/jobs', '/commands', '/scheduled-tasks', '/exceptions', '/queries', '/notifications', '/mail', '/cache', '/outgoing-requests']
+      .map((path) => NAV.find((item) => item.to === path))
+      .filter((item): item is (typeof NAV)[number] => Boolean(item)),
+  },
+  {
+    label: 'Monitoring',
+    items: ['/users', '/logs']
+      .map((path) => NAV.find((item) => item.to === path))
+      .filter((item): item is (typeof NAV)[number] => Boolean(item)),
+  },
+  {
+    label: 'Manage',
+    items: ['/pipeline', '/setup', '/accounts']
+      .map((path) => NAV.find((item) => item.to === path))
+      .filter((item): item is (typeof NAV)[number] => Boolean(item)),
+  },
 ];
 
 function PaletteHost({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
@@ -101,35 +112,63 @@ function PaletteHost({ open, setOpen }: { open: boolean; setOpen: (open: boolean
   );
 }
 
-function NavItem({ to, label, icon: Icon, end }: (typeof NAV)[number]) {
+function NavItem({ to, label, icon: Icon, end, badge }: (typeof NAV)[number] & { badge?: number }) {
   const { range } = useRange();
   const { projectId } = useProject();
   const { environment } = useEnvironment();
   const href = scopedPath(to, projectId, range, environment);
   const active = useMatch({ path: useResolvedPath(to).pathname, end: end ?? false }) !== null;
   return (
-    <LinkButton
-      href={href}
-      variant={active ? 'secondary' : 'ghost'}
-      size="sm"
-      icon={<Icon weight={active ? 'duotone' : 'regular'} />}
+    <Link
+      to={href}
       aria-current={active ? 'page' : undefined}
-      className={`h-9 w-full justify-start gap-3 px-3 text-sm ${active ? 'font-medium text-kumo-strong' : 'text-kumo-subtle hover:text-kumo-default'}`}
+      className={
+        active
+          ? 'group relative flex h-9 w-full items-center gap-2.5 rounded-md border border-neutral-200 bg-white px-2.5 text-sm font-medium text-neutral-900 shadow-sm shadow-black/[0.04] transition-colors dark:border-white/[0.08] dark:bg-white/[0.05] dark:text-white'
+          : 'group relative flex h-9 w-full items-center gap-2.5 rounded-md border border-transparent px-2.5 text-sm text-neutral-500 transition-colors hover:bg-neutral-100/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/[0.03] dark:hover:text-white'
+      }
     >
-      {label}
-    </LinkButton>
+      <Icon
+        size={16}
+        weight={active ? 'duotone' : 'regular'}
+        className={
+          active
+            ? 'shrink-0 text-blue-600 dark:text-emerald-500'
+            : 'shrink-0 text-neutral-400 transition-colors group-hover:text-blue-500 dark:text-neutral-500 dark:group-hover:text-emerald-500'
+        }
+        aria-hidden
+      />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {badge !== undefined && badge > 0 && (
+        <span
+          className={`inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded px-1 font-sans text-[11px] leading-none font-medium tabular-nums ${
+            active
+              ? 'bg-neutral-600 text-neutral-100 dark:bg-neutral-600 dark:text-white'
+              : 'bg-black/[0.07] text-neutral-700 dark:bg-white/10 dark:text-neutral-200'
+          }`}
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
+    </Link>
   );
 }
 
-function ProjectSwitcher() {
+function ProjectHeaderSwitcher({ onClose }: { onClose?: () => void }) {
   const { projectId, projects, setProjectId } = useProject();
   const { range } = useRange();
   const { environment } = useEnvironment();
   const { pathname, search } = useLocation();
   const navigate = useNavigate();
-  const items = (projects.length ? projects : [{ id: projectId, name: projectId }]).map((p) => ({ value: p.id, label: p.name }));
+  const [open, setOpen] = useState(false);
+
+  const list = projects.length ? projects : [{ id: projectId, name: projectId, host: undefined }];
+  const active = list.find((p) => p.id === projectId) ?? list[0];
+  const initial = (active?.name || projectId || 'E').trim().charAt(0).toUpperCase();
 
   const onChange = (nextId: string) => {
+    setOpen(false);
+    if (nextId === projectId) return;
     setProjectId(nextId);
     // Avoid stranding users on a project-specific detail URL (e.g. /traces/:id) when switching projects.
     const segments = pathname.split('/').filter(Boolean);
@@ -141,14 +180,80 @@ function ProjectSwitcher() {
   };
 
   return (
-    <Select
-      aria-label="Project"
-      className="w-full"
-      value={projectId}
-      onValueChange={(v) => v && onChange(String(v))}
-      items={items}
-      data-testid="project-switcher"
-    />
+    <div className="flex h-14 shrink-0 items-center border-b border-neutral-200 dark:border-white/[0.06]">
+      <Popover.Root open={open} onOpenChange={setOpen}>
+        <Popover.Trigger
+          render={
+            <button
+              type="button"
+              data-testid="project-switcher"
+              aria-label="Switch project"
+              className="group flex h-full min-w-0 flex-1 items-center justify-between gap-2.5 px-3 text-left transition-colors hover:bg-neutral-50 dark:hover:bg-white/[0.02] focus-visible:outline-2 focus-visible:outline-kumo-link"
+            >
+              <span className="flex min-w-0 items-center gap-2.5">
+                <span className="grid size-8 shrink-0 place-items-center rounded-md border border-neutral-200/80 bg-neutral-100 text-xs font-semibold text-neutral-800 dark:border-white/10 dark:bg-neutral-800 dark:text-neutral-200">
+                  {initial}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm/tight font-medium text-neutral-900 dark:text-white">
+                    {active.name}
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-neutral-500 dark:text-neutral-400">
+                    {environment || 'All environments'}
+                  </span>
+                </span>
+              </span>
+              <CaretUpDownIcon size={15} className="shrink-0 text-neutral-400 transition-colors group-hover:text-blue-600 dark:group-hover:text-neutral-200" aria-hidden />
+            </button>
+          }
+        />
+        <Popover.Portal>
+          <Popover.Positioner side="bottom" align="start" sideOffset={6}>
+            <Popover.Popup className="w-60 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-lg shadow-black/10 dark:border-white/10 dark:bg-neutral-900">
+              <div className="px-2.5 py-1.5 font-mono text-[10px] font-medium uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+                Projects
+              </div>
+              <div className="space-y-0.5">
+                {list.map((project) => {
+                  const selected = project.id === projectId;
+                  const letter = (project.name || project.id).trim().charAt(0).toUpperCase();
+                  return (
+                    <button
+                      key={project.id}
+                      type="button"
+                      onClick={() => onChange(project.id)}
+                      className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${
+                        selected
+                          ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-white/[0.08] dark:text-white'
+                          : 'text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.04] dark:hover:text-white'
+                      }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <span className="grid size-6 shrink-0 place-items-center rounded bg-neutral-200/70 text-[11px] font-semibold text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200">
+                          {letter}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate leading-tight">{project.name}</span>
+                          {project.name !== project.id && (
+                            <span className="block truncate font-mono text-[11px] text-neutral-400">{project.id}</span>
+                          )}
+                        </span>
+                      </span>
+                      {selected && <CheckIcon size={14} className="shrink-0 text-blue-600 dark:text-emerald-500" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
+      {onClose && (
+        <div className="pr-2">
+          <Button variant="ghost" shape="square" size="sm" icon={XIcon} aria-label="Close menu" onClick={onClose} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -157,36 +262,10 @@ function ProjectLabel() {
   const p = projects.find((x) => x.id === projectId);
   const label = p?.name ?? projectId;
   return (
-    <div className="flex min-w-0 items-center gap-2 truncate text-sm text-kumo-subtle">
-      <FolderSimpleIcon size={15} className="shrink-0 text-kumo-subtle" aria-hidden />
-      <span className="truncate font-semibold text-kumo-strong">{label}</span>
-      {p?.host && <span className="hidden truncate xl:inline">· {p.host}</span>}
-      {label !== projectId && (
-        <span className="hidden rounded-md bg-kumo-recessed px-2 py-0.5 font-mono text-xs text-kumo-subtle md:inline">{projectId}</span>
-      )}
+    <div className="flex min-w-0 items-center gap-2 truncate text-sm text-neutral-500 dark:text-neutral-400">
+      <FolderSimpleIcon size={15} className="shrink-0" aria-hidden />
+      <span className="truncate font-semibold text-neutral-900 dark:text-white">{label}</span>
     </div>
-  );
-}
-
-function RefreshButton() {
-  const { lastUpdated, refresh } = useRange();
-  const [spinning, setSpinning] = useState(false);
-  const triggerRefresh = () => {
-    refresh();
-    setSpinning(true);
-    setTimeout(() => setSpinning(false), 450);
-  };
-  return (
-    <Tooltip asChild content={`Refresh now · updated ${new Date(lastUpdated).toLocaleTimeString()}`}>
-      <Button
-        variant="ghost"
-        shape="square"
-        size="sm"
-        aria-label="Refresh data"
-        onClick={triggerRefresh}
-        icon={<ArrowClockwiseIcon className={spinning ? 'animate-refresh' : undefined} />}
-      />
-    </Tooltip>
   );
 }
 
@@ -200,24 +279,12 @@ function ThemeToggle() {
   );
 }
 
-function Brand() {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-kumo-brand text-white shadow-xs">
-        <BroadcastIcon size={19} weight="bold" />
-      </div>
-      <div className="min-w-0">
-        <div className="text-[15px] font-semibold leading-tight text-kumo-strong">EdgeWatch</div>
-        <div className="mt-0.5 truncate text-xs text-kumo-subtle">Application Monitoring</div>
-      </div>
-    </div>
-  );
-}
-
 function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
   const user = useSessionUser();
+  const displayName = user?.name || user?.email || 'Account';
+  const initial = displayName.trim().charAt(0).toUpperCase();
   return (
-    <div className="mt-auto border-t border-kumo-hairline px-4 py-3.5">
+    <div className="mt-auto border-t border-neutral-200 px-3 py-2.5 dark:border-white/[0.06]">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           {USING_MOCK ? (
@@ -231,15 +298,17 @@ function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
             </Tooltip>
           ) : user ? (
             <div className="flex min-w-0 items-center gap-2.5">
-              <UserCircleIcon size={22} className="shrink-0 text-kumo-subtle" />
+              <span className="grid size-7 shrink-0 place-items-center rounded-md border border-neutral-200/80 bg-neutral-100 text-xs font-medium text-neutral-800 dark:border-white/10 dark:bg-neutral-800 dark:text-neutral-200">
+                {initial}
+              </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-medium text-kumo-strong">{user.name || user.email}</div>
-                <div className="truncate text-xs capitalize text-kumo-subtle">{user.role}</div>
+                <div className="truncate text-sm/tight font-medium text-neutral-900 dark:text-white">{displayName}</div>
+                <div className="truncate text-[11px] capitalize text-neutral-500 dark:text-neutral-400">{user.role}</div>
               </div>
             </div>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5">
           <ThemeToggle />
           {!USING_MOCK && (
             <Tooltip asChild content="Sign out">
@@ -261,17 +330,18 @@ function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
 }
 
 function Sidebar({ onClose, onOpenPalette, onSignOut }: { onClose?: () => void; onOpenPalette: () => void; onSignOut: () => void }) {
+  const { range } = useRange();
+  const openIssues = useAsync(
+    () => (USING_MOCK ? Promise.resolve(null) : api.issues(range, 'open', '', 0).catch(() => null)),
+    [range],
+    { keepPreviousData: true },
+  );
+  const issueCount = openIssues.data?.data.length;
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-kumo-hairline px-5 py-4">
-        <Brand />
-        {onClose && <Button variant="ghost" shape="square" size="sm" icon={XIcon} aria-label="Close menu" onClick={onClose} />}
-      </div>
-      <div className="space-y-3 border-b border-kumo-hairline px-4 py-4">
-        <div>
-          <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-kumo-subtle">Project</div>
-          <ProjectSwitcher />
-        </div>
+    <div className="flex h-full flex-col bg-white dark:bg-transparent">
+      <ProjectHeaderSwitcher onClose={onClose} />
+      <div className="px-2.5 pt-2.5">
         <button
           type="button"
           onClick={() => {
@@ -281,19 +351,26 @@ function Sidebar({ onClose, onOpenPalette, onSignOut }: { onClose?: () => void; 
           aria-label="Search"
           aria-keyshortcuts="Meta+K Control+K"
           data-testid="palette-toggle"
-          className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-kumo-hairline bg-kumo-recessed/60 px-3 text-xs text-kumo-subtle transition-colors hover:border-kumo-line hover:bg-kumo-tint/60 hover:text-kumo-strong focus-visible:outline-2 focus-visible:outline-kumo-link"
+          className="flex h-8 w-full items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-neutral-50/80 px-2.5 text-xs text-neutral-500 transition-colors hover:border-blue-400 hover:bg-white hover:text-neutral-900 focus-visible:outline-2 focus-visible:outline-kumo-link dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-neutral-400 dark:hover:border-white/15 dark:hover:text-white"
         >
           <span className="flex items-center gap-2">
-            <MagnifyingGlassIcon size={14} aria-hidden />
+            <MagnifyingGlassIcon size={13} aria-hidden />
             <span>Search…</span>
           </span>
-          <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5 font-sans text-[10px] leading-none text-kumo-subtle">⌘K</kbd>
+          <kbd className="rounded border border-neutral-200 bg-white px-1.5 py-0.5 font-mono text-[10px] leading-none text-neutral-500 dark:border-white/10 dark:bg-neutral-800 dark:text-neutral-400">
+            ⌘K
+          </kbd>
         </button>
       </div>
-      <nav className="flex-1 space-y-6 overflow-y-auto px-3.5 py-5" aria-label="Main">
+      <nav className="flex-1 overflow-y-auto px-2 py-2.5" aria-label="Main">
+        <div className="space-y-0.5">
+          {TOP_NAV.map((item) => (
+            <NavItem key={item.to} {...item} badge={item.to === '/issues' ? issueCount : undefined} />
+          ))}
+        </div>
         {NAV_SECTIONS.map((section) => (
-          <div key={section.label} className="space-y-1">
-            <div className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-kumo-subtle">
+          <div key={section.label} className="mt-4 space-y-0.5">
+            <div className="px-2.5 pb-1 text-xs font-semibold text-neutral-500 dark:text-neutral-500">
               {section.label}
             </div>
             {section.items.map((item) => <NavItem key={item.to} {...item} />)}
@@ -311,8 +388,6 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { pathname } = useLocation();
-  const isTelemetryView = environmentScopedPath(pathname);
-  const showHeaderControls = isTelemetryView || pathname === '/pipeline' || pathname.startsWith('/pipeline/');
   const handleSignOut = () => {
     void signOut().catch(() => toasts.add({ title: 'Could not sign out. Please try again.', variant: 'error' }));
   };
@@ -334,13 +409,13 @@ export default function Layout() {
     <RangeProvider>
       <a
         href={`#${mainId}`}
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-kumo-brand focus:px-3.5 focus:py-2 focus:text-xs focus:font-medium focus:text-white focus:shadow-lg"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-blue-600 focus:px-3.5 focus:py-2 focus:text-xs focus:font-medium focus:text-white focus:shadow-lg"
       >
         Skip to content
       </a>
-      <div className="flex h-full">
-        {/* Desktop: fixed sidebar. Mobile: slide-over drawer opened from the header. */}
-        <aside className="hidden w-64 shrink-0 flex-col border-r border-kumo-hairline bg-kumo-elevated lg:flex">
+      <div className="flex h-full bg-neutral-50 dark:bg-neutral-900">
+        {/* Desktop: fixed 228px sidebar matching capture width & crisp white rail. Mobile: slide-over drawer. */}
+        <aside className="hidden w-[228px] shrink-0 flex-col border-r border-neutral-200 bg-white lg:flex dark:border-white/[0.06] dark:bg-neutral-950/35">
           <Sidebar onOpenPalette={() => setPaletteOpen(true)} onSignOut={handleSignOut} />
         </aside>
         <Dialog.Root open={menuOpen} onOpenChange={setMenuOpen} onOpenChangeComplete={(open) => {
@@ -353,26 +428,12 @@ export default function Layout() {
           </Dialog>
         </Dialog.Root>
         <div className="flex min-w-0 flex-1 flex-col">
-          <header
-            className={`flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-kumo-hairline bg-kumo-elevated/75 px-5 py-3 sm:px-8 lg:min-h-16 lg:px-10 ${!showHeaderControls ? 'lg:hidden' : ''}`}
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              <Button variant="ghost" shape="square" size="sm" icon={ListIcon} aria-label="Open menu" onClick={() => setMenuOpen(true)} data-testid="menu-toggle" className="lg:hidden" />
-              <ProjectLabel />
-            </div>
-            {showHeaderControls && (
-              <div className="flex w-full flex-wrap items-center gap-3 lg:w-auto">
-                <RefreshButton />
-                {isTelemetryView && (
-                  <>
-                    <EnvironmentPicker />
-                    <RangePicker />
-                  </>
-                )}
-              </div>
-            )}
+          {/* Mobile-only navigation header; desktop puts title + telemetry controls on ONE unified PageHeader row */}
+          <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-neutral-200 bg-white px-4 lg:hidden dark:border-white/[0.06] dark:bg-neutral-900">
+            <Button variant="ghost" shape="square" size="sm" icon={ListIcon} aria-label="Open menu" onClick={() => setMenuOpen(true)} data-testid="menu-toggle" />
+            <ProjectLabel />
           </header>
-          <main id={mainId} className="min-w-0 flex-1 overflow-y-auto px-5 py-7 sm:px-8 sm:py-8 lg:px-10 lg:py-9">
+          <main id={mainId} className="min-w-0 flex-1 overflow-y-auto px-5 py-5 sm:px-8 lg:px-10 lg:py-6">
             <div className="mx-auto w-full max-w-[1440px]">
               <PageBoundary key={pathname}>
                 <Suspense fallback={<Loading />}><Outlet /></Suspense>

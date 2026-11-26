@@ -1,15 +1,64 @@
-/* Kumo (Cloudflare's design system) is the design system of record: https://kumo-ui.com/installation */
+/* Kumo (Cloudflare's design system) is the design system of record, themed 1:1 with the capture's neutral-50 / neutral-900 telemetry aesthetic. */
 @source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
 @import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *, [data-mode="dark"], [data-mode="dark"] *));
+
 @theme {
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Exact capture light/dark tokens mapped onto Kumo's CSS variables */
+  --color-kumo-canvas: light-dark(#fafafa, #171717);
+  --color-kumo-elevated: light-dark(#ffffff, #1b1b1b);
+  --color-kumo-base: light-dark(#ffffff, #202020);
+  --color-kumo-recessed: light-dark(#f5f5f5, #121212);
+  --color-kumo-tint: light-dark(#f5f5f5, rgba(255, 255, 255, 0.05));
+  --color-kumo-overlay: light-dark(#ffffff, #222222);
+  --color-kumo-control: light-dark(#ffffff, rgba(255, 255, 255, 0.03));
+  --color-kumo-fill: light-dark(#e5e5e5, rgba(255, 255, 255, 0.08));
+  --color-kumo-fill-hover: light-dark(#ededed, rgba(255, 255, 255, 0.12));
+  --color-kumo-hairline: light-dark(#e5e5e5, rgba(255, 255, 255, 0.06));
+  --color-kumo-line: light-dark(#e5e5e5, rgba(255, 255, 255, 0.1));
+  --color-kumo-interact: light-dark(#d4d4d4, #404040);
+  --color-kumo-brand: light-dark(#2563eb, #2563eb);
+  --color-kumo-brand-hover: light-dark(#1d4ed8, #1d4ed8);
+  --color-kumo-focus: light-dark(#3b82f6, #3b82f6);
+
+  --text-color-kumo-default: light-dark(#171717, #f5f5f5);
+  --text-color-kumo-strong: light-dark(#0a0a0a, #ffffff);
+  --text-color-kumo-subtle: light-dark(#737373, #a3a3a3);
+  --text-color-kumo-brand: light-dark(#2563eb, #10b981);
+  --text-color-kumo-link: light-dark(#2563eb, #60a5fa);
+  --text-color-kumo-info: light-dark(#2563eb, #60a5fa);
+  --text-color-kumo-success: light-dark(#059669, #34d399);
+  --text-color-kumo-warning: light-dark(#d97706, #fbbf24);
+  --text-color-kumo-danger: light-dark(#e11d48, #fb7185);
+}
+
+:root {
+  --chart-bar-neutral: oklch(87% 0 none);
+  --chart-bar-alert: oklch(76.9% 0.188 70.08);
+  --chart-bar-blue: oklch(62.3% 0.214 259.815);
+  --chart-bar-error: oklch(64.5% 0.246 16.439);
+  --chart-area-neutral: oklch(37.1% 0 none);
+  --chart-area-alert: oklch(76.9% 0.188 70.08);
+}
+
+:root.dark,
+:root[data-mode="dark"] {
+  --chart-bar-neutral: oklch(37.1% 0 none);
+  --chart-bar-alert: oklch(66.6% 0.179 58.318);
+  --chart-bar-blue: oklch(70.7% 0.165 254.624);
+  --chart-bar-error: oklch(64.5% 0.246 16.439);
+  --chart-area-neutral: oklch(55.6% 0 none);
+  --chart-area-alert: oklch(66.6% 0.179 58.318);
 }
 
 html,
 body {
-  @apply bg-kumo-canvas text-sm leading-relaxed text-kumo-default antialiased;
+  @apply bg-neutral-50 text-sm leading-relaxed text-neutral-900 antialiased selection:bg-amber-500 selection:text-neutral-900 dark:bg-neutral-900 dark:text-white;
 }
 
 @layer base {
@@ -18,39 +67,137 @@ body {
   }
 }
 
-/* Subtle, theme-aware scrollbars for data tables and sidebars */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-kumo-hairline) transparent;
 }
 
-/* Spacious, consistent table density inside dashboard panels */
+/* Signature dot-grid canvas for Sign In */
+.ew-dot-grid {
+  background-image: radial-gradient(circle, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.dark .ew-dot-grid,
+[data-mode="dark"] .ew-dot-grid {
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+}
+
+/* Crisp tables inside standard white panels */
 .ew-panel table {
   border-collapse: collapse;
+  width: 100%;
 }
 
 .ew-panel thead th {
-  padding: 0.8125rem 1rem;
-  font-size: 0.75rem;
+  padding: 0.625rem 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--color-kumo-subtle);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-color-kumo-subtle);
   white-space: nowrap;
+  background-color: light-dark(#fafafa, rgba(255, 255, 255, 0.02));
+  border-bottom: 1px solid light-dark(#e5e5e5, rgba(255, 255, 255, 0.06));
 }
 
 .ew-panel tbody td {
-  padding: 0.9375rem 1rem;
+  padding: 0.75rem 1rem;
   vertical-align: middle;
+  border-bottom: 1px solid light-dark(#f0f0f0, rgba(255, 255, 255, 0.04));
+}
+
+.ew-panel tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .ew-panel thead th:first-child,
 .ew-panel tbody td:first-child {
-  padding-left: 1.5rem;
+  padding-left: 1.25rem;
 }
 
 .ew-panel thead th:last-child,
 .ew-panel tbody td:last-child {
-  padding-right: 1.5rem;
+  padding-right: 1.25rem;
+}
+
+/* 1:1 Capture floating card-row tables (separate bordered white cards per row, matching Table-DS6Cy-yG.js) */
+.ew-floating-table table {
+  border-collapse: separate !important;
+  border-spacing: 0 4px !important;
+  width: 100%;
+  margin-top: -4px;
+}
+
+.ew-floating-table thead tr,
+.ew-floating-table tbody tr {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.ew-floating-table thead th {
+  height: 2.5rem;
+  padding: 0.5rem 1rem !important;
+  font-family: var(--font-mono) !important;
+  font-size: 0.6875rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: var(--text-color-kumo-subtle) !important;
+  white-space: nowrap;
+  background-color: light-dark(#ffffff, rgba(255, 255, 255, 0.03)) !important;
+  border-top: 1px solid light-dark(#e5e5e5, rgba(255, 255, 255, 0.07)) !important;
+  border-bottom: 1px solid light-dark(#e5e5e5, rgba(255, 255, 255, 0.07)) !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+}
+
+.ew-floating-table thead th:first-child {
+  padding-left: 1.25rem !important;
+  border-left: 1px solid light-dark(#e5e5e5, rgba(255, 255, 255, 0.07)) !important;
+  border-top-left-radius: 0.5rem;
+  border-bottom-left-radius: 0.5rem;
+}
+
+.ew-floating-table thead th:last-child {
+  padding-right: 1.25rem !important;
+  border-right: 1px solid light-dark(#e5e5e5, rgba(255, 255, 255, 0.07)) !important;
+  border-top-right-radius: 0.5rem;
+  border-bottom-right-radius: 0.5rem;
+}
+
+.ew-floating-table tbody td {
+  padding: 0.875rem 1rem !important;
+  vertical-align: middle;
+  background-color: light-dark(#ffffff, rgba(255, 255, 255, 0.025)) !important;
+  border-top: 1px solid light-dark(#e5e5e5, rgba(255, 255, 255, 0.06)) !important;
+  border-bottom: 1px solid light-dark(#e5e5e5, rgba(255, 255, 255, 0.06)) !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.ew-floating-table tbody td:first-child {
+  padding-left: 1.25rem !important;
+  border-left: 1px solid light-dark(#e5e5e5, rgba(255, 255, 255, 0.06)) !important;
+  border-top-left-radius: 0.5rem;
+  border-bottom-left-radius: 0.5rem;
+}
+
+.ew-floating-table tbody td:last-child {
+  padding-right: 1.25rem !important;
+  border-right: 1px solid light-dark(#e5e5e5, rgba(255, 255, 255, 0.06)) !important;
+  border-top-right-radius: 0.5rem;
+  border-bottom-right-radius: 0.5rem;
+}
+
+.ew-floating-table tbody tr {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.035);
+}
+
+.ew-floating-table tbody tr:hover td {
+  background-color: light-dark(#fafafa, rgba(255, 255, 255, 0.05)) !important;
 }
 
 @keyframes ew-indeterminate {

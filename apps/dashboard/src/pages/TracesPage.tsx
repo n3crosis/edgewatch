@@ -7,7 +7,21 @@ import { BugIcon, FunnelSimpleIcon, GitBranchIcon, HardDrivesIcon, TimerIcon, Us
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
-import { Empty, ErrorState, FilterBar, Loading, PageHeader, PaginationBar, Panel, SearchBox, SourceBadge, StatusBadge, TimeAgo, useRowNavigate } from '@/components/common';
+import {
+  Empty,
+  ErrorState,
+  FilterBar,
+  FloatingTablePanel,
+  Loading,
+  PageHeader,
+  PaginationBar,
+  Panel,
+  SearchBox,
+  SourceBadge,
+  StatusBadge,
+  TimeAgo,
+  useRowNavigate,
+} from '@/components/common';
 import { api, useAsync } from '@/lib/api';
 import { ms } from '@/lib/format';
 import { useProject } from '@/lib/project';
@@ -146,7 +160,7 @@ export default function TracesPage() {
 
   return (
     <>
-      <PageHeader title="Traces" subtitle="Requests, background jobs, commands, and scheduled tasks — click any row to inspect its timeline" />
+      <PageHeader title="Traces" />
 
       <FilterBar className="flex-col items-stretch">
         <div className="flex flex-wrap items-center gap-3">
@@ -228,20 +242,37 @@ export default function TracesPage() {
         )}
       </FilterBar>
 
-      <Panel fetching={!loading && fetching}>
-        {error ? (
-          <ErrorState error={error} />
-        ) : loading || !data ? (
-          <Loading rows={10} />
-        ) : data.data.length === 0 ? (
+      {error ? (
+        <ErrorState error={error} />
+      ) : loading || !data ? (
+        <Panel><Loading rows={10} /></Panel>
+      ) : data.data.length === 0 ? (
+        <Panel>
           <Empty
-            icon={<GitBranchIcon size={32} className="text-kumo-subtle" />}
-            description={hasFilters ? 'Try broadening your filters or choosing a wider time window.' : undefined}
+            icon={<GitBranchIcon size={14} />}
             action={hasFilters ? <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button> : undefined}
           >
-            No traces match these filters.
+            No traces found
           </Empty>
-        ) : (
+        </Panel>
+      ) : (
+        <FloatingTablePanel
+          fetching={!loading && fetching}
+          footer={
+            <PaginationBar
+              status={`Showing ${data.data.length} trace${data.data.length === 1 ? '' : 's'}`}
+              onFirst={() => pageTo(null, [])}
+              firstDisabled={!cursor}
+              onPrevious={() => pageTo(history[history.length - 1], history.slice(0, -1))}
+              previousDisabled={history.length === 0}
+              onNext={() => {
+                const next = data?.next_cursor;
+                if (next) pageTo(next, [...history, cursor]);
+              }}
+              nextDisabled={fetching || !!error || !data?.next_cursor}
+            />
+          }
+        >
           <Table>
             <Table.Header>
               <Table.Row>
@@ -260,13 +291,13 @@ export default function TracesPage() {
                 <Table.Row
                   key={t.trace_id}
                   onClick={rowNav(`/traces/${t.trace_id}`)}
-                  className="cursor-pointer transition-colors hover:bg-kumo-tint/50"
+                  className="cursor-pointer"
                 >
                   <Table.Cell className="text-xs"><TimeAgo iso={t.timestamp} /></Table.Cell>
                   <Table.Cell><SourceBadge source={t.execution_source} /></Table.Cell>
                   <Table.Cell className="max-w-md">
                     <div className="flex items-center gap-2.5">
-                      <Link title={t.name} className="truncate font-mono text-xs text-kumo-link hover:underline" to={`/traces/${t.trace_id}`}>
+                      <Link title={t.name} className="truncate font-mono text-xs text-kumo-strong hover:text-kumo-link hover:underline" to={`/traces/${t.trace_id}`}>
                         {t.name}
                       </Link>
                       {t.exception_count > 0 && (
@@ -281,30 +312,18 @@ export default function TracesPage() {
                   <Table.Cell className={`text-right font-mono text-xs tabular-nums ${t.duration_ms > 2000 ? 'font-medium text-kumo-danger' : t.duration_ms > 500 ? 'font-medium text-kumo-warning' : ''}`}>
                     {ms(t.duration_ms)}
                   </Table.Cell>
-                  <Table.Cell className="text-right tabular-nums text-kumo-subtle">{t.query_count}</Table.Cell>
+                  <Table.Cell className="text-right font-mono tabular-nums text-kumo-subtle">{t.query_count}</Table.Cell>
                   <Table.Cell className="font-mono text-xs text-kumo-subtle">{t.user ? `#${t.user}` : '—'}</Table.Cell>
                   <Table.Cell>
                     <div className="font-mono text-xs text-kumo-default">{t.server}</div>
-                    <div className="mt-0.5 text-xs text-kumo-subtle">{t.environment || 'Unknown'}</div>
+                    <div className="mt-0.5 text-[11px] text-kumo-subtle">{t.environment || 'Unknown'}</div>
                   </Table.Cell>
                 </Table.Row>
               ))}
             </Table.Body>
           </Table>
-        )}
-        <PaginationBar
-          status={data ? `Showing ${data.data.length} trace${data.data.length === 1 ? '' : 's'}` : undefined}
-          onFirst={() => pageTo(null, [])}
-          firstDisabled={!cursor}
-          onPrevious={() => pageTo(history[history.length - 1], history.slice(0, -1))}
-          previousDisabled={history.length === 0}
-          onNext={() => {
-            const next = data?.next_cursor;
-            if (next) pageTo(next, [...history, cursor]);
-          }}
-          nextDisabled={fetching || !!error || !data?.next_cursor}
-        />
-      </Panel>
+        </FloatingTablePanel>
+      )}
     </>
   );
 }

@@ -1,7 +1,7 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
-import { CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, SourceBadge, Sql, Stat, StatusBadge, useRowNavigate } from '@/components/common';
+import { CardTray, CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, SourceBadge, Sql, Stat, StatusBadge, useRowNavigate } from '@/components/common';
 import Waterfall, { SPAN_COLORS, SPAN_ICONS, SPAN_LABELS } from '@/components/Waterfall';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Banner } from '@cloudflare/kumo/components/banner';
@@ -202,12 +202,14 @@ export default function TraceDetailPage() {
         }
       />
 
-      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Duration" icon={<TimerIcon size={14} />} value={ms(trace.duration_ms)} hint={`${spans.length} span${spans.length === 1 ? '' : 's'}`} tone={trace.duration_ms > 2000 ? 'bad' : trace.duration_ms > 500 ? 'warn' : 'default'} />
-        <Stat label="Queries" icon={<DatabaseIcon size={14} />} value={trace.query_count} hint={`${ms(queryTime)} in database`} />
-        <Stat label="Exceptions" icon={<BugIcon size={14} />} value={trace.exception_count} hint={trace.exception_count ? 'captured in trace' : 'clean execution'} tone={trace.exception_count ? 'bad' : 'good'} />
-        <Stat label="Peak memory" icon={<CpuIcon size={14} />} value={trace.peak_memory_usage ? bytes(trace.peak_memory_usage) : '—'} />
-      </section>
+      <CardTray>
+        <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat label="Duration" icon={<TimerIcon size={13} />} value={ms(trace.duration_ms)} hint={`${spans.length} span${spans.length === 1 ? '' : 's'}`} tone={trace.duration_ms > 2000 ? 'bad' : trace.duration_ms > 500 ? 'warn' : 'default'} />
+          <Stat label="Queries" icon={<DatabaseIcon size={13} />} value={trace.query_count} hint={`${ms(queryTime)} in database`} />
+          <Stat label="Exceptions" icon={<BugIcon size={13} />} value={trace.exception_count} hint={trace.exception_count ? 'captured in trace' : 'clean execution'} tone={trace.exception_count ? 'bad' : 'good'} />
+          <Stat label="Peak memory" icon={<CpuIcon size={13} />} value={trace.peak_memory_usage ? bytes(trace.peak_memory_usage) : '—'} />
+        </section>
+      </CardTray>
 
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-xl border border-kumo-hairline bg-kumo-elevated/55 px-5 py-4 text-xs sm:grid-cols-4 sm:px-6">
         <div>

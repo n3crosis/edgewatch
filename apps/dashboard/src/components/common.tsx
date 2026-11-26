@@ -4,8 +4,7 @@ import { useProject } from '@/lib/project';
 import { useRange } from '@/lib/range';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Banner } from '@cloudflare/kumo/components/banner';
-import { Button, LinkButton } from '@cloudflare/kumo/components/button';
-import { Empty as KumoEmpty } from '@cloudflare/kumo/components/empty';
+import { Button } from '@cloudflare/kumo/components/button';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
@@ -14,7 +13,6 @@ import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { cn } from '@cloudflare/kumo/utils';
 import {
   ArrowClockwiseIcon,
-  ArrowLeftIcon,
   ArrowUpRightIcon,
   ArrowsLeftRightIcon,
   BriefcaseIcon,
@@ -34,6 +32,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 're
 import { useNavigate } from 'react-router-dom';
 import { ago } from '@/lib/format';
 import type { ExecutionSource } from '@/lib/types';
+import TelemetryControls from './TelemetryControls';
 
 /**
  * Returns a row click handler that navigates smoothly while ignoring clicks on nested links/buttons,
@@ -59,16 +58,16 @@ export function PageHeader({
   subtitle,
   back,
   actions,
+  hideTelemetryControls = false,
 }: {
   title: ReactNode;
   documentTitle?: string;
   subtitle?: ReactNode;
   back?: { to: string; label: string };
   actions?: ReactNode;
+  hideTelemetryControls?: boolean;
 }) {
   const { projectId, projects } = useProject();
-  const { range } = useRange();
-  const { environment } = useEnvironment();
   const pageTitle = documentTitle ?? (typeof title === 'string' ? title : undefined);
   const projectName = projects.find((p) => p.id === projectId)?.name ?? projectId;
 
@@ -77,26 +76,135 @@ export function PageHeader({
   }, [pageTitle, projectName]);
 
   return (
-    <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <div className="min-w-0">
         {back && (
-          <LinkButton
-            href={scopedPath(back.to, projectId, range, environment)}
-            variant="ghost"
-            size="sm"
-            icon={ArrowLeftIcon}
-            className="-ml-2 mb-2 text-kumo-subtle"
-          >
-            {back.label}
-          </LinkButton>
+          <nav aria-label="Breadcrumb" className="mb-1.5 flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+            <Link
+              to={back.to}
+              className="transition-colors hover:text-neutral-900 dark:hover:text-white"
+            >
+              {back.label}
+            </Link>
+            <CaretRightIcon size={11} className="shrink-0 text-neutral-400 dark:text-neutral-500" aria-hidden />
+            {pageTitle && <span className="truncate font-mono text-neutral-700 dark:text-neutral-300">{pageTitle}</span>}
+          </nav>
         )}
-        <h1 className="break-words text-2xl font-semibold tracking-tight text-kumo-strong sm:text-[26px] sm:leading-tight">
+        <h1 className="break-words text-xl font-semibold tracking-tight text-neutral-900 md:text-2xl dark:text-white">
           {title}
         </h1>
-        {subtitle && <div className="mt-2 max-w-3xl text-sm leading-relaxed text-kumo-subtle">{subtitle}</div>}
+        {subtitle && <div className="mt-1.5 max-w-3xl text-sm leading-relaxed text-kumo-subtle">{subtitle}</div>}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2.5">{actions}</div>}
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        {actions}
+        {!hideTelemetryControls && <TelemetryControls />}
+      </div>
     </div>
+  );
+}
+
+/** Capture-exact table section bar: blue icon + count title on the left, inline search/filters on the right. */
+export function SectionBar({
+  icon,
+  title,
+  controls,
+  className,
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  controls?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn('mb-3 flex flex-col items-start justify-between gap-3 md:flex-row md:items-center md:gap-6', className)}>
+      <h2 className="flex shrink-0 items-center gap-2 text-lg font-medium text-neutral-900 dark:text-white [&_svg]:size-4 [&_svg]:text-blue-600 dark:[&_svg]:text-emerald-500">
+        {icon}
+        <span>{title}</span>
+      </h2>
+      {controls && <div className="flex w-full flex-wrap items-center justify-end gap-2 md:w-auto">{controls}</div>}
+    </div>
+  );
+}
+
+/** Capture-exact floating card-row container for standalone Kumo tables (no bulky outer frame). */
+export function FloatingTablePanel({
+  children,
+  footer,
+  fetching = false,
+  className,
+}: {
+  children: ReactNode;
+  footer?: ReactNode;
+  fetching?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={cn('relative', className)}>
+      {fetching && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden rounded-full bg-blue-600/15" aria-hidden>
+          <div className="ew-indeterminate h-full w-1/3 rounded-full bg-blue-600 dark:bg-emerald-500" />
+        </div>
+      )}
+      <div className={cn('ew-floating-table min-w-0 overflow-x-auto transition-opacity duration-150', fetching && 'opacity-65')}>
+        {children}
+      </div>
+      {footer && <div className="mt-2 rounded-lg border border-neutral-200 bg-white dark:border-white/[0.06] dark:bg-white/[0.025]">{footer}</div>}
+    </div>
+  );
+}
+
+/** Signature capture outer frosted tray (`data-slot="card-container"`) wrapping elevated white cards. */
+export function CardTray({
+  title,
+  icon,
+  action,
+  children,
+  className,
+}: {
+  title?: ReactNode;
+  icon?: ReactNode;
+  action?: { to: string; label: string } | ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  const { projectId } = useProject();
+  const { range } = useRange();
+  const { environment } = useEnvironment();
+  const isLinkAction = action && typeof action === 'object' && 'to' in action && 'label' in action;
+
+  return (
+    <section
+      data-slot="card-container"
+      className={cn(
+        'rounded-xl border border-neutral-200/80 bg-white/55 p-1.5 dark:border-white/[0.06] dark:bg-white/[0.03]',
+        className,
+      )}
+    >
+      {(title || action) && (
+        <div className="flex items-center justify-between gap-3 px-2 pt-1.5 pb-2">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {icon && (
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-neutral-300/90 bg-white text-neutral-500 dark:border-white/10 dark:bg-neutral-800 dark:text-neutral-400">
+                {icon}
+              </span>
+            )}
+            {title && <h2 className="truncate text-base font-medium text-neutral-900 dark:text-white">{title}</h2>}
+          </div>
+          {isLinkAction ? (
+            <Link
+              to={scopedPath(action.to, projectId, range, environment)}
+              className="group inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-neutral-200 bg-white/75 px-3 text-sm text-neutral-600 transition-colors hover:border-blue-500 hover:bg-white hover:text-neutral-900 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-neutral-400 dark:hover:border-white/15 dark:hover:bg-neutral-800 dark:hover:text-white"
+            >
+              <span>{action.label}</span>
+              <ArrowUpRightIcon size={14} className="text-neutral-400 transition-colors group-hover:text-blue-600 dark:group-hover:text-white" aria-hidden />
+            </Link>
+          ) : (
+            action && <div className="flex shrink-0 items-center gap-2">{action}</div>
+          )}
+        </div>
+      )}
+      {children}
+    </section>
   );
 }
 
@@ -117,7 +225,7 @@ export function FilterBar({
       id={id}
       tabIndex={tabIndex}
       className={cn(
-        'mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-kumo-hairline bg-kumo-elevated/55 p-3.5 sm:px-4 sm:py-3.5',
+        'mb-5 flex flex-wrap items-center gap-2.5 rounded-xl border border-neutral-200/80 bg-white/60 p-2.5 sm:px-3 dark:border-white/[0.06] dark:bg-white/[0.03]',
         className,
       )}
     >
@@ -126,7 +234,7 @@ export function FilterBar({
   );
 }
 
-/** Kumo LayerCard with a spacious header row; content is flush so tables reach the edges. */
+/** Layered card panel matching capture's nested tray + crisp white inner surface. */
 export function Panel({
   title,
   description,
@@ -143,24 +251,32 @@ export function Panel({
   fetching?: boolean;
 }) {
   return (
-    <LayerCard className={cn('ew-panel relative flex flex-col overflow-hidden', className)}>
-      {fetching && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden bg-kumo-brand/15" aria-hidden>
-          <div className="ew-indeterminate h-full w-1/3 rounded-full bg-kumo-brand" />
-        </div>
+    <div
+      data-slot="card-container"
+      className={cn(
+        'rounded-xl border border-neutral-200/80 bg-white/55 p-1.5 dark:border-white/[0.06] dark:bg-white/[0.03]',
+        className,
       )}
-      {title && (
-        <div className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-2.5 border-b border-kumo-hairline px-5 py-3.5 sm:px-6">
-          <div className="min-w-0">
-            <div className="text-[15px] font-semibold leading-snug text-kumo-strong">{title}</div>
-            {description && <div className="mt-0.5 text-xs text-kumo-subtle">{description}</div>}
+    >
+      <LayerCard className="ew-panel relative flex flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm shadow-black/[0.04] dark:border-white/[0.06] dark:bg-white/[0.025] dark:shadow-black/20">
+        {fetching && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden bg-blue-600/15" aria-hidden>
+            <div className="ew-indeterminate h-full w-1/3 rounded-full bg-blue-600 dark:bg-emerald-500" />
           </div>
-          {actions && <div className="flex shrink-0 flex-wrap items-center gap-2.5">{actions}</div>}
-        </div>
-      )}
-      {/* Wide tables scroll horizontally on small screens instead of squashing columns. */}
-      <div className={cn('min-w-0 overflow-x-auto transition-opacity duration-150', fetching && 'opacity-65')}>{children}</div>
-    </LayerCard>
+        )}
+        {title && (
+          <div className="flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-neutral-200/80 px-4 py-3 sm:px-5 dark:border-white/[0.06]">
+            <div className="min-w-0">
+              <div className="text-[15px] font-medium leading-snug text-neutral-900 dark:text-white">{title}</div>
+              {description && <div className="mt-0.5 text-xs text-kumo-subtle">{description}</div>}
+            </div>
+            {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+          </div>
+        )}
+        {/* Wide tables scroll horizontally on small screens instead of squashing columns. */}
+        <div className={cn('min-w-0 overflow-x-auto transition-opacity duration-150', fetching && 'opacity-65')}>{children}</div>
+      </LayerCard>
+    </div>
   );
 }
 
@@ -191,37 +307,37 @@ export function Stat({
   const inner = (
     <LayerCard
       className={cn(
-        'flex h-full flex-col justify-between p-5 transition-colors sm:p-6',
-        to && 'group-hover:bg-kumo-tint/50',
+        'flex h-full flex-col justify-between rounded-lg border border-neutral-200 bg-white p-4 shadow-sm shadow-black/[0.04] transition-colors sm:p-5 dark:border-white/[0.06] dark:bg-white/[0.025] dark:shadow-black/20',
+        to && 'group-hover:border-blue-400/70 dark:group-hover:border-white/15',
         !to && className,
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2 text-xs font-medium tracking-wide text-kumo-subtle">
-          {icon && <span className="shrink-0 text-kumo-subtle" aria-hidden>{icon}</span>}
+        <div className="flex min-w-0 items-center gap-1.5 font-mono text-[11px] font-medium uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
+          {icon && <span className="shrink-0 text-neutral-400 dark:text-neutral-500" aria-hidden>{icon}</span>}
           <span className="truncate">{label}</span>
         </div>
         {to && (
           <ArrowUpRightIcon
             size={14}
-            className="shrink-0 text-kumo-subtle opacity-0 transition-opacity group-hover:opacity-100"
+            className="shrink-0 text-neutral-400 opacity-0 transition-all group-hover:text-blue-600 group-hover:opacity-100 dark:group-hover:text-emerald-400"
             aria-hidden
           />
         )}
       </div>
-      <div className={cn('mt-3 truncate text-2xl font-semibold leading-none tracking-tight tabular-nums sm:text-[28px]', TONES[tone])}>
+      <div className={cn('mt-2.5 truncate text-2xl font-semibold leading-none tracking-tight tabular-nums', TONES[tone])}>
         {value}
       </div>
       {hint ? (
-        <div className="mt-2.5 truncate text-xs text-kumo-subtle">{hint}</div>
+        <div className="mt-2 truncate text-xs text-kumo-subtle">{hint}</div>
       ) : (
-        <div className="mt-2.5 h-4" aria-hidden />
+        <div className="mt-2 h-4" aria-hidden />
       )}
     </LayerCard>
   );
   if (to) {
     return (
-      <Link to={to} className={cn('group block rounded-xl focus-visible:outline-2 focus-visible:outline-kumo-link', className)}>
+      <Link to={to} className={cn('group block rounded-lg focus-visible:outline-2 focus-visible:outline-kumo-link', className)}>
         {inner}
       </Link>
     );
@@ -258,11 +374,12 @@ export function SourceBadge({ source }: { source: ExecutionSource }) {
 }
 
 const METHOD_VARIANTS: Record<string, 'info' | 'success' | 'warning' | 'error' | 'secondary'> = {
-  GET: 'info',
+  GET: 'secondary',
   HEAD: 'secondary',
+  OPTIONS: 'secondary',
   POST: 'success',
-  PUT: 'warning',
-  PATCH: 'warning',
+  PUT: 'info',
+  PATCH: 'info',
   DELETE: 'error',
 };
 
@@ -275,7 +392,7 @@ export function TimeAgo({ iso, className }: { iso: string; className?: string })
   const formatted = new Date(iso).toLocaleString();
   return (
     <Tooltip asChild content={formatted}>
-      <time dateTime={iso} className={cn('cursor-default whitespace-nowrap tabular-nums text-kumo-subtle', className)}>
+      <time dateTime={iso} className={cn('cursor-default whitespace-nowrap font-mono tabular-nums text-kumo-subtle', className)}>
         {ago(iso)}
       </time>
     </Tooltip>
@@ -345,9 +462,9 @@ export function PaginationBar({
   status?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 border-t border-kumo-hairline px-5 py-3.5 sm:px-6">
-      <div className="text-xs text-kumo-subtle">{status}</div>
-      <div className="flex items-center gap-2.5">
+    <div className="flex flex-wrap items-center justify-between gap-4 border-t border-neutral-200/80 px-4 py-3 sm:px-5 dark:border-white/[0.06]">
+      <div className="font-mono text-xs text-kumo-subtle">{status}</div>
+      <div className="flex items-center gap-2">
         {onFirst && (
           <Button variant="secondary" size="sm" icon={CaretDoubleLeftIcon} disabled={firstDisabled} onClick={onFirst}>
             {firstLabel}
@@ -384,25 +501,33 @@ export function PageSkeleton({ stats = 5 }: { stats?: number }) {
   const cols = stats === 4 ? 'sm:grid-cols-2 xl:grid-cols-4' : stats === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5';
   return (
     <div role="status" aria-label="Loading">
-      <div className="mb-8 space-y-2.5">
-        <div className="w-48"><SkeletonLine blockHeight={28} /></div>
-        <div className="w-80"><SkeletonLine blockHeight={16} /></div>
+      <div className="mb-6 space-y-2">
+        <div className="w-44"><SkeletonLine blockHeight={26} /></div>
+        <div className="w-72"><SkeletonLine blockHeight={15} /></div>
       </div>
-      <div className={cn('grid grid-cols-1 gap-5', cols)}>
+      <div className="rounded-xl border border-neutral-200/80 bg-white/55 p-1.5 dark:border-white/[0.06] dark:bg-white/[0.03]">
+        <div className="grid gap-2 xl:grid-cols-2">
+          {[0, 1].map((i) => (
+            <LayerCard key={i} className="rounded-lg border border-neutral-200 bg-white p-5 dark:border-white/[0.06] dark:bg-white/[0.025]">
+              <SkeletonLine blockHeight={200} />
+            </LayerCard>
+          ))}
+        </div>
+      </div>
+      <div className={cn('mt-5 grid grid-cols-1 gap-3', cols)}>
         {Array.from({ length: stats }, (_, i) => (
-          <LayerCard key={i} className="space-y-3.5 p-6">
+          <LayerCard key={i} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-5 dark:border-white/[0.06] dark:bg-white/[0.025]">
             <SkeletonLine minWidth={40} maxWidth={60} />
-            <SkeletonLine blockHeight={28} minWidth={45} maxWidth={70} />
+            <SkeletonLine blockHeight={24} minWidth={45} maxWidth={70} />
             <SkeletonLine minWidth={30} maxWidth={50} />
           </LayerCard>
         ))}
       </div>
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        {[0, 1].map((i) => (
-          <LayerCard key={i} className="p-6"><SkeletonLine blockHeight={208} /></LayerCard>
-        ))}
+      <div className="mt-5 rounded-xl border border-neutral-200/80 bg-white/55 p-1.5 dark:border-white/[0.06] dark:bg-white/[0.03]">
+        <LayerCard className="rounded-lg border border-neutral-200 bg-white dark:border-white/[0.06] dark:bg-white/[0.025]">
+          <Loading rows={5} />
+        </LayerCard>
       </div>
-      <LayerCard className="mt-6"><Loading rows={5} /></LayerCard>
     </div>
   );
 }
@@ -411,7 +536,7 @@ export function ErrorState({ error, onRetry }: { error: Error; onRetry?: () => v
   const { refresh } = useRange();
   const retry = onRetry ?? refresh;
   return (
-    <div className="flex flex-col gap-3.5 p-2 sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1">
         <Banner variant="error" icon={<WarningCircleIcon />} title="Could not load data" description={error.message} />
       </div>
@@ -422,26 +547,60 @@ export function ErrorState({ error, onRetry }: { error: Error; onRetry?: () => v
   );
 }
 
+const MATRIX_ROWS = [
+  'E{)7GTTS\\8   YZTIMIS:400Q   CJZOS6Y_CWK+K;{   {J]XB{9EH>L3KLQ   M/{JK   MCU|A   ]5.TK   Q0LY-KPHILLIP=I3$WY//]',
+  '/CV]9   U-DSJKTAYLORP#[   %|R<89J,BO   ?3VNN|92Q%MN3I=   BQU{}   AXKRYUTA@   0WRWYM&JESSIAFYH_IY.0#Y   ;+A%B',
+  '{   X3<-7   \'G)DJ   +J\'YM4/R20NXSH\\   O[VRW   UQQ9YCZ1X*R1{PO   |EZ{@V5J>Z?\\3J   T%L;SNWX\'=   ET%MJ   ^TAYLOR',
+  'DLAN<   \\FP%Q   J@J\'|   {AVF(   .JPDE   QY7OP   IIYN$+   $9CSJ   T|7T\\   D*4072>3X^A[]ML   =<580Y   RV2<8VC(',
+];
+
 export function Empty({
   children,
   description,
   action,
   icon,
+  variant = 'matrix',
 }: {
   children: string;
   description?: string;
   action?: ReactNode;
   icon?: ReactNode;
+  variant?: 'matrix' | 'clean';
 }) {
+  if (variant === 'clean') {
+    return (
+      <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+        <div className="mb-3">{icon ?? <TrayIcon size={28} className="text-kumo-subtle" />}</div>
+        <div className="text-sm font-medium text-neutral-900 dark:text-white">{children}</div>
+        {description && <p className="mt-1.5 max-w-md text-xs leading-relaxed text-kumo-subtle">{description}</p>}
+        {action && <div className="mt-4">{action}</div>}
+      </div>
+    );
+  }
+
   return (
-    <div className="px-6 py-16">
-      <KumoEmpty
-        size="sm"
-        icon={icon ?? <TrayIcon size={32} className="text-kumo-subtle" />}
-        title={children}
-        description={description}
-        contents={action}
-      />
+    <div className="relative flex min-h-52 flex-col items-center justify-center overflow-hidden rounded-lg border border-neutral-200 bg-white px-5 py-12 text-center dark:border-white/[0.06] dark:bg-white/[0.025]">
+      {/* Capture-exact deterministic monospace hash-matrix backdrop (`TableEmptyState`) */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 flex flex-col justify-between overflow-hidden px-4 py-2.5 font-mono text-xs leading-7 tracking-widest text-neutral-300/60 select-none dark:text-neutral-700/45"
+        style={{ maskImage: 'radial-gradient(ellipse 85% 85% at 50% 50%, black 45%, transparent 100%)' }}
+      >
+        {[...MATRIX_ROWS, ...MATRIX_ROWS].map((row, idx) => (
+          <div key={idx} className="truncate whitespace-nowrap">
+            {row}
+          </div>
+        ))}
+      </div>
+      <div className="relative z-10 flex flex-col items-center gap-2">
+        <div className="inline-flex items-center gap-1.5 rounded-[3px] bg-yellow-300 px-2 py-0.5 font-mono text-xs font-medium uppercase tracking-wider text-neutral-950 dark:bg-amber-400 dark:text-neutral-950">
+          <span>{children.replace(/\.$/, '')}</span>
+        </div>
+        <div className="max-w-lg rounded-[3px] bg-neutral-950 px-2.5 py-0.5 font-mono text-xs uppercase tracking-wider text-white dark:bg-neutral-200 dark:text-neutral-950">
+          {description ?? 'Try adjusting any filters or time range'}
+        </div>
+        {action && <div className="mt-3">{action}</div>}
+      </div>
     </div>
   );
 }
@@ -499,9 +658,9 @@ export function SearchBox({
   };
 
   return (
-    <InputGroup className={className}>
+    <InputGroup className={cn('h-8 bg-white dark:bg-white/[0.03]', className)}>
       <InputGroup.Addon align="start">
-        <MagnifyingGlassIcon className="text-kumo-subtle" />
+        <MagnifyingGlassIcon size={14} className="text-neutral-400 dark:text-neutral-500" />
       </InputGroup.Addon>
       <InputGroup.Input
         value={draft}
@@ -512,6 +671,7 @@ export function SearchBox({
         }}
         placeholder={placeholder}
         aria-label={placeholder}
+        className="h-8 text-sm"
       />
       {draft && (
         <InputGroup.Addon align="end">

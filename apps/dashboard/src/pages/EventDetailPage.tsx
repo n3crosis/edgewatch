@@ -12,7 +12,7 @@ import {
   WarningCircleIcon,
 } from '@phosphor-icons/react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, Stat, TimeAgo, useRowNavigate } from '@/components/common';
+import { CardTray, CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, Stat, TimeAgo, useRowNavigate } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
 import { useEnvironment } from '@/lib/environment';
 import type { EventPage } from '@/lib/events';
@@ -83,11 +83,13 @@ export default function EventDetailPage({ page }: { page: EventPage }) {
 
       {isUserDetail && (
         <>
-          <section className="grid grid-cols-1 gap-5 sm:grid-cols-3">
-            <Stat label="Recent executions" icon={<GitBranchIcon size={14} />} value={compact(data.length)} hint={`Latest in ${rangeLabel(range)}`} />
-            <Stat label="Errors" icon={<WarningCircleIcon size={14} />} value={compact(userErrors)} tone={userErrors > 0 ? 'bad' : 'good'} hint="5xx or exceptions" />
-            <Stat label="Avg duration" icon={<TimerIcon size={14} />} value={userAvgMs === null ? '—' : ms(userAvgMs)} />
-          </section>
+          <CardTray>
+            <section className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <Stat label="Recent executions" icon={<GitBranchIcon size={13} />} value={compact(data.length)} hint={`Latest in ${rangeLabel(range)}`} />
+              <Stat label="Errors" icon={<WarningCircleIcon size={13} />} value={compact(userErrors)} tone={userErrors > 0 ? 'bad' : 'good'} hint="5xx or exceptions" />
+              <Stat label="Avg duration" icon={<TimerIcon size={13} />} value={userAvgMs === null ? '—' : ms(userAvgMs)} />
+            </section>
+          </CardTray>
           <nav aria-label="User activity" className="flex flex-wrap items-center gap-2.5">
             {userActivityLinks(key).map((link) => (
               <LinkButton

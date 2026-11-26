@@ -2,7 +2,7 @@ import { groupListLink } from '@/lib/group-list';
 import { useRange, rangeLabel } from '@/lib/range';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
-import { CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, Sql, Stat, TimeAgo, useRowNavigate } from '@/components/common';
+import { CardTray, CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, Sql, Stat, TimeAgo, useRowNavigate } from '@/components/common';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
@@ -62,13 +62,15 @@ export default function QueryDetailPage() {
         <pre className="whitespace-pre-wrap bg-kumo-recessed/40 p-6 leading-7"><Sql sql={data.sql} className="text-sm" /></pre>
       </Panel>
 
-      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
-        <Stat label={`Calls (${rangeLabel(range)})`} icon={<DatabaseIcon size={14} />} value={compact(data.calls)} />
-        <Stat label="Total time" icon={<ClockIcon size={14} />} value={ms(data.total_ms)} />
-        <Stat label="Average" icon={<TimerIcon size={14} />} value={ms(data.avg_ms)} />
-        <Stat label="p95" icon={<GaugeIcon size={14} />} value={ms(data.p95_ms)} tone={data.p95_ms > 500 ? 'bad' : data.p95_ms > 100 ? 'warn' : 'default'} />
-        <Stat label="Max" icon={<LightningIcon size={14} />} value={ms(data.max_ms)} tone={data.max_ms > 500 ? 'warn' : 'default'} />
-      </section>
+      <CardTray>
+        <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+          <Stat label={`Calls (${rangeLabel(range)})`} icon={<DatabaseIcon size={13} />} value={compact(data.calls)} />
+          <Stat label="Total time" icon={<ClockIcon size={13} />} value={ms(data.total_ms)} />
+          <Stat label="Average" icon={<TimerIcon size={13} />} value={ms(data.avg_ms)} />
+          <Stat label="p95" icon={<GaugeIcon size={13} />} value={ms(data.p95_ms)} tone={data.p95_ms > 500 ? 'bad' : data.p95_ms > 100 ? 'warn' : 'default'} />
+          <Stat label="Max" icon={<LightningIcon size={13} />} value={ms(data.max_ms)} tone={data.max_ms > 500 ? 'warn' : 'default'} />
+        </section>
+      </CardTray>
 
       <Panel fetching={!loading && fetching} title="Slowest executions">
         {data.samples.length === 0 ? (

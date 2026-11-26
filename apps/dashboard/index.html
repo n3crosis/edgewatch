@@ -9,8 +9,9 @@
     <script>
       (function () {
         var t = localStorage.getItem('edgewatch.theme');
-        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         document.documentElement.dataset.mode = t;
+        document.documentElement.classList.toggle('dark', t === 'dark');
         document.documentElement.style.colorScheme = t;
       })();
     </script>

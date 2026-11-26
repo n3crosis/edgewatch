@@ -48,20 +48,18 @@ export default function KeyGate({ children }: { children: ReactNode }) {
   if (USING_MOCK) return children;
   if (checking) {
     return (
-      <div role="status" className="grid min-h-full place-items-center p-8">
-        <div className="flex flex-col items-center gap-4 text-sm text-kumo-subtle">
-          <div className="grid size-11 place-items-center rounded-xl bg-kumo-brand text-white shadow-xs">
-            <BroadcastIcon size={22} weight="bold" />
-          </div>
-          <span>Checking your session…</span>
+      <div role="status" className="ew-dot-grid grid min-h-full place-items-center bg-neutral-100 p-8 dark:bg-neutral-900">
+        <div className="flex flex-col items-center gap-3 text-sm text-neutral-500 dark:text-neutral-400">
+          <BroadcastIcon size={24} weight="bold" className="text-neutral-900 dark:text-white" />
+          <span className="font-mono text-xs uppercase tracking-widest">Checking session…</span>
         </div>
       </div>
     );
   }
   if (unavailable) {
     return (
-      <div className="grid min-h-full place-items-center p-8">
-        <LayerCard className="w-full max-w-md p-8 text-center">
+      <div className="ew-dot-grid grid min-h-full place-items-center bg-neutral-100 p-8 dark:bg-neutral-900">
+        <LayerCard className="w-full max-w-md rounded-xl border border-neutral-200 bg-white p-8 text-center shadow-2xl shadow-black/[0.08] dark:border-neutral-800 dark:bg-neutral-900">
           <WarningCircleIcon size={32} className="mx-auto text-kumo-danger" />
           <h1 className="mt-4 text-lg font-semibold text-kumo-strong">Could not connect to EdgeWatch</h1>
           <p className="mt-2 text-sm text-kumo-subtle">Check that the API server is reachable and try again.</p>
@@ -96,7 +94,7 @@ function PasswordInput({
   const id = useId();
   return (
     <div className="space-y-2">
-      <label htmlFor={id} className="block text-sm font-medium text-kumo-default">
+      <label htmlFor={id} className="block text-sm font-medium text-neutral-900 dark:text-neutral-200">
         {label}
       </label>
       <div className="relative">
@@ -109,18 +107,18 @@ function PasswordInput({
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full pr-11"
+          className="h-11 w-full pr-11"
         />
         <button
           type="button"
           onClick={() => setVisible((v) => !v)}
           aria-label={visible ? 'Hide password' : 'Show password'}
-          className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-kumo-subtle transition-colors hover:bg-kumo-tint hover:text-kumo-strong"
+          className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-white/10 dark:hover:text-white"
         >
           {visible ? <EyeSlashIcon size={16} /> : <EyeIcon size={16} />}
         </button>
       </div>
-      {description && <div className="text-xs text-kumo-subtle">{description}</div>}
+      {description && <div className="text-xs text-neutral-500 dark:text-neutral-400">{description}</div>}
     </div>
   );
 }
@@ -155,12 +153,7 @@ function SignIn() {
   const needsSetupToken = mode === 'setup' && (setupTokenRequired || (entry.fromLink && entry.mode === 'setup'));
   const needsInviteToken = mode === 'invite' && !(entry.fromLink && entry.mode === 'invite' && token);
 
-  const title = mode === 'setup' ? 'Set up your owner account' : mode === 'invite' ? 'Accept your invitation' : 'Sign in to EdgeWatch';
-  const subtitle = mode === 'setup'
-    ? 'Choose an email and password to claim this EdgeWatch installation.'
-    : mode === 'invite'
-      ? 'Choose your display name and a password to join this workspace.'
-      : 'Monitor your applications and investigate what happened.';
+  const title = mode === 'setup' ? 'Create owner account' : mode === 'invite' ? 'Accept invitation' : 'Sign in';
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -195,41 +188,40 @@ function SignIn() {
   const passwordReady = password.length >= 8;
 
   return (
-    <div className="relative grid min-h-full place-items-center px-6 py-12">
-      <div className="fixed right-5 top-5">
+    <div className="ew-dot-grid relative flex min-h-full flex-col items-center justify-center bg-neutral-100 px-6 py-12 dark:bg-neutral-900">
+      <div className="fixed right-5 top-5 z-30">
         <Tooltip asChild content={themeLabel}>
           <Button variant="ghost" shape="square" size="sm" icon={theme === 'dark' ? SunIcon : MoonIcon} aria-label={themeLabel} onClick={toggle} />
         </Tooltip>
       </div>
+
+      {/* Centered brand mark above card, matching capture */}
+      <div className="z-10 mb-8 flex items-center gap-3 text-neutral-900 dark:text-neutral-200">
+        <BroadcastIcon size={22} weight="bold" />
+        <span className="font-mono text-sm font-semibold uppercase tracking-[0.24em]">EdgeWatch</span>
+        {mode === 'setup' && (
+          <Badge variant="info">
+            <SparkleIcon />
+            First setup
+          </Badge>
+        )}
+      </div>
+
       <form
         onSubmit={submit}
-        className="flex w-full max-w-md flex-col gap-6 rounded-2xl bg-kumo-elevated p-8 ring ring-kumo-line shadow-sm"
+        className="relative z-20 flex w-full max-w-md flex-col gap-7 rounded-xl border border-neutral-200 bg-white p-8 shadow-2xl shadow-black/[0.08] dark:border-neutral-800 dark:bg-neutral-900/90"
         data-testid="account-gate"
       >
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="grid size-10 place-items-center rounded-xl bg-kumo-brand text-white shadow-xs">
-              <BroadcastIcon size={20} weight="bold" />
-            </div>
-            <div>
-              <div className="text-[15px] font-semibold leading-tight text-kumo-strong">EdgeWatch</div>
-              <div className="mt-0.5 text-xs text-kumo-subtle">Application Monitoring</div>
-            </div>
-          </div>
-          {mode === 'setup' && (
-            <Badge variant="info">
-              <SparkleIcon />
-              First setup
-            </Badge>
-          )}
-        </div>
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-tight text-kumo-strong">{title}</h1>
-          <p className="text-sm leading-relaxed text-kumo-subtle">{subtitle}</p>
-        </div>
-        <div className="flex flex-col gap-4">
+        {/* Signature top notch handle */}
+        <div className="mx-auto h-3 w-12 rounded-full border border-neutral-300 bg-neutral-200/60 dark:border-white/15 dark:bg-black/80" aria-hidden />
+
+        <h1 className="text-center text-2xl font-semibold tracking-tight text-neutral-900 sm:text-3xl dark:text-white">
+          {title}
+        </h1>
+
+        <div className="flex flex-col gap-5">
           {mode === 'invite' && entry.fromLink && entry.mode === 'invite' && token && (
-            <div className="flex items-center gap-2.5 rounded-lg border border-kumo-hairline bg-kumo-success-tint px-3.5 py-2.5 text-xs text-kumo-success">
+            <div className="flex items-center gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300">
               <CheckCircleIcon size={16} className="shrink-0" />
               <span>Invitation link ready</span>
             </div>
@@ -240,11 +232,12 @@ function SignIn() {
               type="email"
               autoFocus
               autoComplete="username"
-              placeholder="admin@example.com"
+              placeholder="Enter email"
               required
               maxLength={254}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              className="h-11"
             />
           )}
           {mode === 'invite' && (
@@ -257,6 +250,7 @@ function SignIn() {
               maxLength={100}
               value={name}
               onChange={(e) => setName(e.target.value)}
+              className="h-11"
             />
           )}
           {needsSetupToken && (
@@ -267,6 +261,7 @@ function SignIn() {
               required
               value={token}
               onChange={(e) => setToken(e.target.value)}
+              className="h-11"
             />
           )}
           {needsInviteToken && (
@@ -277,13 +272,14 @@ function SignIn() {
               required
               value={token}
               onChange={(e) => setToken(e.target.value)}
+              className="h-11"
             />
           )}
           <PasswordInput
             label="Password"
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             minLength={mode === 'login' ? undefined : 8}
-            placeholder={mode === 'login' ? 'Enter your password' : 'At least 8 characters'}
+            placeholder={mode === 'login' ? 'Enter password' : 'At least 8 characters'}
             value={password}
             onChange={setPassword}
             description={
@@ -305,22 +301,25 @@ function SignIn() {
               maxLength={100}
               value={name}
               onChange={(e) => setName(e.target.value)}
+              className="h-11"
             />
           )}
-          <Checkbox label="Remember me for 30 days" checked={remember} onCheckedChange={(value) => setRemember(value === true)} />
+          <Checkbox label="Remember me" checked={remember} onCheckedChange={(value) => setRemember(value === true)} />
         </div>
+
         <Button
           type="submit"
           variant="primary"
           icon={mode === 'login' ? SignInIcon : mode === 'setup' ? RocketLaunchIcon : UserPlusIcon}
-          className="w-full justify-center"
+          className="h-11 w-full justify-center rounded-lg"
           loading={busy}
           disabled={busy}
         >
           {mode === 'login' ? 'Sign in' : mode === 'setup' ? 'Create owner account' : 'Join workspace'}
         </Button>
+
         {(mode !== 'login' || setupRequired) && (
-          <div className="border-t border-kumo-hairline pt-4">
+          <div className="border-t border-neutral-200 pt-4 dark:border-white/[0.08]">
             {mode === 'login' ? (
               <Button type="button" variant="ghost" size="sm" className="w-full justify-center" onClick={() => setMode('setup')}>
                 Set up owner account
@@ -333,6 +332,10 @@ function SignIn() {
           </div>
         )}
       </form>
+
+      <div className="z-10 mt-8 font-mono text-[11px] uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
+        EdgeWatch · Application Monitoring
+      </div>
     </div>
   );
 }

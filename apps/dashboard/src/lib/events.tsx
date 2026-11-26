@@ -1,27 +1,17 @@
 import { Badge } from '@cloudflare/kumo/components/badge';
 import {
-  ArrowCounterClockwiseIcon,
   BellIcon,
   BriefcaseIcon,
-  BugIcon,
   CalendarCheckIcon,
-  CheckCircleIcon,
   EnvelopeIcon,
-  FastForwardIcon,
-  GaugeIcon,
-  GitBranchIcon,
   GlobeIcon,
   LightningIcon,
   ListBulletsIcon,
-  PencilSimpleIcon,
-  QueueIcon,
   TerminalIcon,
-  TimerIcon,
   UsersIcon,
-  WarningCircleIcon,
-  WarningIcon,
 } from '@phosphor-icons/react';
-import type { ComponentType, ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import type { MetricLegendItem } from '@/components/charts';
 import { compact, ms } from './format';
 import { splitClassName } from './ui-helpers';
 import type { EventGroup, EventRow } from './types';
@@ -42,6 +32,23 @@ export interface EventColumn<T> {
   render: (row: T) => ReactNode;
 }
 
+export interface EventChartCardData {
+  title: string;
+  value: ReactNode;
+  metrics?: MetricLegendItem[];
+  kind: 'bar' | 'line';
+  unit?: string;
+  barSeries?: { label: string; value: number; warn?: number; highlight?: number }[];
+  lineValues?: number[];
+  lineLabels?: string[];
+  format?: (n: number) => string;
+}
+
+export interface EventChartDeck {
+  left: EventChartCardData;
+  right: EventChartCardData;
+}
+
 /** One dashboard view over an event table served by workers/api (see workers/api/src/events.ts). */
 export interface EventPage {
   path: string;
@@ -50,16 +57,14 @@ export interface EventPage {
   icon: typeof BriefcaseIcon;
   subtitle: string;
   keyLabel: string;
+  sectionUnit?: [string, string];
+  emptyLabel?: string;
+  showUserFilter?: boolean;
   isClassKey?: boolean;
   renderKey?: (key: string) => ReactNode;
   columns: EventColumn<EventGroup>[];
   rowColumns: EventColumn<EventRow>[];
-  summary?: {
-    label: string;
-    icon?: ComponentType<{ size?: number; className?: string }>;
-    render: (s: Record<string, number>) => ReactNode;
-    tone?: (s: Record<string, number>) => 'bad' | 'good' | 'warn' | 'default';
-  }[];
+  chartDeck?: (summary: Record<string, number>, rows: EventGroup[]) => EventChartDeck;
   filters?: { param: string; label: string; options: string[] }[];
   searchPlaceholder: string;
 }
@@ -79,6 +84,30 @@ const dur = (v: unknown) => (v === null || v === undefined ? <span className="te
 const LOG_LEVELS = ['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'];
 const levelVariant = (level: string) => (LOG_LEVELS.indexOf(level) <= 3 ? 'error' : level === 'warning' ? 'warning' : 'secondary');
 
+function durationCard(rows: EventGroup[], summaryAvg?: number): EventChartCardData {
+  const avgVals = rows.map((r) => Number(r.avg_ms ?? 0)).filter((v) => v > 0);
+  const maxVals = rows.map((r) => Number(r.max_ms ?? 0)).filter((v) => v > 0);
+  const overallAvg = summaryAvg !== undefined && summaryAvg > 0
+    ? summaryAvg
+    : avgVals.length
+      ? avgVals.reduce((a, b) => a + b, 0) / avgVals.length
+      : 0;
+  const overallMax = maxVals.length ? Math.max(...maxVals) : 0;
+  const sample = rows.slice(0, 16);
+  return {
+    title: 'Duration',
+    value: overallMax > 0 ? ms(overallMax) : overallAvg > 0 ? ms(overallAvg) : '—',
+    metrics: [
+      { label: 'AVG', value: overallAvg > 0 ? ms(overallAvg) : '—', tone: 'charcoal' },
+      { label: 'MAX', value: overallMax > 0 ? ms(overallMax) : '—', tone: 'alert' },
+    ],
+    kind: 'line',
+    lineValues: sample.map((r) => Number(r.max_ms ?? r.avg_ms ?? 0)),
+    lineLabels: sample.map((r) => splitClassName(r.key).short),
+    format: ms,
+  };
+}
+
 export const EVENT_PAGES: EventPage[] = [
   {
     path: '/jobs',
@@ -87,6 +116,9 @@ export const EVENT_PAGES: EventPage[] = [
     icon: BriefcaseIcon,
     subtitle: 'Background jobs grouped by class — click any job to inspect attempts',
     keyLabel: 'Job',
+    sectionUnit: ['Job', 'Jobs'],
+    emptyLabel: 'No jobs found',
+    showUserFilter: true,
     isClassKey: true,
     renderKey: renderClassKey,
     columns: [
@@ -105,14 +137,34 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Queue', render: (r) => <span className="font-mono text-xs text-kumo-subtle">{String(r.queue ?? '—')}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    summary: [
-      { label: 'Queued', icon: QueueIcon, render: (s) => num(s.queued) },
-      { label: 'Attempts', icon: BriefcaseIcon, render: (s) => num(s.attempts) },
-      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Released', icon: ArrowCounterClockwiseIcon, render: (s) => num(s.released), tone: (s) => (s.released ? 'warn' : 'default') },
-    ],
+    chartDeck: (s, rows) => {
+      const attempts = Number(s.attempts ?? 0);
+      const failed = Number(s.failed ?? 0);
+      const released = Number(s.released ?? 0);
+      const processed = Math.max(0, attempts - failed - released);
+      return {
+        left: {
+          title: 'Attempts',
+          value: compact(attempts),
+          metrics: [
+            { label: 'FAILED', value: compact(failed), tone: 'error' },
+            { label: 'PROCESSED', value: compact(processed), tone: 'neutral' },
+            { label: 'RELEASED', value: compact(released), tone: 'alert' },
+          ],
+          kind: 'bar',
+          unit: 'attempts',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: splitClassName(r.key).short,
+            value: Number(r.attempts ?? r.count ?? 0),
+            warn: Number(r.released ?? 0),
+            highlight: Number(r.failed ?? 0),
+          })),
+        },
+        right: durationCard(rows),
+      };
+    },
     filters: [{ param: 'status', label: 'Status', options: ['all', 'processed', 'released', 'failed'] }],
-    searchPlaceholder: 'Search job class or queue…',
+    searchPlaceholder: 'Search jobs',
   },
   {
     path: '/commands',
@@ -121,6 +173,8 @@ export const EVENT_PAGES: EventPage[] = [
     icon: TerminalIcon,
     subtitle: 'Artisan command runs grouped by command name',
     keyLabel: 'Command',
+    sectionUnit: ['Command', 'Commands'],
+    emptyLabel: 'No commands found',
     renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
       { label: 'Runs', align: 'right', render: (g) => num(g.count) },
@@ -133,13 +187,31 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Command line', render: (r) => <span className="font-mono text-xs">{String(r.command ?? '—')}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    summary: [
-      { label: 'Runs', icon: TerminalIcon, render: (s) => num(s.runs) },
-      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
-    ],
+    chartDeck: (s, rows) => {
+      const runs = Number(s.runs ?? 0);
+      const failed = Number(s.failed ?? 0);
+      const ok = Math.max(0, runs - failed);
+      return {
+        left: {
+          title: 'Calls',
+          value: compact(runs),
+          metrics: [
+            { label: 'UNSUCCESSFUL', value: compact(failed), tone: 'error' },
+            { label: 'SUCCESSFUL', value: compact(ok), tone: 'neutral' },
+          ],
+          kind: 'bar',
+          unit: 'calls',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: r.key,
+            value: Number(r.count ?? 0),
+            highlight: Number(r.failed ?? 0),
+          })),
+        },
+        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+      };
+    },
     filters: [{ param: 'status', label: 'Status', options: ['all', 'success', 'failed'] }],
-    searchPlaceholder: 'Search command…',
+    searchPlaceholder: 'Search commands',
   },
   {
     path: '/cache',
@@ -148,6 +220,8 @@ export const EVENT_PAGES: EventPage[] = [
     icon: LightningIcon,
     subtitle: 'Cache hits, misses, writes and deletes grouped by key',
     keyLabel: 'Key',
+    sectionUnit: ['key', 'keys'],
+    emptyLabel: 'No cache keys found',
     renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
       { label: 'Store', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.store ?? '—'}</span> },
@@ -165,22 +239,61 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'TTL', align: 'right', render: (r) => (r.ttl ? <span className="font-mono text-xs">{`${r.ttl}s`}</span> : '—') },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    summary: [
-      { label: 'Hit ratio', icon: GaugeIcon, render: (s) => pct(s.hit_ratio), tone: (s) => (s.hit_ratio === null || s.hit_ratio === undefined ? 'default' : s.hit_ratio >= 0.8 ? 'good' : s.hit_ratio >= 0.5 ? 'warn' : 'bad') },
-      { label: 'Hits', icon: CheckCircleIcon, render: (s) => num(s.hits) },
-      { label: 'Misses', icon: LightningIcon, render: (s) => num(s.misses) },
-      { label: 'Writes / deletes', icon: PencilSimpleIcon, render: (s) => `${num(s.writes)} / ${num(s.deletes)}` },
-    ],
+    chartDeck: (s, rows) => {
+      const hits = Number(s.hits ?? 0);
+      const misses = Number(s.misses ?? 0);
+      const writes = Number(s.writes ?? 0);
+      const deletes = Number(s.deletes ?? 0);
+      const total = hits + misses + writes + deletes;
+      const totalFailures = rows.reduce((sum, r) => sum + Number(r.failures ?? 0), 0);
+      return {
+        left: {
+          title: 'Events',
+          value: compact(total),
+          metrics: [
+            { label: 'DELETES', value: compact(deletes), tone: 'error' },
+            { label: 'HITS', value: compact(hits), tone: 'neutral' },
+            { label: 'MISSES', value: compact(misses), tone: 'alert' },
+            { label: 'WRITES', value: compact(writes), tone: 'blue' },
+          ],
+          kind: 'bar',
+          unit: 'events',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: r.key,
+            value: Number(r.hits ?? 0) + Number(r.misses ?? 0) + Number(r.writes ?? 0) + Number(r.deletes ?? 0),
+            warn: Number(r.misses ?? 0),
+            highlight: Number(r.deletes ?? 0),
+          })),
+        },
+        right: {
+          title: 'Failures',
+          value: compact(totalFailures),
+          metrics: [
+            { label: 'HIT RATIO', value: pct(s.hit_ratio), tone: 'success' },
+            { label: 'FAILURES', value: compact(totalFailures), tone: 'error' },
+          ],
+          kind: 'bar',
+          unit: 'failures',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: r.key,
+            value: Number(r.failures ?? 0),
+            highlight: Number(r.failures ?? 0),
+          })),
+        },
+      };
+    },
     filters: [{ param: 'type', label: 'Type', options: ['all', 'hit', 'miss', 'write', 'delete', 'write-failure', 'delete-failure'] }],
-    searchPlaceholder: 'Search key or store…',
+    searchPlaceholder: 'Search keys',
   },
   {
     path: '/outgoing-requests',
-    title: 'Outgoing HTTP',
-    nav: 'Outgoing HTTP',
+    title: 'Outgoing Requests',
+    nav: 'Outgoing Requests',
     icon: GlobeIcon,
     subtitle: 'HTTP calls your app made to other services, grouped by host',
-    keyLabel: 'Host',
+    keyLabel: 'Domain',
+    sectionUnit: ['Domain', 'Domains'],
+    emptyLabel: 'No outgoing requests found',
     renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
       { label: 'Methods', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.methods ?? '—'}</span> },
@@ -194,16 +307,34 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Request', render: (r) => <span className="font-mono text-xs">{`${r.method} ${r.url ?? ''}`}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    summary: [
-      { label: 'Requests', icon: GlobeIcon, render: (s) => num(s.requests) },
-      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
-    ],
+    chartDeck: (s, rows) => {
+      const total = Number(s.requests ?? 0);
+      const failed = Number(s.failed ?? 0);
+      const ok = Math.max(0, total - failed);
+      return {
+        left: {
+          title: 'Requests',
+          value: compact(total),
+          metrics: [
+            { label: '1/2/3XX', value: compact(ok), tone: 'neutral' },
+            { label: '4XX/5XX', value: compact(failed), tone: 'error' },
+          ],
+          kind: 'bar',
+          unit: 'requests',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: r.key,
+            value: Number(r.count ?? 0),
+            highlight: Number(r.failed ?? 0),
+          })),
+        },
+        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+      };
+    },
     filters: [
       { param: 'method', label: 'Method', options: ['all', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
       { param: 'status', label: 'Status', options: ['all', '2xx', '3xx', '4xx', '5xx', 'error'] },
     ],
-    searchPlaceholder: 'Search host or URL…',
+    searchPlaceholder: 'Search domains',
   },
   {
     path: '/mail',
@@ -212,6 +343,8 @@ export const EVENT_PAGES: EventPage[] = [
     icon: EnvelopeIcon,
     subtitle: 'Emails your app sent, grouped by mailable',
     keyLabel: 'Mailable',
+    sectionUnit: ['mail', 'mails'],
+    emptyLabel: 'No mail found',
     isClassKey: true,
     renderKey: renderClassKey,
     columns: [
@@ -229,13 +362,32 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Attachments', align: 'right', render: (r) => num(r.attachments) },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    summary: [
-      { label: 'Sent', icon: EnvelopeIcon, render: (s) => num(s.sent) },
-      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
-    ],
+    chartDeck: (s, rows) => {
+      const sent = Number(s.sent ?? 0);
+      const failed = Number(s.failed ?? 0);
+      return {
+        left: {
+          title: 'Mails',
+          value: compact(sent),
+          metrics: failed > 0
+            ? [
+                { label: 'SENT', value: compact(Math.max(0, sent - failed)), tone: 'neutral' },
+                { label: 'FAILED', value: compact(failed), tone: 'error' },
+              ]
+            : undefined,
+          kind: 'bar',
+          unit: 'mails',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: splitClassName(r.key).short,
+            value: Number(r.count ?? 0),
+            highlight: Number(r.failed ?? 0),
+          })),
+        },
+        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+      };
+    },
     filters: [{ param: 'status', label: 'Status', options: ['all', 'sent', 'failed'] }],
-    searchPlaceholder: 'Search mailable or subject…',
+    searchPlaceholder: 'Search mail',
   },
   {
     path: '/notifications',
@@ -244,6 +396,8 @@ export const EVENT_PAGES: EventPage[] = [
     icon: BellIcon,
     subtitle: 'Notifications your app sent, grouped by class',
     keyLabel: 'Notification',
+    sectionUnit: ['Notification', 'Notifications'],
+    emptyLabel: 'No notifications found',
     isClassKey: true,
     renderKey: renderClassKey,
     columns: [
@@ -258,24 +412,45 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Channel', render: (r) => <span className="font-mono text-xs text-kumo-subtle">{String(r.channel ?? '—')}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    summary: [
-      { label: 'Sent', icon: BellIcon, render: (s) => num(s.sent) },
-      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
-    ],
+    chartDeck: (s, rows) => {
+      const sent = Number(s.sent ?? 0);
+      const failed = Number(s.failed ?? 0);
+      return {
+        left: {
+          title: 'Notifications',
+          value: compact(sent),
+          metrics: failed > 0
+            ? [
+                { label: 'SENT', value: compact(Math.max(0, sent - failed)), tone: 'neutral' },
+                { label: 'FAILED', value: compact(failed), tone: 'error' },
+              ]
+            : undefined,
+          kind: 'bar',
+          unit: 'notifications',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: splitClassName(r.key).short,
+            value: Number(r.count ?? 0),
+            highlight: Number(r.failed ?? 0),
+          })),
+        },
+        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+      };
+    },
     filters: [
       { param: 'channel', label: 'Channel', options: ['all', 'mail', 'database', 'broadcast', 'slack', 'vonage'] },
       { param: 'status', label: 'Status', options: ['all', 'sent', 'failed'] },
     ],
-    searchPlaceholder: 'Search notification or channel…',
+    searchPlaceholder: 'Search notifications',
   },
   {
     path: '/scheduled-tasks',
-    title: 'Scheduled tasks',
-    nav: 'Scheduled tasks',
+    title: 'Scheduled Tasks',
+    nav: 'Scheduled Tasks',
     icon: CalendarCheckIcon,
     subtitle: 'Runs of your scheduled tasks, grouped by task',
     keyLabel: 'Task',
+    sectionUnit: ['Task', 'Tasks'],
+    emptyLabel: 'No scheduled tasks found',
     renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
       { label: 'Cron', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.cron ?? '—'}</span> },
@@ -291,14 +466,34 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Cron', render: (r) => <span className="font-mono text-xs text-kumo-subtle">{`${r.cron ?? '—'}${r.timezone ? ` (${r.timezone})` : ''}`}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    summary: [
-      { label: 'Runs', icon: CalendarCheckIcon, render: (s) => num(s.runs) },
-      { label: 'Failed', icon: WarningCircleIcon, render: (s) => num(s.failed), tone: (s) => (s.failed ? 'bad' : 'good') },
-      { label: 'Skipped', icon: FastForwardIcon, render: (s) => num(s.skipped) },
-      { label: 'Avg duration', icon: TimerIcon, render: (s) => (s.avg_ms === null || s.avg_ms === undefined ? '—' : ms(Number(s.avg_ms))) },
-    ],
+    chartDeck: (s, rows) => {
+      const runs = Number(s.runs ?? 0);
+      const failed = Number(s.failed ?? 0);
+      const skipped = Number(s.skipped ?? 0);
+      const processed = Math.max(0, runs - failed - skipped);
+      return {
+        left: {
+          title: 'Scheduled Tasks',
+          value: compact(runs),
+          metrics: [
+            { label: 'FAILED', value: compact(failed), tone: 'error' },
+            { label: 'PROCESSED', value: compact(processed), tone: 'neutral' },
+            { label: 'SKIPPED', value: compact(skipped), tone: 'alert' },
+          ],
+          kind: 'bar',
+          unit: 'runs',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: r.key,
+            value: Number(r.count ?? 0),
+            warn: Number(r.skipped ?? 0),
+            highlight: Number(r.failed ?? 0),
+          })),
+        },
+        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+      };
+    },
     filters: [{ param: 'status', label: 'Status', options: ['all', 'processed', 'failed', 'skipped'] }],
-    searchPlaceholder: 'Search task or cron…',
+    searchPlaceholder: 'Search tasks',
   },
   {
     path: '/logs',
@@ -317,13 +512,8 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Message', render: (r) => <span className="text-sm">{String(r.message)}</span> },
       { label: 'Context', render: (r) => <span className="break-all font-mono text-xs text-kumo-subtle">{r.context ? String(r.context) : '—'}</span> },
     ],
-    summary: [
-      { label: 'Entries', icon: ListBulletsIcon, render: (s) => num(s.logs) },
-      { label: 'Errors', icon: WarningCircleIcon, render: (s) => num(s.errors), tone: (s) => (s.errors ? 'bad' : 'good') },
-      { label: 'Warnings', icon: WarningIcon, render: (s) => num(s.warnings), tone: (s) => (s.warnings ? 'warn' : 'good') },
-    ],
     filters: [{ param: 'level', label: 'Level', options: ['all', ...LOG_LEVELS] }],
-    searchPlaceholder: 'Search message or context…',
+    searchPlaceholder: 'Search logs',
   },
   {
     path: '/users',
@@ -332,6 +522,8 @@ export const EVENT_PAGES: EventPage[] = [
     icon: UsersIcon,
     subtitle: 'Authenticated users and the traces they triggered',
     keyLabel: 'User ID',
+    sectionUnit: ['User', 'Users'],
+    emptyLabel: 'No users found',
     renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
       { label: 'Name', render: (g) => <span className="text-sm">{g.name ?? '—'}</span> },
@@ -346,12 +538,39 @@ export const EVENT_PAGES: EventPage[] = [
       { label: 'Type', render: (r) => <Badge variant="outline">{String(r.execution_source ?? '—')}</Badge> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    summary: [
-      { label: 'Users', icon: UsersIcon, render: (s) => num(s.users) },
-      { label: 'Traces', icon: GitBranchIcon, render: (s) => num(s.traces) },
-      { label: 'Exceptions', icon: BugIcon, render: (s) => num(s.exceptions), tone: (s) => (s.exceptions ? 'bad' : 'good') },
-    ],
+    chartDeck: (s, rows) => {
+      const usersCount = Number(s.users ?? rows.length);
+      const traces = Number(s.traces ?? 0);
+      const exceptions = Number(s.exceptions ?? 0);
+      return {
+        left: {
+          title: 'Authenticated Users',
+          value: compact(usersCount),
+          kind: 'bar',
+          unit: 'requests',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: r.name ? String(r.name) : `#${r.key}`,
+            value: Number(r.requests ?? r.count ?? 0),
+          })),
+        },
+        right: {
+          title: 'Requests',
+          value: compact(traces),
+          metrics: [
+            { label: 'AUTHENTICATED', value: compact(traces), tone: 'success' },
+            { label: 'EXCEPTIONS', value: compact(exceptions), tone: 'error' },
+          ],
+          kind: 'bar',
+          unit: 'traces',
+          barSeries: rows.slice(0, 16).map((r) => ({
+            label: r.name ? String(r.name) : `#${r.key}`,
+            value: Number(r.count ?? 0),
+            highlight: Number(r.exceptions ?? 0),
+          })),
+        },
+      };
+    },
     filters: [{ param: 'source', label: 'Type', options: ['all', 'request', 'command', 'job', 'schedule'] }],
-    searchPlaceholder: 'Search user ID or trace…',
+    searchPlaceholder: 'Search users',
   },
 ];

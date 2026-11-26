@@ -15,11 +15,12 @@ export function themeFrom(stored: string | null, prefersLight: boolean): Theme {
   return prefersLight ? 'light' : 'dark';
 }
 
-/** Kumo reads `data-mode` on an ancestor for its light/dark tokens. */
+/** Kumo reads `data-mode` and Tailwind reads `.dark` on the root element. */
 export function useTheme() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   useEffect(() => {
     document.documentElement.dataset.mode = theme;
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     document.documentElement.style.colorScheme = theme;
   }, [theme]);
   // Until the user picks a theme, follow OS light/dark switches live (e.g. automatic dark mode at sunset).

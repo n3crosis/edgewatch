@@ -7,8 +7,8 @@ import { useRange, rangeLabel } from '@/lib/range';
 import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Link, { scopedPath } from '@/components/ScopedLink';
-import { BarChart } from '@/components/charts';
-import { CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, Stat, TimeAgo, useRowNavigate } from '@/components/common';
+import { BarChart, MetricChartCard, rangeFooterBounds } from '@/components/charts';
+import { CardTray, CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, Stat, TimeAgo, useRowNavigate } from '@/components/common';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { LinkButton } from '@cloudflare/kumo/components/button';
 import { Table } from '@cloudflare/kumo/components/table';
@@ -70,7 +70,13 @@ export default function ExceptionDetailPage() {
         subtitle={
           <div className="mt-1.5 space-y-2">
             <div className="flex flex-wrap items-center gap-2.5">
-              <Badge variant={data.handled ? 'secondary' : 'error'}>{exceptionHandling(data)}</Badge>
+              {!data.handled ? (
+                <span className="inline-flex items-center rounded bg-rose-600 px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-white">
+                  {exceptionHandling(data)}
+                </span>
+              ) : (
+                <Badge variant="secondary" className="font-mono uppercase">{exceptionHandling(data)}</Badge>
+              )}
               {namespace && <span className="font-mono text-xs text-kumo-subtle">{namespace}</span>}
               {user && <Badge variant="outline" className="font-mono">User #{user}</Badge>}
             </div>
@@ -91,12 +97,14 @@ export default function ExceptionDetailPage() {
         }
       />
 
-      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label={`Events (${rangeLabel(range)})`} icon={<BugIcon size={14} />} value={compact(data.count)} tone="bad" />
-        <Stat label="Users affected" icon={<UsersIcon size={14} />} value={compact(data.users)} />
-        <Stat label="First seen" icon={<ClockIcon size={14} />} value={ago(data.first_seen)} hint={new Date(data.first_seen).toLocaleString()} />
-        <Stat label="Last seen" icon={<ClockIcon size={14} />} value={ago(data.last_seen)} hint={new Date(data.last_seen).toLocaleString()} />
-      </section>
+      <CardTray>
+        <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat label={`Events (${rangeLabel(range)})`} icon={<BugIcon size={13} />} value={compact(data.count)} tone="bad" />
+          <Stat label="Users affected" icon={<UsersIcon size={13} />} value={compact(data.users)} />
+          <Stat label="First seen" icon={<ClockIcon size={13} />} value={ago(data.first_seen)} hint={new Date(data.first_seen).toLocaleString()} />
+          <Stat label="Last seen" icon={<ClockIcon size={13} />} value={ago(data.last_seen)} hint={new Date(data.last_seen).toLocaleString()} />
+        </section>
+      </CardTray>
 
       <section className="grid grid-cols-1 gap-6 [&>*]:min-w-0 xl:grid-cols-2">
         <Panel
@@ -136,19 +144,28 @@ export default function ExceptionDetailPage() {
         </Panel>
 
         <div className="space-y-6">
-          <Panel fetching={!loading && fetching} title={`Occurrences over ${rangeLabel(range)}`}>
-            <div className="p-6">
+          <CardTray>
+            <MetricChartCard
+              fetching={!loading && fetching}
+              title="Occurrences"
+              value={compact(data.count)}
+              metrics={[
+                ...(data.handled_count !== undefined ? [{ label: 'Handled', value: compact(data.handled_count), tone: 'neutral' as const }] : []),
+                ...(data.unhandled_count !== undefined ? [{ label: 'Unhandled', value: compact(data.unhandled_count), tone: 'error' as const }] : []),
+              ]}
+            >
               <BarChart
-                height={168}
+                height={164}
                 tone="danger"
                 unit="occurrences"
+                bounds={rangeFooterBounds(range)}
                 series={data.trend.map((v, i) => ({
                   label: win ? bucketTime(win.since + i * win.width, range) : `#${i + 1}`,
                   value: v,
                 }))}
               />
-            </div>
-          </Panel>
+            </MetricChartCard>
+          </CardTray>
 
           <Panel fetching={!loading && fetching} title="Recent occurrences">
             {data.occurrences.length === 0 ? (

@@ -17,8 +17,8 @@ import {
 } from '@phosphor-icons/react';
 import { useState } from 'react';
 import Link from '@/components/ScopedLink';
-import { LineChart } from '@/components/charts';
-import { Empty, ErrorState, Loading, PageHeader, PageSkeleton, Panel, Stat, TimeAgo, useRowNavigate } from '@/components/common';
+import { LineChart, MetricChartCard } from '@/components/charts';
+import { CardTray, Empty, ErrorState, Loading, PageHeader, PageSkeleton, Panel, Stat, TimeAgo, useRowNavigate } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
 import { ago, bucketTime, compact, ms } from '@/lib/format';
 
@@ -68,28 +68,38 @@ export default function PipelinePage() {
         }
       />
 
-      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Messages (1h)" icon={<QueueIcon size={14} />} value={compact(consumer.messages_1h)} hint={consumer.last_batch_at ? `last batch ${ago(consumer.last_batch_at)}` : 'no batches in the last hour'} />
-        <Stat label="Retried (1h)" icon={<ArrowClockwiseIcon size={14} />} value={compact(consumer.retried_1h)} tone={consumer.retried_1h > 0 ? 'warn' : 'good'} />
-        <Stat label="Queue lag (5m)" icon={<TimerIcon size={14} />} value={ms(consumer.max_lag_ms_5m)} tone={consumer.max_lag_ms_5m > LAG_WARN_MS ? 'warn' : 'good'} hint={`1h peak ${ms(consumer.max_lag_ms_1h)}`} />
-        <Stat
-          label="Dead letters"
-          icon={<WarningOctagonIcon size={14} />}
-          value={compact(summary.count)}
-          tone={summary.count > 0 ? 'bad' : 'good'}
-          hint={summary.replay_pending ? `${summary.replay_pending} replay pending` : summary.oldest_failed_at ? `oldest ${ago(summary.oldest_failed_at)}` : 'all clear'}
-        />
-      </section>
+      <CardTray>
+        <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat label="Messages (1h)" icon={<QueueIcon size={13} />} value={compact(consumer.messages_1h)} hint={consumer.last_batch_at ? `last batch ${ago(consumer.last_batch_at)}` : 'no batches in the last hour'} />
+          <Stat label="Retried (1h)" icon={<ArrowClockwiseIcon size={13} />} value={compact(consumer.retried_1h)} tone={consumer.retried_1h > 0 ? 'warn' : 'good'} />
+          <Stat label="Queue lag (5m)" icon={<TimerIcon size={13} />} value={ms(consumer.max_lag_ms_5m)} tone={consumer.max_lag_ms_5m > LAG_WARN_MS ? 'warn' : 'good'} hint={`1h peak ${ms(consumer.max_lag_ms_1h)}`} />
+          <Stat
+            label="Dead letters"
+            icon={<WarningOctagonIcon size={13} />}
+            value={compact(summary.count)}
+            tone={summary.count > 0 ? 'bad' : 'good'}
+            hint={summary.replay_pending ? `${summary.replay_pending} replay pending` : summary.oldest_failed_at ? `oldest ${ago(summary.oldest_failed_at)}` : 'all clear'}
+          />
+        </section>
+      </CardTray>
 
-      <Panel fetching={!health.loading && health.fetching} title="Queue lag per minute (last hour)" actions={minutes.length > 0 ? <span className="text-xs tabular-nums text-kumo-subtle">peak {ms(peakLag)}</span> : undefined}>
-        {minutes.length === 0 ? (
-          <Empty icon={<ChartLineIcon size={32} className="text-kumo-subtle" />}>No consumer batches in the last hour.</Empty>
-        ) : (
-          <div className="p-6">
+      <CardTray>
+        <MetricChartCard
+          fetching={!health.loading && health.fetching}
+          title="Queue lag (last hour)"
+          value={ms(consumer.max_lag_ms_5m)}
+          metrics={[
+            { label: '5M MAX', value: ms(consumer.max_lag_ms_5m), tone: 'charcoal' },
+            { label: '1H PEAK', value: ms(peakLag), tone: 'alert' },
+          ]}
+        >
+          {minutes.length === 0 ? (
+            <Empty variant="clean" icon={<ChartLineIcon size={26} className="text-kumo-subtle" />}>No consumer batches in the last hour.</Empty>
+          ) : (
             <LineChart values={minutes.map((m) => m.max_lag_ms)} labels={minutes.map((m) => bucketTime(m.minute, '1h'))} format={ms} />
-          </div>
-        )}
-      </Panel>
+          )}
+        </MetricChartCard>
+      </CardTray>
 
       <Panel
         fetching={!usage.loading && usage.fetching}
