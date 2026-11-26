@@ -25,7 +25,7 @@ const execution = {
 };
 
 const record = <T extends string, S extends z.ZodRawShape>(t: T, shape: S) =>
-  z.object({ v: int, t: z.literal(t), ...execution, ...shape }).passthrough();
+  z.looseObject({ v: int, t: z.literal(t), ...execution, ...shape });
 
 export const RECORD_SCHEMAS = {
   request: record('request', {
@@ -82,14 +82,14 @@ export const RECORD_SCHEMAS = {
     failed: z.boolean().optional(),
   }),
   notification: record('notification', { channel: optStr, class: str, duration: int.nonnegative(), failed: z.boolean().optional() }),
-  log: record('log', { level: str, message: z.string(), context: z.union([z.string(), z.record(z.unknown())]).optional() }),
-  user: z.object({ v: int, t: z.literal('user'), timestamp: num, id: z.union([z.string(), z.number()]), name: optStr, username: optStr }).passthrough(),
+  log: record('log', { level: str, message: z.string(), context: z.union([z.string(), z.record(z.string(), z.unknown())]).optional() }),
+  user: z.looseObject({ v: int, t: z.literal('user'), timestamp: num, id: z.union([z.string(), z.number()]), name: optStr, username: optStr }),
 } as const;
 
 export type RecordType = keyof typeof RECORD_SCHEMAS;
 export type NightwatchRecord = { v: number; t: string; trace_id?: string; timestamp?: number; [key: string]: unknown };
 
-const UnknownRecord = z.object({ v: int, t: str.min(1) }).passthrough();
+const UnknownRecord = z.looseObject({ v: int, t: str.min(1) });
 
 export const IngestBody = z.object({ records: z.array(z.unknown()) });
 
@@ -110,7 +110,7 @@ export function validateRecords(input: unknown[]): { records: NightwatchRecord[]
     if (result.success) {
       records.push(result.data as NightwatchRecord);
     } else {
-      rejected.push({ index, t, issues: result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`) });
+      rejected.push({ index, t, issues: result.error.issues.map((i) => `${i.path.map(String).join('.') || '(root)'}: ${i.message}`) });
     }
   });
 
