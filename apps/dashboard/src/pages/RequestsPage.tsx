@@ -9,6 +9,8 @@ import Link from '@/components/ScopedLink';
 import { BarChart, LineChart, MetricChartCard, durationRangeLabel, rangeFooterBounds } from '@/components/charts';
 import {
   CardTray,
+  CompactNumber,
+  DurationHover,
   Empty,
   ErrorCount,
   ErrorState,
@@ -265,12 +267,16 @@ export default function RequestsPage() {
                             )}
                           </div>
                         </Table.Cell>
-                        <Table.Cell className="text-right">{compact(okCount)}</Table.Cell>
+                        <Table.Cell className="text-right"><CompactNumber value={okCount} /></Table.Cell>
                         <Table.Cell className="text-right"><WarningCount count={r.status_4xx} /></Table.Cell>
                         <Table.Cell className="text-right"><ErrorCount count={r.status_5xx} /></Table.Cell>
-                        <Table.Cell className="text-right font-medium">{compact(r.requests)}</Table.Cell>
-                        <Table.Cell className="text-right">{ms(r.avg_ms)}</Table.Cell>
-                        <Table.Cell className="text-right">{r.p95_ms === null ? '—' : ms(r.p95_ms)}</Table.Cell>
+                        <Table.Cell className="text-right font-medium"><CompactNumber value={r.requests} /></Table.Cell>
+                        <Table.Cell className="text-right">
+                          <DurationHover value={r.avg_ms} avg={r.avg_ms} p95={r.p95_ms} />
+                        </Table.Cell>
+                        <Table.Cell className="text-right">
+                          <DurationHover value={r.p95_ms} avg={r.avg_ms} p95={r.p95_ms} />
+                        </Table.Cell>
                         <Table.Cell className="text-right"><RowActionLink to={target} label={`Open ${r.route}`} /></Table.Cell>
                       </Table.Row>
                     );

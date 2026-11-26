@@ -1,4 +1,5 @@
 import { useKumoToastManager } from '@cloudflare/kumo/components/toast';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { envDotClass, EnvironmentProvider, useEnvironment } from '@/lib/environment';
 import Link, { scopedPath } from './ScopedLink';
 import { Button } from '@cloudflare/kumo/components/button';
@@ -7,6 +8,7 @@ import { Popover } from '@cloudflare/kumo/components/popover';
 import {
   ArrowsLeftRightIcon,
   BugIcon,
+  CaretRightIcon,
   CaretUpDownIcon,
   CheckIcon,
   DatabaseIcon,
@@ -15,14 +17,16 @@ import {
   GaugeIcon,
   KeyIcon,
   ListIcon,
+  MagnifyingGlassIcon,
   MoonIcon,
+  PlusIcon,
   SignOutIcon,
   SlidersHorizontalIcon,
   SunIcon,
   WarningOctagonIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { Suspense, useEffect, useId, useMemo, useState, type ComponentType } from 'react';
+import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType } from 'react';
 import CommandPalette from './CommandPalette';
 import { isPaletteShortcut, type PaletteCommand } from '@/lib/command-palette';
 import PageBoundary from './PageBoundary';
@@ -32,6 +36,7 @@ import { useTheme } from '@/lib/theme';
 import { EVENT_PAGES } from '@/lib/events';
 import { api, USING_MOCK, useAsync } from '@/lib/api';
 import { signOut, useSessionUser } from '@/lib/auth';
+import { LayoutScrollContext, LocalPreferencesProvider } from '@/lib/preferences';
 import { ProjectProvider, useProject } from '@/lib/project';
 import { RangeProvider, useRange } from '@/lib/range';
 
@@ -57,12 +62,12 @@ const KEYWORDS: Record<string, string[]> = {
   '/exceptions': ['errors'],
   '/queries': ['sql', 'database', 'slow'],
   '/setup': ['settings', 'install', 'keys'],
-  '/accounts': ['members', 'invitations', 'users', 'access'],
+  '/accounts': ['members', 'invitations', 'users', 'access', 'applications'],
 };
 
 const TOP_NAV = NAV.filter((item) => ['/', '/issues'].includes(item.to));
 
-/** Exact Nightwatch sidebar sections (`hi()` in `AuthenticatedLayout-CUJ0-ea8.js`). */
+/** Exact Nightwatch sidebar sections (`hi()` in `AuthenticatedLayout-CCFtg7gs.js`). */
 const NAV_SECTIONS = [
   {
     label: 'Activity',
@@ -102,20 +107,33 @@ function PaletteHost({ open, setOpen }: { open: boolean; setOpen: (open: boolean
   );
 }
 
-function NavItem({ to, label, icon: Icon, end, badge }: (typeof NAV)[number] & { badge?: number }) {
+function NavItem({
+  to,
+  label,
+  icon: Icon,
+  end,
+  badge,
+  compactRail = false,
+}: (typeof NAV)[number] & { badge?: number; compactRail?: boolean }) {
   const { range } = useRange();
   const { projectId } = useProject();
   const { environment } = useEnvironment();
   const href = scopedPath(to, projectId, range, environment);
   const active = useMatch({ path: useResolvedPath(to).pathname, end: end ?? false }) !== null;
-  return (
+
+  const linkNode = (
     <Link
       to={href}
       aria-current={active ? 'page' : undefined}
+      aria-label={compactRail ? label : undefined}
       className={
         active
-          ? 'group relative flex h-9 w-full items-center gap-3 rounded-md border border-neutral-200 bg-white px-2 pr-0.5 text-sm font-normal text-neutral-900 shadow-lg shadow-black/[0.04] transition-colors dark:border-white/[0.05] dark:bg-white/[0.05] dark:text-white'
-          : 'group relative flex h-9 w-full items-center gap-3 rounded-md border border-transparent px-2 pr-0.5 text-sm text-neutral-500 transition-colors hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white'
+          ? `group relative flex h-9 w-full items-center rounded-md border border-neutral-200 bg-white text-sm font-normal text-neutral-900 shadow-lg shadow-black/[0.04] transition-colors dark:border-white/[0.05] dark:bg-white/[0.05] dark:text-white ${
+              compactRail ? 'justify-center px-0 lg:justify-start lg:gap-3 lg:px-2 lg:pr-0.5' : 'gap-3 px-2 pr-0.5'
+            }`
+          : `group relative flex h-9 w-full items-center rounded-md border border-transparent text-sm text-neutral-500 transition-colors hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white ${
+              compactRail ? 'justify-center px-0 lg:justify-start lg:gap-3 lg:px-2 lg:pr-0.5' : 'gap-3 px-2 pr-0.5'
+            }`
       }
     >
       <Icon
@@ -128,10 +146,12 @@ function NavItem({ to, label, icon: Icon, end, badge }: (typeof NAV)[number] & {
         }
         aria-hidden
       />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className={`min-w-0 flex-1 truncate ${compactRail ? 'hidden lg:inline' : ''}`}>{label}</span>
       {badge !== undefined && badge > 0 && (
         <span
           className={`mr-2 inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded px-1 font-sans text-[11px] leading-none font-medium tabular-nums ${
+            compactRail ? 'hidden lg:inline-flex' : ''
+          } ${
             active
               ? 'bg-neutral-600 text-neutral-100 dark:bg-neutral-600 dark:text-white'
               : 'bg-black/[0.07] text-neutral-700 dark:bg-white/10 dark:text-neutral-200'
@@ -142,16 +162,26 @@ function NavItem({ to, label, icon: Icon, end, badge }: (typeof NAV)[number] & {
       )}
     </Link>
   );
+
+  if (compactRail) {
+    return (
+      <Tooltip content={label} side="right" asChild>
+        {linkNode}
+      </Tooltip>
+    );
+  }
+  return linkNode;
 }
 
-/** 1:1 Nightwatch top-left Application + Environment switcher (`bi` & `vi` in `AuthenticatedLayout-CUJ0-ea8.js`). */
-function ProjectHeaderSwitcher({ onClose }: { onClose?: () => void }) {
+/** 1:1 Nightwatch top-left Application + Environment switcher (`bi` & `vi` in `AuthenticatedLayout-CCFtg7gs.js`). */
+function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () => void; compactRail?: boolean }) {
   const { projectId, projects, setProjectId } = useProject();
   const { range } = useRange();
   const { environment, setEnvironment, envRevision } = useEnvironment();
   const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [appSearch, setAppSearch] = useState('');
 
   const envs = useAsync(() => (open ? api.environments().catch(() => []) : Promise.resolve([])), [open, projectId, envRevision]);
   const envItems = useMemo(() => {
@@ -162,8 +192,20 @@ function ProjectHeaderSwitcher({ onClose }: { onClose?: () => void }) {
   }, [envs.data, environment]);
 
   const list = projects.length ? projects : [{ id: projectId, name: projectId, host: undefined }];
+  const filteredApps = useMemo(() => {
+    const needle = appSearch.trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter(
+      (p) => p.name.toLowerCase().includes(needle) || p.id.toLowerCase().includes(needle),
+    );
+  }, [list, appSearch]);
+
   const active = list.find((p) => p.id === projectId) ?? list[0];
   const initial = (active?.name || projectId || 'E').trim().charAt(0).toUpperCase();
+
+  useEffect(() => {
+    if (!open) setAppSearch('');
+  }, [open]);
 
   const onChangeProject = (nextId: string) => {
     setOpen(false);
@@ -186,13 +228,15 @@ function ProjectHeaderSwitcher({ onClose }: { onClose?: () => void }) {
               type="button"
               data-testid="project-switcher"
               aria-label="Switch project and environment"
-              className="group relative flex h-full min-w-0 flex-1 items-center justify-between gap-2.5 px-2 py-2 pr-4 text-left transition-all hover:bg-white dark:hover:bg-white/[0.01] focus-visible:outline-2 focus-visible:outline-kumo-link"
+              className={`group relative flex h-full min-w-0 flex-1 items-center transition-all hover:bg-white dark:hover:bg-white/[0.01] focus-visible:outline-2 focus-visible:outline-kumo-link ${
+                compactRail ? 'justify-center px-1.5 lg:justify-between lg:gap-2.5 lg:px-2 lg:pr-4' : 'justify-between gap-2.5 px-2 py-2 pr-4'
+              } text-left`}
             >
               <span className="flex min-w-0 items-center gap-2.5">
                 <span className="grid size-8 shrink-0 place-items-center rounded-md border border-neutral-200/80 bg-neutral-100 text-xs font-semibold text-neutral-800 dark:border-white/10 dark:bg-neutral-800 dark:text-neutral-200">
                   {initial}
                 </span>
-                <span className="flex min-w-0 flex-col font-medium">
+                <span className={`min-w-0 flex-col font-medium ${compactRail ? 'hidden lg:flex' : 'flex'}`}>
                   <span className="truncate text-sm/none text-neutral-900 dark:text-white">
                     {active.name}
                   </span>
@@ -201,49 +245,99 @@ function ProjectHeaderSwitcher({ onClose }: { onClose?: () => void }) {
                   </span>
                 </span>
               </span>
-              <CaretUpDownIcon size={16} className="shrink-0 text-neutral-600 transition-colors group-hover:text-blue-600 dark:text-neutral-500 dark:group-hover:text-neutral-300" aria-hidden />
+              <CaretUpDownIcon
+                size={16}
+                className={`shrink-0 text-neutral-600 transition-colors group-hover:text-blue-600 dark:text-neutral-500 dark:group-hover:text-neutral-300 ${
+                  compactRail ? 'hidden lg:block' : ''
+                }`}
+                aria-hidden
+              />
             </button>
           }
         />
         <Popover.Portal>
           <Popover.Positioner side="bottom" align="start" sideOffset={4}>
-            <Popover.Popup className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-0 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
-              <div className="flex max-h-[420px] flex-col sm:flex-row">
-                {/* Projects column */}
-                <div className="w-60 shrink-0 overflow-y-auto p-2">
-                  <div className="px-2 pb-1.5 pt-1 text-xs font-medium text-neutral-400 dark:text-neutral-500">
-                    Applications
+            {/* 1:1 Nightwatch `.dropdown dark` 2-pane Application & Environment switcher */}
+            <Popover.Popup className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 p-0 text-white shadow-2xl shadow-black/50 dark:border-neutral-700/50 dark:bg-neutral-800">
+              <div className="flex max-h-[450px] flex-col sm:flex-row">
+                {/* Projects column with live search + New Application button */}
+                <div className="flex w-[260px] shrink-0 flex-col">
+                  <div className="flex h-11 items-center border-b border-neutral-800 px-3 dark:border-neutral-700/50">
+                    <MagnifyingGlassIcon size={15} className="mr-2 shrink-0 text-neutral-400 opacity-60" aria-hidden />
+                    <input
+                      type="text"
+                      value={appSearch}
+                      onChange={(e) => setAppSearch(e.target.value)}
+                      placeholder="Find application..."
+                      aria-label="Find application"
+                      className="flex w-full bg-transparent text-sm leading-tight text-white outline-none placeholder:font-light placeholder:text-neutral-500"
+                    />
+                    {appSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setAppSearch('')}
+                        aria-label="Clear application search"
+                        className="ml-1 text-neutral-400 hover:text-white"
+                      >
+                        <XIcon size={12} aria-hidden />
+                      </button>
+                    )}
                   </div>
-                  <div className="space-y-0.5">
-                    {list.map((project) => {
-                      const selected = project.id === projectId;
-                      const letter = (project.name || project.id).trim().charAt(0).toUpperCase();
-                      return (
-                        <button
-                          key={project.id}
-                          type="button"
-                          onClick={() => onChangeProject(project.id)}
-                          className={`flex h-9 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm transition-colors ${
-                            selected
-                              ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-white/[0.08] dark:text-white'
-                              : 'text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.04] dark:hover:text-white'
-                          }`}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="grid size-5 shrink-0 place-items-center rounded bg-neutral-200/70 text-[11px] font-semibold text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200">
-                              {letter}
-                            </span>
-                            <span className="truncate leading-tight">{project.name}</span>
-                          </span>
-                          {selected && <CheckIcon size={14} className="shrink-0 text-blue-600 dark:text-emerald-500" />}
-                        </button>
-                      );
-                    })}
+
+                  <div className="max-h-[340px] flex-1 overflow-y-auto p-2">
+                    <div className="px-2 pb-1.5 pt-1 text-xs font-medium text-neutral-400 dark:text-neutral-500">
+                      Applications
+                    </div>
+                    {filteredApps.length === 0 ? (
+                      <div className="py-5 text-center text-sm text-neutral-500">No results found</div>
+                    ) : (
+                      <div className="space-y-0.5">
+                        {filteredApps.map((project) => {
+                          const selected = project.id === projectId;
+                          const letter = (project.name || project.id).trim().charAt(0).toUpperCase();
+                          return (
+                            <button
+                              key={project.id}
+                              type="button"
+                              onClick={() => onChangeProject(project.id)}
+                              className={`group/app flex h-9 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm transition-colors ${
+                                selected
+                                  ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'
+                                  : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white dark:hover:bg-neutral-700/50'
+                              }`}
+                            >
+                              <span className="flex min-w-0 items-center gap-2">
+                                <span className="grid size-5 shrink-0 place-items-center rounded bg-white/10 text-[11px] font-semibold text-white">
+                                  {letter}
+                                </span>
+                                <span className="truncate leading-tight">{project.name}</span>
+                              </span>
+                              <span className="flex shrink-0 items-center gap-1">
+                                {selected && <CheckIcon size={14} className="text-emerald-400" />}
+                                <CaretRightIcon size={12} className="text-neutral-500 group-hover/app:text-white" aria-hidden />
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      navigate(scopedPath('/accounts', projectId, range, environment));
+                    }}
+                    className="flex h-10 w-full shrink-0 items-center gap-2 border-t border-neutral-800 px-4 text-sm text-neutral-300 transition-colors hover:bg-white/5 hover:text-white dark:border-neutral-700/75"
+                  >
+                    <PlusIcon size={13} aria-hidden />
+                    <span>New Application</span>
+                  </button>
                 </div>
 
                 {/* Environments column (exact Nightwatch 2-pane switcher) */}
-                <div className="w-56 shrink-0 overflow-y-auto border-t border-neutral-200 p-2 sm:border-l sm:border-t-0 dark:border-neutral-700/50">
+                <div className="w-[230px] shrink-0 overflow-y-auto border-t border-neutral-800 p-2 sm:border-l sm:border-t-0 dark:border-neutral-700/50">
                   <div className="px-2 pb-1.5 pt-1 text-xs font-medium text-neutral-400 dark:text-neutral-500">
                     Environments
                   </div>
@@ -254,17 +348,17 @@ function ProjectHeaderSwitcher({ onClose }: { onClose?: () => void }) {
                         setEnvironment(undefined);
                         setOpen(false);
                       }}
-                      className={`flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
+                      className={`ew-fade-in-up flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
                         environment === undefined
-                          ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-white/[0.08] dark:text-white'
-                          : 'text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.04] dark:hover:text-white'
+                          ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'
+                          : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white dark:hover:bg-neutral-700/50'
                       }`}
                     >
                       <span className="flex items-center gap-2.5 truncate">
-                        <span className="size-2 shrink-0 rounded-full bg-blue-600 dark:bg-emerald-500" aria-hidden />
+                        <span className="size-2 shrink-0 rounded-full bg-blue-500 dark:bg-emerald-500" aria-hidden />
                         <span className="truncate">All environments</span>
                       </span>
-                      {environment === undefined && <CheckIcon size={14} className="shrink-0 text-blue-600 dark:text-emerald-500" />}
+                      {environment === undefined && <CheckIcon size={14} className="shrink-0 text-emerald-400" />}
                     </button>
                     {envItems.map((envItem, idx) => {
                       const selected = environment === envItem.name;
@@ -273,21 +367,22 @@ function ProjectHeaderSwitcher({ onClose }: { onClose?: () => void }) {
                         <button
                           key={envItem.name}
                           type="button"
+                          style={{ animationDelay: `${Math.min(idx + 1, 6) * 40}ms` }}
                           onClick={() => {
                             setEnvironment(envItem.name);
                             setOpen(false);
                           }}
-                          className={`flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
+                          className={`ew-fade-in-up flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
                             selected
-                              ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-white/[0.08] dark:text-white'
-                              : 'text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.04] dark:hover:text-white'
+                              ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'
+                              : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white dark:hover:bg-neutral-700/50'
                           }`}
                         >
                           <span className="flex items-center gap-2.5 truncate">
                             <span className={`size-2 shrink-0 rounded-full ${dotColor}`} aria-hidden />
                             <span className="truncate">{envItem.name}</span>
                           </span>
-                          {selected && <CheckIcon size={14} className="shrink-0 text-blue-600 dark:text-emerald-500" />}
+                          {selected && <CheckIcon size={14} className="shrink-0 text-emerald-400" />}
                         </button>
                       );
                     })}
@@ -319,8 +414,8 @@ function ProjectLabel() {
   );
 }
 
-/** 1:1 Nightwatch sidebar footer (`AuthenticatedLayout-CUJ0-ea8.js`): avatar + name + `···` menu. */
-function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
+/** 1:1 Nightwatch sidebar footer (`AuthenticatedLayout-CCFtg7gs.js`): avatar + name + `···` dark menu. */
+function SidebarFooter({ onSignOut, compactRail = false }: { onSignOut: () => void; compactRail?: boolean }) {
   const user = useSessionUser();
   const { theme, toggle } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -329,15 +424,20 @@ function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
 
   return (
     <div className="sticky bottom-0 z-10 w-full shrink-0 border-t border-neutral-200 p-1.5 dark:border-white/[0.05]">
-      <div className="flex items-center gap-0.5">
+      <div className={`flex items-center gap-0.5 ${compactRail ? 'flex-col justify-center lg:flex-row' : 'flex-row'}`}>
         <Link
           to="/accounts"
-          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md p-2 transition-colors hover:bg-neutral-200/70 dark:hover:bg-white/10"
+          className={`flex h-8 min-w-0 items-center gap-2 rounded-md p-2 transition-colors hover:bg-neutral-200/70 dark:hover:bg-white/10 ${
+            compactRail ? 'justify-center lg:flex-1 lg:justify-start' : 'flex-1'
+          }`}
+          title={displayName}
         >
           <span className="grid size-6 shrink-0 place-items-center rounded-full bg-neutral-200 text-xs font-medium text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200">
             {initial}
           </span>
-          <span className="truncate text-sm text-neutral-900 dark:text-white">{displayName}</span>
+          <span className={`truncate text-sm text-neutral-900 dark:text-white ${compactRail ? 'hidden lg:inline' : ''}`}>
+            {displayName}
+          </span>
         </Link>
 
         <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
@@ -354,7 +454,7 @@ function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
           />
           <Popover.Portal>
             <Popover.Positioner side="top" align="end" sideOffset={6}>
-              <Popover.Popup className="w-48 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
+              <Popover.Popup className="w-48 rounded-md border border-neutral-800 bg-neutral-900 p-1 text-white shadow-2xl shadow-black/50 dark:border-neutral-700/50 dark:bg-neutral-800">
                 <button
                   type="button"
                   data-testid="theme-toggle"
@@ -362,12 +462,12 @@ function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
                     toggle();
                     setMenuOpen(false);
                   }}
-                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.06] dark:hover:text-white"
+                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-200 transition-colors hover:bg-neutral-800 hover:text-white dark:hover:bg-neutral-700/70"
                 >
                   {theme === 'dark' ? (
-                    <SunIcon size={15} className="shrink-0 text-neutral-500" aria-hidden />
+                    <SunIcon size={15} className="shrink-0 text-neutral-400" aria-hidden />
                   ) : (
-                    <MoonIcon size={15} className="shrink-0 text-neutral-500" aria-hidden />
+                    <MoonIcon size={15} className="shrink-0 text-neutral-400" aria-hidden />
                   )}
                   <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
                 </button>
@@ -379,9 +479,9 @@ function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
                       setMenuOpen(false);
                       onSignOut();
                     }}
-                    className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-white/[0.06] dark:hover:text-white"
+                    className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-200 transition-colors hover:bg-neutral-800 hover:text-white dark:hover:bg-neutral-700/70"
                   >
-                    <SignOutIcon size={15} className="shrink-0 text-neutral-500" aria-hidden />
+                    <SignOutIcon size={15} className="shrink-0 text-neutral-400" aria-hidden />
                     <span>Logout</span>
                   </button>
                 )}
@@ -394,7 +494,15 @@ function SidebarFooter({ onSignOut }: { onSignOut: () => void }) {
   );
 }
 
-function Sidebar({ onClose, onSignOut }: { onClose?: () => void; onSignOut: () => void }) {
+function Sidebar({
+  onClose,
+  onSignOut,
+  compactRail = false,
+}: {
+  onClose?: () => void;
+  onSignOut: () => void;
+  compactRail?: boolean;
+}) {
   const { range } = useRange();
   const openIssues = useAsync(
     () => (USING_MOCK ? Promise.resolve(null) : api.issues(range, 'open', '', 0).catch(() => null)),
@@ -405,26 +513,40 @@ function Sidebar({ onClose, onSignOut }: { onClose?: () => void; onSignOut: () =
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-transparent">
-      <ProjectHeaderSwitcher onClose={onClose} />
+      <ProjectHeaderSwitcher onClose={onClose} compactRail={compactRail} />
       <nav className="flex flex-1 flex-col overflow-y-auto md:pt-1" aria-label="Main">
         <div className="flex w-full flex-col p-1.5">
           {TOP_NAV.map((item) => (
-            <NavItem key={item.to} {...item} badge={item.to === '/issues' ? issueCount : undefined} />
+            <NavItem
+              key={item.to}
+              {...item}
+              compactRail={compactRail}
+              badge={item.to === '/issues' ? issueCount : undefined}
+            />
           ))}
           {NAV_SECTIONS.map((section) => (
             <div key={section.label} className="flex flex-col">
-              <div className="px-2 pt-4 pb-1 text-xs font-semibold text-neutral-500 dark:text-neutral-500">
+              <div
+                className={`px-2 pt-4 pb-1 text-xs font-semibold text-neutral-500 dark:text-neutral-500 ${
+                  compactRail ? 'hidden lg:block' : ''
+                }`}
+              >
                 {section.label}
               </div>
-              {section.items.map((item) => <NavItem key={item.to} {...item} />)}
+              {compactRail && <div className="my-2 border-t border-neutral-200 lg:hidden dark:border-white/[0.06]" aria-hidden />}
+              {section.items.map((item) => (
+                <NavItem key={item.to} {...item} compactRail={compactRail} />
+              ))}
             </div>
           ))}
         </div>
         <div className="mt-6 flex w-full flex-col gap-0.5 px-1.5 pb-4">
-          {BOTTOM_NAV.map((item) => <NavItem key={item.to} {...item} />)}
+          {BOTTOM_NAV.map((item) => (
+            <NavItem key={item.to} {...item} compactRail={compactRail} />
+          ))}
         </div>
       </nav>
-      <SidebarFooter onSignOut={onSignOut} />
+      <SidebarFooter onSignOut={onSignOut} compactRail={compactRail} />
     </div>
   );
 }
@@ -432,13 +554,38 @@ function Sidebar({ onClose, onSignOut }: { onClose?: () => void; onSignOut: () =
 export default function Layout() {
   const toasts = useKumoToastManager();
   const mainId = useId();
+  const mainRef = useRef<HTMLElement>(null);
+  const [isScrolled, setIsScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { pathname } = useLocation();
+
+  const scrollToTop = useCallback(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  }, []);
+
   const handleSignOut = () => {
     void signOut().catch(() => toasts.add({ title: 'Could not sign out. Please try again.', variant: 'error' }));
   };
-  useEffect(() => setMenuOpen(false), [pathname]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+    if (mainRef.current) {
+      mainRef.current.scrollTop = 0;
+      setIsScrolled(false);
+    }
+  }, [pathname]);
+
+  // Exact Nightwatch `AuthenticatedLayout-CCFtg7gs.js` scroll listener (`e.scrollTop > 24`)
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const onScroll = () => setIsScrolled(el.scrollTop > 24);
+    onScroll();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isPaletteShortcut(e)) return;
@@ -451,19 +598,21 @@ export default function Layout() {
   }, []);
 
   return (
+    <LocalPreferencesProvider>
     <ProjectProvider>
     <EnvironmentProvider>
     <RangeProvider>
+    <LayoutScrollContext.Provider value={{ isScrolled, scrollToTop }}>
       <a
         href={`#${mainId}`}
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-blue-600 focus:px-3.5 focus:py-2 focus:text-xs focus:font-medium focus:text-white focus:shadow-lg"
       >
         Skip to content
       </a>
-      <div className="flex h-full bg-neutral-50 dark:bg-neutral-900">
-        {/* Desktop: fixed 228px sidebar matching Nightwatch AuthenticatedLayout 1:1 */}
-        <aside className="hidden w-[228px] shrink-0 flex-col border-r border-neutral-200 bg-white lg:flex dark:border-white/[0.05] dark:bg-transparent">
-          <Sidebar onSignOut={handleSignOut} />
+      <div className="flex h-svh w-full overflow-hidden bg-neutral-50 dark:bg-neutral-900">
+        {/* Desktop & tablet: exact Nightwatch responsive sidebar (48px icon rail on md, 228px full on lg) */}
+        <aside className="hidden h-dvh shrink-0 flex-col border-r border-neutral-200 bg-white transition-[width] duration-200 md:flex md:w-[48px] lg:w-[228px] dark:border-white/[0.05] dark:bg-transparent">
+          <Sidebar onSignOut={handleSignOut} compactRail />
         </aside>
         <Dialog.Root open={menuOpen} onOpenChange={setMenuOpen} onOpenChangeComplete={(open) => {
           if (!open) document.querySelector<HTMLButtonElement>('[data-testid="menu-toggle"]')?.focus();
@@ -474,12 +623,12 @@ export default function Layout() {
             <Sidebar onClose={() => setMenuOpen(false)} onSignOut={handleSignOut} />
           </Dialog>
         </Dialog.Root>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-neutral-200 bg-white px-4 lg:hidden dark:border-white/[0.05] dark:bg-neutral-900">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-neutral-200 bg-white px-4 md:hidden dark:border-white/[0.05] dark:bg-neutral-900">
             <Button variant="ghost" shape="square" size="sm" icon={ListIcon} aria-label="Open menu" onClick={() => setMenuOpen(true)} data-testid="menu-toggle" />
             <ProjectLabel />
           </header>
-          <main id={mainId} className="relative min-w-0 flex-1 overflow-x-clip overflow-y-auto">
+          <main ref={mainRef} id={mainId} className="relative min-w-0 flex-1 overflow-x-clip overflow-y-auto">
             <div className="ew-container min-h-full pt-1 pb-12 md:pt-5">
               <PageBoundary key={pathname}>
                 <Suspense fallback={<Loading />}><Outlet /></Suspense>
@@ -489,8 +638,10 @@ export default function Layout() {
         </div>
       </div>
       <PaletteHost open={paletteOpen} setOpen={setPaletteOpen} />
+    </LayoutScrollContext.Provider>
     </RangeProvider>
     </EnvironmentProvider>
     </ProjectProvider>
+    </LocalPreferencesProvider>
   );
 }

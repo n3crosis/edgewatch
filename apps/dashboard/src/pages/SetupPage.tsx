@@ -386,22 +386,20 @@ NIGHTWATCH_BASE_URL=https://ingest.edgewatch.dev`;
   return (
     <div className="space-y-4 md:space-y-6">
       {/* 1:1 Nightwatch Application Settings header + underline tabs (`General-xIm8QZi-.js` + `Tabs-BrRBw4o6.js`) */}
-      <div className="space-y-2">
-        <PageHeader
-          hideTelemetryControls
-          documentTitle={`Settings · ${projectName}`}
-          title={projectName}
-        />
-        <SettingsTabs
-          value={activeTab}
-          onChange={setTab}
-          tabs={[
-            { value: 'general', label: 'General' },
-            { value: 'environments', label: 'Environments & Agent' },
-            { value: 'preferences', label: 'Preferences' },
-          ]}
-        />
-      </div>
+      <PageHeader
+        hideTelemetryControls
+        documentTitle={`Settings · ${projectName}`}
+        title={projectName}
+      />
+      <SettingsTabs
+        value={activeTab}
+        onChange={setTab}
+        tabs={[
+          { value: 'general', label: 'General' },
+          { value: 'environments', label: 'Environments & Agent' },
+          { value: 'preferences', label: 'Preferences' },
+        ]}
+      />
 
       {activeTab === 'general' && (
         <div className="space-y-6">

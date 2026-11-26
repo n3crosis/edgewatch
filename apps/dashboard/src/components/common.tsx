@@ -1,4 +1,5 @@
 import { useEnvironment } from '@/lib/environment';
+import { useLayoutScroll, useLocalPreferences } from '@/lib/preferences';
 import Link, { scopedPath } from './ScopedLink';
 import { useProject } from '@/lib/project';
 import { useRange } from '@/lib/range';
@@ -9,6 +10,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
+import { Popover } from '@cloudflare/kumo/components/popover';
 import { useKumoToastManager } from '@cloudflare/kumo/components/toast';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { cn } from '@cloudflare/kumo/utils';
@@ -32,7 +34,7 @@ import {
 } from '@phosphor-icons/react';
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ago } from '@/lib/format';
+import { ago, compact, ms } from '@/lib/format';
 import type { ExecutionSource } from '@/lib/types';
 import { chartFooterDate } from './charts';
 import TelemetryControls from './TelemetryControls';
@@ -75,6 +77,7 @@ export function PageHeader({
   hideTelemetryControls?: boolean;
 }) {
   const { projectId, projects } = useProject();
+  const { isScrolled } = useLayoutScroll();
   const pageTitle = documentTitle ?? (typeof title === 'string' ? title : undefined);
   const projectName = projects.find((p) => p.id === projectId)?.name ?? projectId;
 
@@ -83,35 +86,48 @@ export function PageHeader({
   }, [pageTitle, projectName]);
 
   return (
-    <div className="!mb-3 flex min-h-12 flex-col justify-center gap-3 py-2 md:min-h-14 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-      <div className="min-w-0">
-        {back && (
-          <nav aria-label="Breadcrumb" className="mb-1.5 flex items-center gap-1.5 text-sm text-neutral-600 dark:text-neutral-400">
-            <Link
-              to={back.to}
-              className="transition-colors hover:text-blue-600 dark:hover:text-emerald-500"
-            >
-              {back.label}
-            </Link>
-            <CaretRightIcon size={13} className="shrink-0 text-neutral-500 dark:text-neutral-500" aria-hidden />
-            {pageTitle && <span className="truncate font-mono text-xs text-neutral-700 dark:text-neutral-300">{pageTitle}</span>}
-          </nav>
+    <>
+      {back && (
+        <nav aria-label="Breadcrumb" className="!mb-1 flex items-center gap-1.5 text-sm text-neutral-600 dark:text-neutral-400">
+          <Link
+            to={back.to}
+            className="transition-colors hover:text-blue-600 dark:hover:text-emerald-500"
+          >
+            {back.label}
+          </Link>
+          <CaretRightIcon size={13} className="shrink-0 text-neutral-500 dark:text-neutral-500" aria-hidden />
+          {pageTitle && <span className="truncate font-mono text-xs text-neutral-700 dark:text-neutral-300">{pageTitle}</span>}
+        </nav>
+      )}
+      {/* 1:1 Nightwatch `AuthenticatedLayout-CCFtg7gs.js` sticky frosted header with shrinking title on scroll */}
+      <header
+        className={cn(
+          'sticky top-0 z-30 -mx-5 !mb-3 flex min-h-12 flex-col justify-center gap-3 border-b px-5 py-1.5 transition-colors duration-150 sm:flex-row sm:items-center sm:justify-between sm:gap-6 md:min-h-14 xl:-mx-10 xl:px-10',
+          isScrolled
+            ? 'border-neutral-200 bg-white/60 backdrop-blur-md dark:border-white/5 dark:bg-neutral-900/70'
+            : 'border-transparent bg-transparent',
         )}
-        <div className="flex flex-wrap items-center gap-2">
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {!hideTitle && (
-            <h1 className="break-words text-xl font-semibold text-neutral-900 md:text-2xl dark:text-white">
+            <h1
+              className={cn(
+                'break-words font-semibold text-neutral-900 transition-all duration-100 ease-in-out dark:text-white',
+                isScrolled ? 'text-lg md:text-xl' : 'text-xl md:text-2xl',
+              )}
+            >
               {title}
             </h1>
           )}
           {leftSlot}
         </div>
-        {subtitle && <div className="mt-1.5 max-w-3xl text-sm leading-relaxed text-kumo-subtle">{subtitle}</div>}
-      </div>
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
-        {actions}
-        {!hideTelemetryControls && <TelemetryControls />}
-      </div>
-    </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {actions}
+          {!hideTelemetryControls && <TelemetryControls />}
+        </div>
+      </header>
+      {subtitle && <div className="!-mt-1 !mb-2 max-w-3xl text-sm leading-relaxed text-kumo-subtle">{subtitle}</div>}
+    </>
   );
 }
 
@@ -637,13 +653,224 @@ export function RowActionLink({ to, label = 'View' }: { to: string; label?: stri
   );
 }
 
-/** 1:1 Capture UTC timestamp display (`26 Nov 2026, 05:32:07 UTC`). */
-export function UtcDate({ iso, className }: { iso: string; className?: string }) {
+function localTzShort(): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(new Date());
+    return parts.find((p) => p.type === 'timeZoneName')?.value ?? 'LOCAL';
+  } catch {
+    return 'LOCAL';
+  }
+}
+
+function localTzName(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local';
+  } catch {
+    return 'Local';
+  }
+}
+
+function formatDateTimeMs(iso: string, utc: boolean): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number, len = 2) => String(n).padStart(len, '0');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  if (utc) {
+    return `${pad(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`;
+  }
+  return `${pad(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+}
+
+function formatLocalDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${pad(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function MiniCopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
   return (
-    <time dateTime={iso} className={cn('whitespace-nowrap font-mono text-xs tabular-nums text-neutral-900 dark:text-neutral-200', className)}>
-      {chartFooterDate(iso)}
-      <span className="ml-1 text-neutral-400 dark:text-neutral-500">UTC</span>
-    </time>
+    <button
+      type="button"
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        void navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1000);
+        });
+      }}
+      className="inline-flex shrink-0 items-center justify-center rounded p-0.5 text-neutral-400 transition-colors hover:text-white"
+    >
+      {copied ? <CheckIcon size={12} weight="bold" className="text-emerald-400" aria-hidden /> : <CopyIcon size={12} aria-hidden />}
+    </button>
+  );
+}
+
+/** Shared hover-activated interactive dark popover (Nightwatch `Date-Dpo70E7n.js` & `Duration-CWrOZ_r-.js`). */
+function HoverPopover({
+  trigger,
+  content,
+  delayMs = 300,
+  side = 'top',
+  popupClassName,
+}: {
+  trigger: ReactNode;
+  content: ReactNode;
+  delayMs?: number;
+  side?: 'top' | 'bottom';
+  popupClassName?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimers = () => {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  };
+
+  useEffect(() => clearTimers, []);
+
+  const scheduleOpen = () => {
+    clearTimers();
+    openTimer.current = setTimeout(() => setOpen(true), delayMs);
+  };
+
+  const scheduleClose = () => {
+    clearTimers();
+    closeTimer.current = setTimeout(() => setOpen(false), 120);
+  };
+
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        render={
+          <button
+            type="button"
+            onMouseEnter={scheduleOpen}
+            onMouseLeave={scheduleClose}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((v) => !v);
+            }}
+            className="inline-flex items-center bg-transparent p-0 text-inherit"
+          >
+            {trigger}
+          </button>
+        }
+      />
+      <Popover.Portal>
+        <Popover.Positioner side={side} align="center" sideOffset={8}>
+          <Popover.Popup
+            onMouseEnter={clearTimers}
+            onMouseLeave={scheduleClose}
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              'z-50 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 p-0 text-white shadow-2xl shadow-black/50 dark:border-neutral-700/50 dark:bg-neutral-800',
+              popupClassName,
+            )}
+          >
+            {content}
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+function RichDatePopupContent({ iso, showDefaultToggle }: { iso: string; showDefaultToggle: boolean }) {
+  const { showUtc, setShowUtc } = useLocalPreferences();
+  const utcMs = formatDateTimeMs(iso, true);
+  const localMs = formatDateTimeMs(iso, false);
+  const tzShort = localTzShort();
+  const tzName = localTzName();
+  const relative = ago(iso);
+
+  return (
+    <div className="min-w-[260px] font-mono">
+      <div className="grid gap-3.5 p-3.5 pr-4">
+        <div className="grid gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs/none text-neutral-400">UTC</span>
+            <MiniCopyButton value={`${utcMs} UTC`} label="Copy UTC datetime" />
+          </div>
+          <span className="text-xs/none text-white">{utcMs}</span>
+        </div>
+        <div className="grid gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs/none text-neutral-400">{tzName}</span>
+            <MiniCopyButton value={`${localMs} ${tzShort}`} label="Copy local datetime" />
+          </div>
+          <span className="text-xs/none text-white">{localMs}</span>
+        </div>
+        <div className="grid gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs/none text-neutral-400">Time ago</span>
+            <MiniCopyButton value={relative} label="Copy time ago" />
+          </div>
+          <span className="text-xs/none text-white first-letter:uppercase">{relative}</span>
+        </div>
+      </div>
+
+      {showDefaultToggle && (
+        <div className="flex items-center justify-between gap-3 border-t border-white/10 bg-white/[0.03] px-3.5 py-2.5">
+          <span className="text-xs/none text-neutral-400">DEFAULT</span>
+          <div className="flex overflow-hidden rounded-md border border-white/20 bg-neutral-900">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowUtc(true);
+              }}
+              className={cn(
+                'flex w-13 items-center justify-center rounded-sm px-1 py-1 text-[11px] transition-colors',
+                showUtc ? 'bg-white text-neutral-900 font-medium' : 'bg-transparent text-neutral-400 hover:bg-neutral-800',
+              )}
+            >
+              UTC
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowUtc(false);
+              }}
+              className={cn(
+                'flex w-13 items-center justify-center rounded-sm px-1 py-1 text-[11px] transition-colors',
+                !showUtc ? 'bg-white text-neutral-900 font-medium' : 'bg-transparent text-neutral-400 hover:bg-neutral-800',
+              )}
+            >
+              LOCAL
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 1:1 Nightwatch `Date-Dpo70E7n.js` timestamp with interactive UTC/Local copy tooltip & global UTC/LOCAL preference toggle. */
+export function UtcDate({ iso, className }: { iso: string; className?: string }) {
+  const { showUtc } = useLocalPreferences();
+  const display = showUtc ? chartFooterDate(iso) : formatLocalDate(iso);
+  const tz = showUtc ? 'UTC' : localTzShort();
+  return (
+    <HoverPopover
+      delayMs={350}
+      trigger={
+        <time
+          dateTime={iso}
+          className={cn('cursor-default whitespace-nowrap font-mono text-xs tabular-nums text-neutral-900 dark:text-neutral-200', className)}
+        >
+          {display}
+          <span className="ml-1 text-neutral-400 dark:text-neutral-500">{tz}</span>
+        </time>
+      }
+      content={<RichDatePopupContent iso={iso} showDefaultToggle />}
+    />
   );
 }
 
@@ -664,14 +891,77 @@ export function DescriptionRow({ label, children, className }: { label: string; 
   );
 }
 
+/** 1:1 Nightwatch `Date-Dpo70E7n.js` relative timestamp with interactive UTC/Local/TimeAgo copy tooltip. */
 export function TimeAgo({ iso, className }: { iso: string; className?: string }) {
-  const formatted = new Date(iso).toLocaleString();
   return (
-    <Tooltip asChild content={formatted}>
-      <time dateTime={iso} className={cn('cursor-default whitespace-nowrap font-mono tabular-nums text-kumo-subtle', className)}>
-        {ago(iso)}
-      </time>
+    <HoverPopover
+      delayMs={350}
+      trigger={
+        <time dateTime={iso} className={cn('cursor-default whitespace-nowrap font-mono tabular-nums text-kumo-subtle', className)}>
+          {ago(iso)}
+        </time>
+      }
+      content={<RichDatePopupContent iso={iso} showDefaultToggle={false} />}
+    />
+  );
+}
+
+/** 1:1 Nightwatch `PrettyLargeNumberTooltip-CU8S_mRH.js`: shows compact number with exact value tooltip when >= 1,000. */
+export function CompactNumber({ value, className }: { value: number; className?: string }) {
+  if (value < 1000) {
+    return <span className={cn('tabular-nums', className)}>{compact(value)}</span>;
+  }
+  return (
+    <Tooltip content={value.toLocaleString()} asChild>
+      <span className={cn('cursor-default tabular-nums', className)}>{compact(value)}</span>
     </Tooltip>
+  );
+}
+
+/** 1:1 Nightwatch `Duration-CWrOZ_r-.js` hover card displaying Min / Avg / P95 / Max breakdown. */
+export function DurationHover({
+  value,
+  min,
+  avg,
+  p95,
+  max,
+  className,
+}: {
+  value: number | null;
+  min?: number | null;
+  avg?: number | null;
+  p95?: number | null;
+  max?: number | null;
+  className?: string;
+}) {
+  const rows = [
+    min !== undefined ? { label: 'Min', val: min } : null,
+    avg !== undefined ? { label: 'Avg', val: avg } : null,
+    p95 !== undefined ? { label: 'P95', val: p95 } : null,
+    max !== undefined ? { label: 'Max', val: max } : null,
+  ].filter((r): r is { label: string; val: number | null } => r !== null);
+
+  const label = value === null ? '—' : ms(value);
+  if (rows.length <= 1) {
+    return <span className={cn('font-mono tabular-nums', className)}>{label}</span>;
+  }
+
+  return (
+    <HoverPopover
+      delayMs={200}
+      popupClassName="min-w-[170px]"
+      trigger={<span className={cn('cursor-default font-mono tabular-nums', className)}>{label}</span>}
+      content={
+        <dl className="grid gap-1.5 p-2.5 font-mono text-xs">
+          {rows.map((row) => (
+            <div key={row.label} className="flex items-center justify-between gap-4">
+              <dt className="uppercase text-neutral-400">{row.label}</dt>
+              <dd className="tabular-nums text-white">{row.val === null ? 'N/A' : ms(row.val)}</dd>
+            </div>
+          ))}
+        </dl>
+      }
+    />
   );
 }
 

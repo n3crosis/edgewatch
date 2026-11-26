@@ -1,14 +1,14 @@
 import UserFilter from '@/components/UserFilter';
 import { useEffect, useId, useMemo, useState } from 'react';
 import LogInspector from '@/components/LogInspector';
-import { chartFooterDate, isoUtcTimestamp } from '@/components/charts';
+import { chartFooterDate } from '@/components/charts';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Popover } from '@cloudflare/kumo/components/popover';
 import { cn } from '@cloudflare/kumo/utils';
 import { CaretDownIcon, CheckIcon, SidebarSimpleIcon } from '@phosphor-icons/react';
 import { useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
-import { ErrorState, Loading, PageHeader, PaginationBar, Panel, SearchBox, SourceTag } from '@/components/common';
+import { ErrorState, Loading, PageHeader, PaginationBar, Panel, SearchBox, SourceTag, UtcDate } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
 import { useRange } from '@/lib/range';
 import { inlineLogContext } from '@/lib/ui-helpers';
@@ -121,8 +121,9 @@ function LevelFilter({
         }
       />
       <Popover.Portal>
-        <Popover.Positioner side="bottom" align="end" sideOffset={8}>
-          <Popover.Popup className="w-[260px] rounded-xl border border-neutral-200 bg-white p-2 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
+        <Popover.Positioner side="bottom" align="end" sideOffset={4}>
+          {/* 1:1 Nightwatch `.dropdown dark` surface */}
+          <Popover.Popup className="w-[260px] rounded-md border border-neutral-800 bg-neutral-900 p-2 text-white shadow-2xl shadow-black/50 dark:border-neutral-700/50 dark:bg-neutral-800">
             <ul className="space-y-0.5">
               {LEVELS.map((lvl) => {
                 const checked = draft.includes(lvl);
@@ -131,12 +132,12 @@ function LevelFilter({
                     <button
                       type="button"
                       onClick={() => toggle(lvl)}
-                      className="flex w-full items-center justify-between rounded-lg px-4 py-2 text-sm text-neutral-800 transition-colors hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700/60"
+                      className="flex w-full items-center justify-between rounded-md px-3.5 py-2 text-sm text-neutral-200 transition-colors hover:bg-neutral-800 hover:text-white dark:hover:bg-neutral-700/60"
                     >
                       <span className="capitalize">{lvl}</span>
                       <CheckIcon
                         size={14}
-                        className={cn('mr-1 shrink-0 transition-opacity', checked ? 'opacity-100 text-blue-600 dark:text-emerald-400' : 'opacity-0')}
+                        className={cn('mr-1 shrink-0 transition-opacity', checked ? 'opacity-100 text-emerald-400' : 'opacity-0')}
                         aria-hidden
                       />
                     </button>
@@ -144,7 +145,7 @@ function LevelFilter({
                 );
               })}
             </ul>
-            <div className="mt-4 grid grid-cols-2 gap-3 px-1 pb-1">
+            <div className="mt-3 grid grid-cols-2 gap-2.5 border-t border-neutral-800 px-1 pt-3 pb-1 dark:border-neutral-700/50">
               <Button
                 type="button"
                 variant="secondary"
@@ -296,10 +297,7 @@ export default function LogsPage() {
                           : 'border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-700/20 dark:bg-neutral-800/25 dark:hover:bg-neutral-800',
                     )}
                   >
-                    <time dateTime={row.timestamp} className="whitespace-nowrap tabular-nums text-neutral-900 dark:text-neutral-200">
-                      {isoUtcTimestamp(row.timestamp)}
-                      <span className="ml-1 text-neutral-400 dark:text-neutral-500">UTC</span>
-                    </time>
+                    <UtcDate iso={row.timestamp} />
                     <span className="flex min-w-0 items-center gap-2">
                       <SourceTag source={row.server ? 'REQUEST' : 'LOG'} />
                       <Link

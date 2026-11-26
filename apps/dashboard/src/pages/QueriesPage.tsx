@@ -8,6 +8,8 @@ import Link from '@/components/ScopedLink';
 import { BarChart, LineChart, MetricChartCard, durationRangeLabel, rangeFooterBounds } from '@/components/charts';
 import {
   CardTray,
+  CompactNumber,
+  DurationHover,
   Empty,
   ErrorState,
   FloatingTablePanel,
@@ -88,20 +90,31 @@ function ConnectionFilter({
         }
       />
       <Popover.Portal>
-        <Popover.Positioner side="bottom" align="end" sideOffset={8}>
-          <Popover.Popup className="w-[280px] overflow-hidden rounded-xl border border-neutral-200 bg-white p-0 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
-            <div className="flex items-center gap-2 border-b border-neutral-200 px-3 dark:border-neutral-700/50">
-              <MagnifyingGlassIcon size={14} className="shrink-0 text-neutral-400" aria-hidden />
+        <Popover.Positioner side="bottom" align="end" sideOffset={4}>
+          {/* 1:1 Nightwatch `.dropdown dark` surface */}
+          <Popover.Popup className="w-[280px] overflow-hidden rounded-md border border-neutral-800 bg-neutral-900 p-0 text-white shadow-2xl shadow-black/50 dark:border-neutral-700/50 dark:bg-neutral-800">
+            <div className="flex h-11 items-center border-b border-neutral-800 px-3 dark:border-neutral-700/50">
+              <MagnifyingGlassIcon size={15} className="mr-2 shrink-0 text-neutral-400 opacity-60" aria-hidden />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search connections..."
                 aria-label="Search connections"
-                className="h-10 w-full bg-transparent text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-white dark:placeholder:text-neutral-500"
+                className="flex w-full bg-transparent text-sm leading-tight text-white outline-none placeholder:font-light placeholder:text-neutral-500"
               />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                  className="ml-1 text-neutral-400 hover:text-white"
+                >
+                  <XIcon size={12} aria-hidden />
+                </button>
+              )}
             </div>
-            <div className="max-h-64 overflow-y-auto p-1.5">
+            <div className="max-h-64 overflow-y-auto p-1">
               {active && (
                 <button
                   type="button"
@@ -109,7 +122,7 @@ function ConnectionFilter({
                     onChange('');
                     setOpen(false);
                   }}
-                  className="mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-white/[0.06] dark:hover:text-white"
+                  className="mb-0.5 flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white dark:hover:bg-neutral-700/70"
                 >
                   <XIcon size={12} aria-hidden />
                   <span>Clear filter</span>
@@ -126,10 +139,10 @@ function ConnectionFilter({
                       onChange(conn);
                       setOpen(false);
                     }}
-                    className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm text-neutral-800 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-white/[0.06]"
+                    className="flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm text-neutral-200 transition-colors hover:bg-neutral-800 hover:text-white dark:hover:bg-neutral-700/70"
                   >
                     <span className="truncate">{conn}</span>
-                    <CheckIcon size={14} className={cn('shrink-0 text-blue-600 dark:text-emerald-500', value === conn ? 'opacity-100' : 'opacity-0')} />
+                    <CheckIcon size={14} className={cn('shrink-0 text-emerald-400', value === conn ? 'opacity-100' : 'opacity-0')} />
                   </button>
                 ))
               )}
@@ -301,10 +314,14 @@ export default function QueriesPage() {
                         </Tooltip>
                       </Table.Cell>
                       <Table.Cell className="text-right text-neutral-600 dark:text-neutral-400">{row.connection}</Table.Cell>
-                      <Table.Cell className="text-right font-medium">{compact(row.calls)}</Table.Cell>
+                      <Table.Cell className="text-right font-medium"><CompactNumber value={row.calls} /></Table.Cell>
                       <Table.Cell className="text-right">{ms(row.total_ms)}</Table.Cell>
-                      <Table.Cell className="text-right">{ms(row.avg_ms)}</Table.Cell>
-                      <Table.Cell className="text-right">{ms(row.p95_ms)}</Table.Cell>
+                      <Table.Cell className="text-right">
+                        <DurationHover value={row.avg_ms} avg={row.avg_ms} p95={row.p95_ms} max={row.max_ms} />
+                      </Table.Cell>
+                      <Table.Cell className="text-right">
+                        <DurationHover value={row.p95_ms} avg={row.avg_ms} p95={row.p95_ms} max={row.max_ms} />
+                      </Table.Cell>
                       <Table.Cell className="text-right"><RowActionLink to={target} label="Inspect query" /></Table.Cell>
                     </Table.Row>
                   );
