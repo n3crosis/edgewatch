@@ -69,7 +69,7 @@ Every row above is **done**. Known differences, none of which block the matrix:
 | e2e on Miniflare, all 13 record types, two or more projects | green locally: 100 passed (`bun run e2e`) |
 | Unmodified `laravel/nightwatch` + `nightwatch:agent` against EdgeWatch | green locally: 27 passed (`bun run fresh-laravel:nightwatch`) |
 | CI on GitHub Actions | **passed**: [first successful hosted run](https://github.com/n3crosis/edgewatch/actions/runs/45364773853); recheck the final release commit |
-| Deploy to a real Cloudflare account | **not done**: `wrangler.jsonc` IDs are still `REPLACE_WITH_*` placeholders |
+| Deploy to a real Cloudflare account | **not verified**: configs carry the test installation's IDs; setup/deploy scripts are tested only against a fake Cloudflare API |
 | Versions | 1.0.0 in `packages/laravel-edgewatch/composer.json` and `packages/browser/package.json`; not tagged or published |
 
 Remaining owner steps: [release-checklist.md](release-checklist.md).

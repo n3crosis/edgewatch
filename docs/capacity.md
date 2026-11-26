@@ -157,12 +157,12 @@ against the single-process server's SQLite store and an in-memory blob store, on
 time, peak RSS and how far RSS grew during the run. Median of 5 runs each, same VM, on `f0dc25f` (before) and
 `fe42001` (after):
 
-| Scenario | Wall time before → after | Peak RSS before → after | RSS growth before → after |
+| Scenario | Wall time before -> after | Peak RSS before -> after | RSS growth before -> after |
 | --- | --- | --- | --- |
-| `batch`: 10 batches of 50 messages, 55,000 records | 4,106 → 4,229 ms | 147 → 148 MB | 103 → 104 MB |
-| `merge`: a 4,001-record trace, then 10 more batches merged into it (5,001 records) | 1,670 → 1,689 ms | 113 → 107 MB | 69 → 63 MB |
-| `parked`: one parked payload of 40,000 records in 400 traces | 2,132 → 2,302 ms | 206 → 210 MB | 162 → 166 MB |
-| `bigtrace`: one 20,001-record trace sent through ingest's `enqueue` | 266 → 241 ms | 134 → 128 MB | 90 → 84 MB |
+| `batch`: 10 batches of 50 messages, 55,000 records | 4,106 -> 4,229 ms | 147 -> 148 MB | 103 -> 104 MB |
+| `merge`: a 4,001-record trace, then 10 more batches merged into it (5,001 records) | 1,670 -> 1,689 ms | 113 -> 107 MB | 69 -> 63 MB |
+| `parked`: one parked payload of 40,000 records in 400 traces | 2,132 -> 2,302 ms | 206 -> 210 MB | 162 -> 166 MB |
+| `bigtrace`: one 20,001-record trace sent through ingest's `enqueue` | 266 -> 241 ms | 134 -> 128 MB | 90 -> 84 MB |
 
 What changed, and what it bought:
 - **Big traces are parked in parts.** Ingest splits a trace over the inline limit into parked objects of at most 1 MB
@@ -173,10 +173,10 @@ What changed, and what it bought:
 - **Less held at once in `storeTrace`.** Each record is serialized once (its length feeds the size cap, a 53-bit hash
   the duplicate check, instead of a set of full JSON strings), statements go to the database 50 at a time instead of
   being built for the whole trace first, and per-message and per-trace record lists are released once used.
-- **Result:** about 6 MB (7–9%) less RSS growth for merges and big traces. No gain for many small traces (`batch`)
+- **Result:** about 6 MB (7-9%) less RSS growth for merges and big traces. No gain for many small traces (`batch`)
   or for one big parked payload of many traces (`parked`, 4 MB more, within noise), where the input itself dominates.
-  Wall time stayed within run-to-run noise (about ±10%). An earlier 5-run measurement, before rebasing onto 32 newer
-  commits, showed the same pattern (7–11 MB less for `merge` and `bigtrace`).
+  Wall time stayed within run-to-run noise (about +/-10%). An earlier 5-run measurement, before rebasing onto 32 newer
+  commits, showed the same pattern (7-11 MB less for `merge` and `bigtrace`).
 
 These are Bun numbers; Workers isolates (128 MB) were not measured, because Miniflare does not report per-isolate memory.
 

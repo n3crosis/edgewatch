@@ -11,12 +11,12 @@ EdgeWatch is **single-tenant and self-hosted**: one owner runs it for their own 
 More screenshots (overview, traces, exceptions, queries, pipeline): [docs/dashboard.md](docs/dashboard.md).
 
 ```
-Laravel app ──TCP (len:v1:hash:json)──▶ Nightwatch agent ──HTTPS gzip──┐
-Laravel app ──laravel-edgewatch (HTTPS gzip, 500ms timeout)────────────┤
-                                                                        ▼
-                         workers/ingest (Hono, Zod, KV keys) ──Queue──▶ workers/consumer ──▶ D1 (metadata) + R2 (raw traces)
-                                                                                                   ▲
-                                  apps/dashboard (React, Vite, Tailwind) ◀── workers/api (Hono) ───┘
+Laravel app --TCP (len:v1:hash:json)--> Nightwatch agent --HTTPS gzip--+
+Laravel app --laravel-edgewatch (HTTPS gzip, 500ms timeout)------------+
+                                                                        v
+                         workers/ingest (Hono, Zod, KV keys) --Queue--> workers/consumer --> D1 (metadata) + R2 (raw traces)
+                                                                                                   ^
+                                  apps/dashboard (React, Vite, Tailwind) <-- workers/api (Hono) ---+
 ```
 
 | Path | What |
@@ -27,15 +27,15 @@ Laravel app ──laravel-edgewatch (HTTPS gzip, 500ms timeout)─────�
 | `workers/ingest` | `POST /api/agent-auth` and `POST /api/ingest` (Nightwatch agent contract), `POST /api/browser`. Hashed API keys in KV, Zod validation, per-trace queue messages, 429 `stop`/`refresh_in` + `Retry-After` when rate-limited or blocked by a manual over-quota flag in KV (no usage metering). |
 | `workers/consumer` | Queue consumer: normalizes SQL, computes `sql_hash`, scrubs PII, writes D1 rows and raw traces to R2 at `traces/{project_id}/{date}/{trace_id}.json`. |
 | `workers/api` | API: overview, route-grouped Requests, persistent Issues, chronological Logs, traces (filters, search, range, cursor, waterfall, raw R2 trace, related job/request traces), exceptions, queries, jobs, commands, cache, outgoing requests, mail, notifications, scheduled tasks, logs, users. Full list in [CHANGELOG.md](CHANGELOG.md#endpoints). |
-| `workers/migrations` | D1 schema `0001`–`0020`: traces, exceptions, queries, users, job attempts, commands, cache events, outgoing requests, mail, notifications, scheduled tasks, logs, dead letters, pipeline stats, daily usage, web vitals, issue state/history, captured route templates and the optional SQL key table. |
+| `workers/migrations` | D1 schema `0001`-`0020`: traces, exceptions, queries, users, job attempts, commands, cache events, outgoing requests, mail, notifications, scheduled tasks, logs, dead letters, pipeline stats, daily usage, web vitals, issue state/history, captured route templates and the optional SQL key table. |
 | `apps/server` | One Bun process (or the root `Dockerfile`) running the ingest, consumer and API code plus the dashboard, on SQLite, Postgres, MySQL or libSQL and local files or S3, for running without Cloudflare ([self-hosting](docs/self-hosting.md#single-process--docker)). |
 | `apps/dashboard` | React + Vite + Tailwind v4 + [Kumo UI](https://kumo-ui.com) (`@cloudflare/kumo`, design system of record). Seed data unless `VITE_API_URL` is set (header badge shows the source); search, filters, 1h/6h/24h, 15 s live polling. |
 | `examples/laravel-sandbox` | Laravel 12 app wired to the local package via a Composer path repository. |
 | `scripts/` | `e2e.sh` + `e2e-records.mjs` (live local pipeline test), `fresh-laravel.sh` (fresh Laravel 12 app, EdgeWatch client or official agent), `setup-cloudflare.ts` (+ tests), `d1-migrate.sh`, `deploy.sh`. |
 | `fixtures/sql-normalization.json` | Shared SQL normalization cases, run by both Pest and Vitest. |
 
-Docs: [changelog](CHANGELOG.md) · [release checklist](docs/release-checklist.md) · [Nightwatch parity](docs/nightwatch-parity.md) · [architecture](docs/architecture.md) · [deployment](docs/deployment.md) · [self-hosting / local](docs/self-hosting.md) ·
-[dashboard screenshots](docs/dashboard.md) · [migrating from Nightwatch](docs/nightwatch-migration.md) · [Nightwatch wire format](docs/nightwatch-compat.md)
+Docs: [changelog](CHANGELOG.md) | [release checklist](docs/release-checklist.md) | [Nightwatch parity](docs/nightwatch-parity.md) | [architecture](docs/architecture.md) | [deployment](docs/deployment.md) | [self-hosting / local](docs/self-hosting.md) |
+[dashboard screenshots](docs/dashboard.md) | [migrating from Nightwatch](docs/nightwatch-migration.md) | [Nightwatch wire format](docs/nightwatch-compat.md)
 
 ## Development
 
@@ -71,7 +71,8 @@ Details: [architecture](docs/architecture.md#projects-single-tenant).
 
 ## Deploying
 
-Not deployed anywhere yet; resource IDs in `workers/*/wrangler.jsonc` are placeholders until you run the setup script.
+The checked-in resource IDs in `workers/*/wrangler.jsonc` belong to the project's test installation. Point them at your own
+account with the setup script (placeholder rules: [deployment.md](docs/deployment.md#replace_with_-placeholders)).
 
 ```bash
 export CLOUDFLARE_API_TOKEN=...   # + CLOUDFLARE_ACCOUNT_ID if the token sees several accounts

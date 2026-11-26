@@ -1,6 +1,6 @@
 # Migrating from Laravel Nightwatch to EdgeWatch
 
-EdgeWatch implements the Nightwatch **agent → cloud** contract of `laravel/nightwatch` v1.30.6
+EdgeWatch implements the Nightwatch **agent -> cloud** contract of `laravel/nightwatch` v1.30.6
 (details and sources: [nightwatch-compat.md](nightwatch-compat.md)). Two ways to switch:
 
 ## Option A: keep the official package and agent (no code changes)

@@ -20,9 +20,9 @@ php artisan demo:generate --days=3
 
 Options:
 
-- `--days=3` — number of days of historical traffic and logs to generate (default: `3`)
-- `--project=acme-storefront` — project slug in EdgeWatch
-- `--endpoint=...` — ingest endpoint URL (`POST /api/ingest`)
-- `--token=...` — ingest API key
-- `--write-log` — also append generated log entries to `storage/logs/laravel.log`
-- `--dry-run` — generate locally and print counts without sending HTTP requests
+- `--days=3` - number of days of historical traffic and logs to generate (default: `3`)
+- `--project=acme-storefront` - project slug in EdgeWatch
+- `--endpoint=...` - ingest endpoint URL (`POST /api/ingest`)
+- `--token=...` - ingest API key
+- `--write-log` - also append generated log entries to `storage/logs/laravel.log`
+- `--dry-run` - generate locally and print counts without sending HTTP requests

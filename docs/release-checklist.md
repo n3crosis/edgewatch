@@ -25,7 +25,7 @@ Verification snapshot (2026-11-24): implementation commit `6e02443` passed
 [hosted core CI and all database jobs](https://github.com/n3crosis/edgewatch/actions/runs/45390925087).
 Local fresh-install runs using the updated harness passed 25 checks for EdgeWatch and 27 for the official Nightwatch
 client. These are local Workers/Miniflare checks, not evidence of a live Cloudflare deployment.
-Wrangler authentication was rechecked and is expired; resource placeholders remain. Gates 2–4 are still unverified.
+Wrangler authentication was rechecked and is expired; resource placeholders remain. Gates 2-4 are still unverified.
 
 ## 2. Create the Cloudflare resources
 
@@ -63,7 +63,7 @@ VITE_API_URL=https://edgewatch-api.<subdomain>.workers.dev scripts/deploy.sh das
 - [ ] The consumer's hourly retention cron and 5-minute pipeline cron run without errors (Workers Logs), and the Pipeline page shows no dead letters.
 - [ ] Optional: `ALERT_WEBHOOK_URL` is set on `edgewatch-consumer` and a test alert arrives.
 
-## 5. Tag and publish (only after 1–4 pass)
+## 5. Tag and publish (only after 1-4 pass)
 
 - [x] Include MIT license files at the root and in both client packages, and npm license/repository metadata.
 - [ ] Change `## [1.0.0] - Unreleased` in `CHANGELOG.md` to the release date and remove the "not yet verified" line.

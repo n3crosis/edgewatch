@@ -1,21 +1,21 @@
 # EdgeWatch architecture
 
 EdgeWatch is a Nightwatch-compatible observability backend on Cloudflare Workers. This page describes what is implemented
-on `feat/mvp-edge-pipeline`; see "Not implemented" at the end.
+on `main`; see "Not implemented" at the end.
 
 ```
-Laravel app ──(a) laravel/nightwatch ──TCP──▶ nightwatch:agent ──HTTPS (NIGHTWATCH_BASE_URL)──┐
-            └─(b) edgewatch/laravel-edgewatch ──HTTPS gzip, or TCP to the agent ─────────────┤
-Browser ─────(c) @edgewatch/browser ── sendBeacon ──▶ POST /api/browser (EdgeWatch extension) ─┤
-                                                                                              ▼
-                                         workers/ingest (Hono)  ── KV API_KEYS (hashed keys, quota blocks)
-                                           │  Queue edgewatch-ingest (one message per trace; >100 KB parked in R2 incoming/, in parts of at most 1 MB)
-                                           ▼
-                                         workers/consumer ── D1 (projects, traces, exceptions, queries)
-                                           │                 R2 traces/{project_id}/{date}/{trace_id}.json
-                                           │  DLQ edgewatch-ingest-dlq after 20 retries
-                                           ▼
-apps/dashboard (React, Kumo UI) ──▶ workers/api (Hono, read keys) ── D1 + R2
+Laravel app --(a) laravel/nightwatch --TCP--> nightwatch:agent --HTTPS (NIGHTWATCH_BASE_URL)--+
+            +-(b) edgewatch/laravel-edgewatch --HTTPS gzip, or TCP to the agent -------------+
+Browser -----(c) @edgewatch/browser -- sendBeacon --> POST /api/browser (EdgeWatch extension) -+
+                                                                                              v
+                                         workers/ingest (Hono)  -- KV API_KEYS (hashed keys, quota blocks)
+                                           |  Queue edgewatch-ingest (one message per trace; >100 KB parked in R2 incoming/, in parts of at most 1 MB)
+                                           v
+                                         workers/consumer -- D1 (projects, traces, exceptions, queries)
+                                           |                 R2 traces/{project_id}/{date}/{trace_id}.json
+                                           |  DLQ edgewatch-ingest-dlq after 20 retries
+                                           v
+apps/dashboard (React, Kumo UI) --> workers/api (Hono, read keys) -- D1 + R2
 ```
 
 ## Components
@@ -26,7 +26,7 @@ apps/dashboard (React, Kumo UI) ──▶ workers/api (Hono, read keys) ── D
 | `workers/ingest` | `POST /api/agent-auth` and `POST /api/ingest` (the official agent's contract), `POST /api/browser`, `GET /health`. Validates records, groups by `trace_id`, enqueues. Returns `429 {stop, refresh_in}` + `Retry-After` for over-quota/rate-limited projects. |
 | `workers/consumer` | Queue consumer. Normalizes SQL (literals stripped, `sql_hash`), scrubs PII from exception/log messages, merges records per trace, writes raw JSON to R2 and summary rows to D1. Retries are idempotent: exact duplicate records are skipped in R2 and a trace's child rows are rebuilt from the merged records. D1 writes go in batches of 50 statements; a stored trace keeps at most 5000 records / 8 MB (root records always kept, the rest counted in `dropped_records`). |
 | `workers/api` | Read API for the dashboard: `/v1/projects/:id/{overview,traces,traces/:traceId,traces/:traceId/raw,exceptions,exceptions/:group,queries,queries/:sqlHash}` plus `jobs`, `commands`, `cache`, `outgoing-requests`, `mail`, `notifications`, `scheduled-tasks`, `logs`, `users` (each with `/:key`). Optional project filter (`/v1/projects/:id/...` or `/v1/...?project_id=`), read-scope keys, CORS. Waterfall spans derived from raw R2 records. |
-| `workers/migrations` | D1 schema (`0001_init.sql` … `0020_issue_revisions.sql`); representative API reads and consumer write/retention queries are checked for index use by `scripts/d1-indexes.test.ts`. |
+| `workers/migrations` | D1 schema (`0001_init.sql` ... `0020_issue_revisions.sql`); representative API reads and consumer write/retention queries are checked for index use by `scripts/d1-indexes.test.ts`. |
 | `packages/laravel-edgewatch` | Composer client that emits all 13 Nightwatch-format record types: requests, queries, exceptions, commands, queued jobs / job attempts, scheduled tasks, cache events, outgoing HTTP, mail, notifications, logs, users. Transports: TCP to a Nightwatch agent, or direct HTTPS gzip to ingest; buffered, 0.5 s connect/send timeouts, never throws into the app; honors 429/`stop`. |
 | `packages/browser` | `@edgewatch/browser`, dependency-free browser error reporter. |
 | `apps/dashboard` | React + Vite + Tailwind v4 + Kumo UI (`@cloudflare/kumo`, the design system of record; Base UI primitives, Phosphor icons). Seed data by default, `workers/api` when `VITE_API_URL` is set. Filters, search, 1h/6h/24h range, 15 s live polling, data-source badge. |
@@ -88,8 +88,9 @@ so the Worker code is shared unchanged; see [self-hosting.md](self-hosting.md#si
 
 ## Auth model
 
-- EdgeWatch is single-tenant: one owner, no accounts, orgs, tenants or roles. Keys only prove "this is the owner's app/dashboard".
-- API keys are random strings; only `sha256(key)` is stored in KV as `apikey:<hex>` → `{project_id, name, scopes, created_at?, expires_at?, disabled?, allowed_origins?}`.
+- EdgeWatch is single-tenant: one owner plus invited dashboard accounts (owner, admin, viewer roles), no orgs or tenants.
+  Dashboard users sign in with email and password (HttpOnly session cookie); API keys only prove "this is the owner's app" or integration.
+- API keys are random strings; only `sha256(key)` is stored in KV as `apikey:<hex>` -> `{project_id, name, scopes, created_at?, expires_at?, disabled?, allowed_origins?}`.
   A key authenticates only if it is not disabled (revoked) and `expires_at` has not passed; an agent token never outlives its key.
   `scripts/keys.ts` creates, lists, rotates and revokes keys and appends each change to `audit:<ms>:<random>` in the same namespace.
   `project_id` is the key's default project for untagged data; it does not limit what the key can write or read.

@@ -7,14 +7,14 @@ header shows the "Seed data" badge.
 
 ## Keyboard
 
-Press **⌘K** (macOS) or **Ctrl+K** anywhere, or click **Search** in the header, to open the command palette:
+Press **Cmd+K** (macOS) or **Ctrl+K** anywhere, or click **Search** in the header, to open the command palette:
 
 - Type to jump to a page. Matching is fuzzy and ranked: exact, then prefix, word start, substring, then letters in
   order (`ppl` finds Pipeline). Pages also match keywords such as `errors` (Exceptions) or `sql` (Queries).
 - Two or more characters also search traces in the current project, environment and range (the same search as the
   Traces page); up to 6 results are listed.
 - Paste a trace ID (UUID or 16+ hex characters) to open it directly.
-- ↑/↓, Home/End move, Enter opens, Esc closes. Focus moves to the search field on open and returns to where it was
+- Up/Down, Home/End move, Enter opens, Esc closes. Focus moves to the search field on open and returns to where it was
   on close; Tab stays inside the palette.
 
 The palette keeps the current project, range and environment when it navigates.

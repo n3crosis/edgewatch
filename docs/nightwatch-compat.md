@@ -16,24 +16,24 @@ Everything below was read directly from source; nothing here is inferred from ma
 ## Architecture: two hops, two protocols
 
 ```
-Laravel app ──(TCP, framed text, 127.0.0.1:2407)──▶ Nightwatch agent ──(HTTPS, gzip JSON)──▶ Nightwatch cloud
+Laravel app --(TCP, framed text, 127.0.0.1:2407)--> Nightwatch agent --(HTTPS, gzip JSON)--> Nightwatch cloud
  laravel/nightwatch package                          `php artisan nightwatch:agent`             base: NIGHTWATCH_BASE_URL
                                                      or laravelphp/nightwatch-agent:v1          (default https://nightwatch.laravel.com)
 ```
 
 * The Laravel package **never talks HTTP to the cloud**. It writes to a local agent over raw TCP
-  (`config/nightwatch.php` → `ingest.uri`, default `127.0.0.1:2407`; `src/Ingest.php` prefixes `tcp://`).
+  (`config/nightwatch.php` -> `ingest.uri`, default `127.0.0.1:2407`; `src/Ingest.php` prefixes `tcp://`).
 * The agent is the only component that talks HTTPS. Its cloud base URL comes from the
   `NIGHTWATCH_BASE_URL` environment variable (`agent.phar:src/agent.php`:
   `$baseUrl ??= $_SERVER['NIGHTWATCH_BASE_URL'] ?? 'https://nightwatch.laravel.com'`).
   **This variable is not listed in the public environment-variables docs**; it exists only in the agent source.
 
 **Consequence for EdgeWatch:** to accept data from an unmodified Nightwatch install, EdgeWatch must
-implement the *agent → cloud* contract (hop 2). Users run the official agent with
+implement the *agent -> cloud* contract (hop 2). Users run the official agent with
 `NIGHTWATCH_BASE_URL=https://<edgewatch-ingest-host>` and keep their app config unchanged.
 The record payloads (hop 1) are forwarded verbatim by the agent, so the record shapes below are also what EdgeWatch ingests.
 
-## Hop 1: app → agent (TCP)
+## Hop 1: app -> agent (TCP)
 
 Source: `src/Payload.php`, `src/Ingest.php`, `agent.phar:src/Server.php`, `agent.phar:src/Payload.php`.
 
@@ -42,10 +42,10 @@ Source: `src/Payload.php`, `src/Ingest.php`, `agent.phar:src/Server.php`, `agent
   * `tokenHash` = `substr(hash('xxh128', NIGHTWATCH_TOKEN), 0, 7)` (computed identically in app and agent).
   * `body` = JSON array of records (`json_encode` with `JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE|JSON_PRESERVE_ZERO_FRACTION|JSON_INVALID_UTF8_SUBSTITUTE`), or the text `PING`.
 * One connection per batch. Agent replies `2:OK` once the frame is complete, then closes. The client reads 4 bytes and throws on anything else.
-* Agent validation order (changelog #432): token hash first (`hash_equals`; mismatch → log "Incoming token hash mismatch!" and drop), then version (≠ `v1` → agent flushes and shuts down).
+* Agent validation order (changelog #432): token hash first (`hash_equals`; mismatch -> log "Incoming token hash mismatch!" and drop), then version (!= `v1` -> agent flushes and shuts down).
 * Client defaults: `ingest.timeout` = 0.5 s (read), `ingest.connection_timeout` = 0.5 s, `ingest.event_buffer` = 500 records (buffer is flushed when full and at the end of each request/command/job). All transmission failures are swallowed and reported as unrecoverable (changelog #443).
 
-## Hop 2: agent → cloud (HTTPS) — what EdgeWatch implements
+## Hop 2: agent -> cloud (HTTPS) - what EdgeWatch implements
 
 ### 2a. Authentication: `POST {NIGHTWATCH_BASE_URL}/api/agent-auth`
 
@@ -72,7 +72,7 @@ Expected 2xx JSON response (all four keys required, types checked; otherwise "In
 * `expires_in`, `refresh_in` must be **integers** (seconds). The agent re-authenticates after `refresh_in`, and also before ingesting if `now > expires_at` (changelog #428).
 * Error responses (non-2xx) may carry JSON `{ "message": string, "stop": bool, "refresh_in": number }`.
   `stop: true` makes the agent stop authenticating until `refresh_in`. Without `refresh_in` the agent backs off
-  (2.5, 5, 10, 15, 30, 60, 120, 240, then 300 s… before first success; 300 s then 3600 s after).
+  (2.5, 5, 10, 15, 30, 60, 120, 240, then 300 s... before first success; 300 s then 3600 s after).
 
 ### 2b. Ingest: `POST {ingest_url}`
 
@@ -115,7 +115,7 @@ Durations are integer **microseconds**. Text columns are truncated client-side t
 
 | `t` | `v` | Fields beyond the common ones (source file) |
 | --- | --- | --- |
-| `request` | 1 | `method, url, route_name, route_methods[], route_domain, route_path, route_action, ip, duration, status_code, request_size, response_size, bootstrap, before_middleware, action, render, after_middleware, sending, terminating, exceptions, logs, queries, lazy_loads, jobs_queued, mail, notifications, outgoing_requests, files_read, files_written, cache_events, hydrated_models, peak_memory_usage, exception_preview, context, headers (JSON string), payload (JSON string or "")` — no `execution_*` keys (`Sensors/RequestSensor.php`) |
+| `request` | 1 | `method, url, route_name, route_methods[], route_domain, route_path, route_action, ip, duration, status_code, request_size, response_size, bootstrap, before_middleware, action, render, after_middleware, sending, terminating, exceptions, logs, queries, lazy_loads, jobs_queued, mail, notifications, outgoing_requests, files_read, files_written, cache_events, hydrated_models, peak_memory_usage, exception_preview, context, headers (JSON string), payload (JSON string or "")` - no `execution_*` keys (`Sensors/RequestSensor.php`) |
 | `query` | 1 | `sql, file, line, duration, connection, connection_type ("read"|"write"|"")` (`Sensors/QuerySensor.php`) |
 | `exception` | **3** | `class, file, line, message, code (string), trace (JSON string of [{file, source, code}]), handled (bool), php_version, laravel_version` (`Sensors/ExceptionSensor.php`) |
 | `command` | 1 | `class, name, command, exit_code, duration, bootstrap, action, terminating` + counters (`Sensors/CommandSensor.php`) |
@@ -134,7 +134,7 @@ Grouping keys (`_group`), all `hash('xxh128', ...)`:
 * query: `"{connection},{sql}"`, where for mysql/mariadb/pgsql/sqlite/sqlsrv/singlestore `in (?, ?)` lists collapse to `in (...?)` and insert `values (?,?), (?,?)` to `values ...`
 * exception: `"{class},{code},{file},{line}"`
 
-Redaction defaults (client side): headers `Authorization, Cookie, Proxy-Authorization, X-XSRF-TOKEN` (docs) — the provider fallback also includes `X-CSRF-TOKEN`;
+Redaction defaults (client side): headers `Authorization, Cookie, Proxy-Authorization, X-XSRF-TOKEN` (docs) - the provider fallback also includes `X-CSRF-TOKEN`;
 values become `[N bytes redacted]` (auth scheme and cookie names kept). Payload fields `_token, password, password_confirmation` (provider fallback adds `current_password`). Request payloads are only captured on HTTP 500 and only when `NIGHTWATCH_CAPTURE_REQUEST_PAYLOAD=true`.
 
 ## Configuration keys (client)
@@ -147,7 +147,7 @@ Agent-only: `NIGHTWATCH_AGENT_LOG_LEVEL` (documented), `NIGHTWATCH_BASE_URL` (**
 
 | Nightwatch | EdgeWatch |
 | --- | --- |
-| `POST /api/agent-auth` | `workers/ingest` — same path, headers and response shape; `NIGHTWATCH_TOKEN` is looked up in KV (`apikey:<sha256(token)>`) |
+| `POST /api/agent-auth` | `workers/ingest` - same path, headers and response shape; `NIGHTWATCH_TOKEN` is looked up in KV (`apikey:<sha256(token)>`) |
 | `POST {ingest_url}` | `workers/ingest` `POST /api/ingest`; accepts gzip or plain JSON; validates `{records: [...]}` with Zod (known `t` types strictly, unknown types passed through) and enqueues to a Queue |
 | short-lived ingest token | HMAC-signed token minted by `/api/agent-auth` (project id + expiry) |
 | `laravel/nightwatch` package | `edgewatch/laravel-edgewatch` emits the same record shapes; transport `agent` speaks hop 1 to an official agent, transport `http` speaks hop 2b directly (no agent needed) |

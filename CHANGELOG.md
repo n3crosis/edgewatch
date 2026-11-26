@@ -9,7 +9,7 @@ All notable changes to EdgeWatch are recorded here. Versions follow [Semantic Ve
   hostname or a URL without a path as HTTP (adding `/api/ingest`) and turns HTTP off when no token is set. Queue
   telemetry records jobs that fail before they start, closes attempts left open by a stopping or restarted worker as
   `released`, and survives payloads that cannot be decoded.
-- Dashboard command palette (⌘K / Ctrl+K): fuzzy page navigation, trace search, open by trace ID, full keyboard
+- Dashboard command palette (Cmd+K / Ctrl+K): fuzzy page navigation, trace search, open by trace ID, full keyboard
   and focus handling. On phones the header keeps search, theme and sign-out on the first row.
 - Docs explain why the dashboard has no query EXPLAIN view (the wire format carries no bindings or plans).
 - `GET /healthz` on the ingest, consumer and API Workers and the Bun server: typed report (`ok`/`degraded`/`down`)
