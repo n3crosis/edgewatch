@@ -83,10 +83,6 @@ const NAV_SECTIONS = [
   },
 ];
 
-const BOTTOM_NAV = ['/setup', '/accounts']
-  .map((path) => NAV.find((item) => item.to === path))
-  .filter((item): item is (typeof NAV)[number] => Boolean(item));
-
 function PaletteHost({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
   const { range } = useRange();
   const { projectId } = useProject();
@@ -436,18 +432,32 @@ function ProjectLabel() {
 }
 
 /** 1:1 Nightwatch sidebar footer (`AuthenticatedLayout-CCFtg7gs.js`): avatar + name + `···` dark menu. */
-function SidebarFooter({ onSignOut, compactRail = false }: { onSignOut: () => void; compactRail?: boolean }) {
+function SidebarFooter({
+  onSignOut,
+  onNavigate,
+  compactRail = false,
+}: {
+  onSignOut: () => void;
+  onNavigate?: () => void;
+  compactRail?: boolean;
+}) {
   const user = useSessionUser();
   const { theme, toggle } = useTheme();
+  const { projectId } = useProject();
+  const { range } = useRange();
+  const { environment } = useEnvironment();
   const [menuOpen, setMenuOpen] = useState(false);
   const displayName = user?.name || user?.email || (USING_MOCK ? 'Demo' : 'Account');
   const initial = displayName.trim().charAt(0).toUpperCase();
+  const settingsHref = scopedPath('/setup', projectId, range, environment);
+  const accountsHref = scopedPath('/accounts', projectId, range, environment);
 
   return (
     <div className="sticky bottom-0 z-10 w-full shrink-0 border-t border-neutral-200 p-1.5 dark:border-white/[0.05]">
       <div className={`flex items-center gap-0.5 ${compactRail ? 'flex-col justify-center lg:flex-row' : 'flex-row'}`}>
         <Link
-          to="/accounts"
+          to={accountsHref}
+          onClick={onNavigate}
           className={`flex h-8 min-w-0 items-center gap-2 rounded-md p-2 transition-colors hover:bg-neutral-200/70 dark:hover:bg-white/10 ${
             compactRail ? 'justify-center lg:flex-1 lg:justify-start' : 'flex-1'
           }`}
@@ -492,6 +502,29 @@ function SidebarFooter({ onSignOut, compactRail = false }: { onSignOut: () => vo
                   )}
                   <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
                 </button>
+                <div className="my-1 border-t border-neutral-800 dark:border-neutral-700/60" aria-hidden />
+                <Link
+                  to={settingsHref}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onNavigate?.();
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-200 transition-colors hover:bg-neutral-800 hover:text-white dark:hover:bg-neutral-700/70"
+                >
+                  <SlidersHorizontalIcon size={15} className="shrink-0 text-neutral-400" aria-hidden />
+                  <span>Settings</span>
+                </Link>
+                <Link
+                  to={accountsHref}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onNavigate?.();
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-neutral-200 transition-colors hover:bg-neutral-800 hover:text-white dark:hover:bg-neutral-700/70"
+                >
+                  <KeyIcon size={15} className="shrink-0 text-neutral-400" aria-hidden />
+                  <span>Accounts</span>
+                </Link>
                 {!USING_MOCK && (
                   <button
                     type="button"
@@ -561,13 +594,8 @@ function Sidebar({
             </div>
           ))}
         </div>
-        <div className="mt-6 flex w-full flex-col gap-0.5 px-1.5 pb-4">
-          {BOTTOM_NAV.map((item) => (
-            <NavItem key={item.to} {...item} compactRail={compactRail} />
-          ))}
-        </div>
       </nav>
-      <SidebarFooter onSignOut={onSignOut} compactRail={compactRail} />
+      <SidebarFooter onSignOut={onSignOut} onNavigate={onClose} compactRail={compactRail} />
     </div>
   );
 }
