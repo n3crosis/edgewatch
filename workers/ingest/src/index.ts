@@ -241,6 +241,8 @@ async function readBody(request: Request, maxBytes: number): Promise<string> {
   const first = await source.read();
   const head = first.value ?? new Uint8Array();
   const gzipped = request.headers.get('content-encoding')?.toLowerCase() === 'gzip' || (head[0] === 0x1f && head[1] === 0x8b);
+  // highWaterMark 0: pull only on demand, so cancelling over the limit never leaves a read pending on the request body
+  // (workerd reports that read's rejection as unhandled).
   let stream: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
     start(controller) {
       if (head.byteLength) controller.enqueue(head);
@@ -252,7 +254,7 @@ async function readBody(request: Request, maxBytes: number): Promise<string> {
       else controller.enqueue(value);
     },
     cancel: (reason) => source.cancel(reason),
-  });
+  }, { highWaterMark: 0 });
   if (gzipped) {
     // Pump by hand so a truncated or corrupt gzip body surfaces as a read error below (-> 400); pipeThrough leaves the
     // rejected close() of the decompressor unhandled.
