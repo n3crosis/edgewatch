@@ -11,7 +11,7 @@ describe('normalizeSql', () => {
     expect(normalizeSql(sql)).toBe(normalized);
   });
 
-  it('hashes like the PHP client (sha256 prefix of the normalized SQL)', async () => {
+  it('hashes the normalized SQL (sha256 prefix)', async () => {
     // Same value as SqlNormalizerTest: substr(hash('sha256', 'select * from users where id = ?'), 0, 32)
     const { createHash } = await import('node:crypto');
     const expected = createHash('sha256').update('select * from users where id = ?').digest('hex').slice(0, 32);
@@ -67,7 +67,7 @@ describe('validateRecords', () => {
 });
 
 describe('scrubPii', () => {
-  it('masks emails, card numbers and bearer tokens like the PHP client', async () => {
+  it('masks emails, card numbers and bearer tokens', async () => {
     const { scrubPii } = await import('./index');
     expect(scrubPii('User jane.doe@example.com paid with 4242 4242 4242 4242 using Bearer sk_live_1234567890'))
       .toBe('User [email] paid with [card] using Bearer [redacted]');

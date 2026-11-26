@@ -14,7 +14,6 @@ COPY packages/shared/package.json packages/shared/
 COPY workers/api/package.json workers/api/
 COPY workers/consumer/package.json workers/consumer/
 COPY workers/ingest/package.json workers/ingest/
-COPY examples/laravel-sandbox/package.json examples/laravel-sandbox/
 
 FROM deps AS dashboard
 RUN bun install --frozen-lockfile

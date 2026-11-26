@@ -16,8 +16,8 @@ export type ErrorCode =
   | 'internal_error';
 
 /**
- * Every EdgeWatch error response. `message` is kept at the top level as well because the Nightwatch agent and
- * laravel-edgewatch log `message`; new clients should read `error.code`.
+ * Every EdgeWatch error response. `message` is kept at the top level as well because the Nightwatch agent
+ * logs `message`; new clients should read `error.code`.
  */
 export interface ErrorBody {
   error: { code: ErrorCode; message: string; details?: unknown };

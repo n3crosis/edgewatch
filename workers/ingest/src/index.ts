@@ -81,7 +81,7 @@ function bearer(c: Context): string | null {
 
 /**
  * Project tag. EdgeWatch is single-tenant: any valid ingest key may write to any project. Clients tag data with
- * X-EdgeWatch-Project (laravel-edgewatch sends EDGEWATCH_PROJECT_ID) or ?project=; untagged data goes to the key's
+ * X-EdgeWatch-Project or ?project=; untagged data goes to the key's
  * default project, which is what the official Nightwatch agent relies on.
  */
 const PROJECT_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -103,7 +103,7 @@ app.get('/health', (c) => c.json({ ok: true }));
 
 /**
  * Nightwatch "stop" instruction: the agent pauses (and drops buffered data) until refresh_in seconds pass,
- * on both agent-auth and ingest responses. laravel-edgewatch honors the same body and Retry-After header.
+ * on both agent-auth and ingest responses.
  */
 function stop(c: Context, code: 'over_quota' | 'rate_limited', message: string, refreshIn: number) {
   const seconds = Math.max(1, Math.ceil(refreshIn));
@@ -163,8 +163,8 @@ app.post('/api/agent-auth', async (c) => {
 });
 
 /**
- * Batch ingest. Accepts the agent's short-lived token, or a raw ingest API key (edgewatch/laravel-edgewatch's
- * agentless HTTP transport). Body: `{"records": [...]}`, gzip or plain JSON.
+ * Batch ingest. Accepts the agent's short-lived token, or a raw ingest API key (direct HTTP senders such as the
+ * e2e harness). Body: `{"records": [...]}`, gzip or plain JSON.
  */
 app.post('/api/ingest', async (c) => {
   const token = bearer(c);

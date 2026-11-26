@@ -1,8 +1,7 @@
 import { shortHash } from './crypto';
 
 /**
- * Port of packages/laravel-edgewatch/src/Sql/SqlNormalizer.php. Both implementations are tested
- * against fixtures/sql-normalization.json and must produce identical output.
+ * SQL normalization (literals stripped, stable hash), tested against fixtures/sql-normalization.json.
  */
 const PATTERNS: [RegExp, string][] = [
   [/'(?:[^'\\]|\\[\s\S]|'')*'/g, '?'],

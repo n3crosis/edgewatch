@@ -86,7 +86,7 @@ describe('POST /api/ingest', () => {
     expect(sent[0]).toMatchObject({ project_id: 'proj_1', server: 'web-1' });
   });
 
-  it('accepts plain JSON authenticated with a raw ingest key (laravel-edgewatch HTTP transport)', async () => {
+  it('accepts plain JSON authenticated with a raw ingest key (direct HTTP sender)', async () => {
     const res = await call('/api/ingest', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${INGEST_KEY}` }, body: JSON.stringify({ records: [query(TRACE_A)] }) });
 
     expect(res.status).toBe(200);

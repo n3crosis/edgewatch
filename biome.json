@@ -9,8 +9,7 @@
       "scripts/**/*.ts",
       "!**/node_modules",
       "!**/dist",
-      "!**/vendor",
-      "!examples/laravel-sandbox/public"
+      "!**/vendor"
     ]
   },
   "formatter": {

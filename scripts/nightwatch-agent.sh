@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# Fresh Laravel 12 install check, entirely local (wrangler dev / Miniflare, no Cloudflare account needed):
-#   composer create-project laravel/laravel:^12.0 in a temp dir outside the repo
-#   + packages/laravel-edgewatch as a symlinked path repository
-#   -> php artisan migrate, the package's Pest suite, the app's own tests
-#   -> one HTTP request, one artisan command, one queued job and one cache call, sent to workers/ingest
+# Official Nightwatch agent check, entirely local (wrangler dev / Miniflare, no Cloudflare account needed):
+#   composer create-project laravel/laravel:^12.0 in a temp dir outside the repo + composer require laravel/nightwatch
+#   -> the unmodified `php artisan nightwatch:agent` with NIGHTWATCH_BASE_URL pointed at the local ingest Worker
+#   -> requests, commands, a queued job, cache, mail, notification, log, exception, outgoing HTTP and a scheduled task
 #   -> the records read back from workers/api (project fresh-l12).
+# The app is a throwaway fixture for the official package; nothing from this repo is installed into it.
 #
-# CLIENT=nightwatch swaps the EdgeWatch package for the official laravel/nightwatch package and runs its unmodified
-# `php artisan nightwatch:agent` with NIGHTWATCH_BASE_URL pointed at the local ingest Worker (the drop-in path).
-#
-# Usage: scripts/fresh-laravel.sh   (from the repo root; needs bun install, composer install in the package, network for create-project)
-#   CLIENT=edgewatch|nightwatch  client to install (default edgewatch)
+# Usage: scripts/nightwatch-agent.sh   (from the repo root; needs bun install, PHP 8.2+, Composer, network for create-project)
 #   RUNTIME=workers|server      wrangler dev Workers (default), or the single Bun process in apps/server (SQLite + files)
 #   FRESH_KEEP=1                leave the app dir and wrangler running afterwards
 #   INGEST_PORT / API_PORT / APP_PORT / AGENT_PORT override the default 8797 / 8798 / 8020 / 2417
@@ -23,12 +19,9 @@ INGEST_PORT="${INGEST_PORT:-8797}"
 API_PORT="${API_PORT:-8798}"
 APP_PORT="${APP_PORT:-8020}"
 AGENT_PORT="${AGENT_PORT:-2417}"
-CLIENT="${CLIENT:-edgewatch}"
-case "$CLIENT" in edgewatch|nightwatch) ;; *) echo "CLIENT must be edgewatch or nightwatch"; exit 1 ;; esac
 RUNTIME="${RUNTIME:-workers}"
 case "$RUNTIME" in workers|server) ;; *) echo "RUNTIME must be workers or server"; exit 1 ;; esac
 PROJECT="fresh-l12"
-PACKAGE="$ROOT/packages/laravel-edgewatch"
 WRANGLER="$ROOT/workers/ingest/node_modules/.bin/wrangler"
 [ -x "$WRANGLER" ] || WRANGLER="bunx wrangler"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/edgewatch-fresh-XXXXXX")"
@@ -95,24 +88,15 @@ step "composer create-project laravel/laravel:^12.0 in $WORK"
 (cd "$WORK" && composer create-project laravel/laravel:^12.0 app --no-interaction --quiet)
 cd "$APP"
 echo "  $(php artisan --version)"
-if [ "$CLIENT" = nightwatch ]; then
-  PKG=laravel/nightwatch
-  composer require laravel/nightwatch --no-interaction --quiet
-else
-  PKG=edgewatch/laravel-edgewatch
-  composer config repositories.edgewatch "{\"type\":\"path\",\"url\":\"$PACKAGE\",\"options\":{\"symlink\":true}}"
-  composer require "edgewatch/laravel-edgewatch:@dev" --no-interaction --quiet
-fi
+PKG=laravel/nightwatch
+composer require laravel/nightwatch --no-interaction --quiet
 echo "  client: $PKG $(composer show "$PKG" 2>/dev/null | awk '/^versions/{print $NF}')"
 php artisan package:discover | grep -q "$PKG" && ok "$PKG auto-discovered" || bad "$PKG auto-discovered"
 
-step "php artisan migrate, package Pest suite, app tests"
-EDGEWATCH_ENABLED=false php artisan migrate --force --no-interaction
+step "php artisan migrate, app tests"
+php artisan migrate --force --no-interaction
 php artisan migrate:status | grep -c ' Ran' | xargs -I{} echo "  {} migrations ran"
-if [ "$CLIENT" = edgewatch ]; then
-  out=$(cd "$APP/vendor/edgewatch/laravel-edgewatch" && vendor/bin/pest 2>&1) && ok "package Pest: $(printf '%s' "$out" | grep -oE 'Tests: .*' | tail -1)" || { printf '%s\n' "$out" | tail -20; bad "package Pest"; }
-fi
-out=$(EDGEWATCH_ENABLED=false php artisan test 2>&1) && ok "app tests: $(printf '%s' "$out" | grep -oE 'Tests: .*' | tail -1)" || { printf '%s\n' "$out" | tail -20; bad "app tests"; }
+out=$(php artisan test 2>&1) && ok "app tests: $(printf '%s' "$out" | grep -oE 'Tests: .*' | tail -1)" || { printf '%s\n' "$out" | tail -20; bad "app tests"; }
 
 step "Adding routes, commands, a queued job, a mailable, a notification and a scheduled task"
 php artisan make:job FreshJob -q
@@ -163,24 +147,18 @@ grep -q 'User::count' app/Jobs/FreshJob.php && ok "FreshJob::handle() queries us
 grep -q htmlString app/Mail/FreshMail.php && ok "FreshMail renders an inline body" || bad "FreshMail edit"
 
 export QUEUE_CONNECTION=database CACHE_STORE=database MAIL_MAILER=array LOG_CHANNEL=stack FRESH_OUTGOING_URL="http://127.0.0.1:$INGEST_PORT/health"
-if [ "$CLIENT" = nightwatch ]; then
-  # The official agent has no project header; records land in the ingest key's default project ($PROJECT).
-  export LOG_STACK=single,nightwatch NIGHTWATCH_ENABLED=true NIGHTWATCH_TOKEN="$INGEST_KEY" NIGHTWATCH_INGEST_URI="127.0.0.1:$AGENT_PORT" NIGHTWATCH_SERVER=fresh-l12
-  step "Starting the official agent: NIGHTWATCH_BASE_URL=http://127.0.0.1:$INGEST_PORT php artisan nightwatch:agent"
-  NIGHTWATCH_BASE_URL="http://127.0.0.1:$INGEST_PORT" php artisan nightwatch:agent >"$LOGS/agent.log" 2>&1 & pids+=($!)
-  for _ in $(seq 1 30); do (exec 3<>"/dev/tcp/127.0.0.1/$AGENT_PORT") 2>/dev/null && break; sleep 1; done
-  (exec 3<>"/dev/tcp/127.0.0.1/$AGENT_PORT") 2>/dev/null && ok "agent listening on 127.0.0.1:$AGENT_PORT" || { cat "$LOGS/agent.log"; bad "agent did not start"; exit 1; }
-  for _ in $(seq 1 15); do grep -q 'POST /api/agent-auth 200' "$LOGS/ingest-consumer.log" && break; sleep 1; done
-  grep -q 'POST /api/agent-auth 200' "$LOGS/ingest-consumer.log" && ok "agent authenticated via /api/agent-auth" || bad "agent authentication (see $LOGS/agent.log)"
-else
-  export LOG_STACK=single,edgewatch EDGEWATCH_ENABLED=true EDGEWATCH_TOKEN="$INGEST_KEY" EDGEWATCH_INGEST_URI="http://127.0.0.1:$INGEST_PORT/api/ingest" \
-    EDGEWATCH_TRANSPORT=http EDGEWATCH_PROJECT_ID="$PROJECT" EDGEWATCH_SERVER=fresh-l12
-  step "php artisan edgewatch:test (one empty batch, no telemetry)"
-  out=$(EDGEWATCH_TRANSPORT=auto EDGEWATCH_INGEST_URI="http://127.0.0.1:$INGEST_PORT" php artisan edgewatch:test 2>&1); printf '%s\n' "$out" | sed 's/^/  /'
-  [[ "$out" == *"auto: ingest URL"* && "$out" == *"/api/ingest"* && "$out" == *"PASS  HTTP 200 in "* ]] && ok "edgewatch:test: HTTP auto-detected, /api/ingest added, HTTP 200" || bad "edgewatch:test"
-  if out=$(EDGEWATCH_TOKEN=ew_live_not_a_real_key php artisan edgewatch:test 2>&1); then bad "edgewatch:test with a wrong token should exit 1"
-  else [[ "$out" == *"FAIL  HTTP 401 in "* ]] && ok "edgewatch:test with a wrong token: HTTP 401, exit 1" || { printf '%s\n' "$out"; bad "edgewatch:test with a wrong token"; }; fi
-fi
+# The official agent has no project header; records land in the ingest key's default project ($PROJECT).
+export LOG_STACK=single,nightwatch NIGHTWATCH_ENABLED=true NIGHTWATCH_TOKEN="$INGEST_KEY" NIGHTWATCH_INGEST_URI="127.0.0.1:$AGENT_PORT" NIGHTWATCH_SERVER=fresh-l12
+# `artisan serve` passes only .env and a few allow-listed variables to its request workers, so mirror these into .env.
+for var in QUEUE_CONNECTION CACHE_STORE MAIL_MAILER LOG_CHANNEL LOG_STACK FRESH_OUTGOING_URL NIGHTWATCH_ENABLED NIGHTWATCH_TOKEN NIGHTWATCH_INGEST_URI NIGHTWATCH_SERVER; do
+  sed -i "/^$var=/d" .env && echo "$var=${!var}" >> .env
+done
+step "Starting the official agent: NIGHTWATCH_BASE_URL=http://127.0.0.1:$INGEST_PORT php artisan nightwatch:agent"
+NIGHTWATCH_BASE_URL="http://127.0.0.1:$INGEST_PORT" php artisan nightwatch:agent >"$LOGS/agent.log" 2>&1 & pids+=($!)
+for _ in $(seq 1 30); do (exec 3<>"/dev/tcp/127.0.0.1/$AGENT_PORT") 2>/dev/null && break; sleep 1; done
+(exec 3<>"/dev/tcp/127.0.0.1/$AGENT_PORT") 2>/dev/null && ok "agent listening on 127.0.0.1:$AGENT_PORT" || { cat "$LOGS/agent.log"; bad "agent did not start"; exit 1; }
+for _ in $(seq 1 15); do grep -q 'POST /api/agent-auth 200' "$LOGS/ingest-consumer.log" && break; sleep 1; done
+grep -q 'POST /api/agent-auth 200' "$LOGS/ingest-consumer.log" && ok "agent authenticated via /api/agent-auth" || bad "agent authentication (see $LOGS/agent.log)"
 
 step "One HTTP request, one artisan command, one queued job, one cache call"
 php artisan serve --host 127.0.0.1 --port "$APP_PORT" >"$LOGS/app.log" 2>&1 & pids+=($!)
@@ -195,7 +173,7 @@ body=$(curl -s -w ' HTTP %{http_code}' "http://127.0.0.1:$APP_PORT/fresh-all"); 
 php artisan schedule:run && ok "schedule:run (fresh-task)" || bad "schedule:run"
 
 step "Records that reached the harness"
-[ "$CLIENT" = nightwatch ] && for _ in $(seq 1 30); do [ "$(grep -c 'POST /api/ingest 200' "$LOGS/ingest-consumer.log" || true)" -ge 1 ] && break; sleep 1; done
+for _ in $(seq 1 30); do [ "$(grep -c 'POST /api/ingest 200' "$LOGS/ingest-consumer.log" || true)" -ge 1 ] && break; sleep 1; done
 echo "  ingest accepted $(grep -c 'POST /api/ingest 200' "$LOGS/ingest-consumer.log" || true) batches"
 API="http://127.0.0.1:$API_PORT/v1/projects/$PROJECT"
 get() { curl -fsS -H "authorization: Bearer $READ_KEY" "$API/$1"; }
@@ -212,9 +190,7 @@ printf '%s' "$traces" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("e
 check "request trace: GET /fresh, route fresh, 200" "$traces" "d.data.some(t=>t.execution_source==='request'&&t.route==='fresh'&&t.status_code===200)"
 check "command traces: fresh:hello and fresh:cache, exit 0" "$traces" "['fresh:hello','fresh:cache'].every(n=>d.data.some(t=>t.execution_source==='command'&&t.name.includes(n)&&t.status_code===0))"
 check "job trace: App\\Jobs\\FreshJob processed" "$traces" "d.data.some(t=>t.execution_source==='job'&&t.name==='App\\\\Jobs\\\\FreshJob'&&t.status==='processed')"
-if [ "$CLIENT" = nightwatch ]; then
-  check "job trace links back to the GET /fresh request that dispatched it" "$traces" "d.data.some(t=>t.execution_source==='job'&&t.origin_trace_id===d.data.find(r=>r.route==='fresh')?.trace_id)"
-fi
+check "job trace links back to the GET /fresh request that dispatched it" "$traces" "d.data.some(t=>t.execution_source==='job'&&t.origin_trace_id===d.data.find(r=>r.route==='fresh')?.trace_id)"
 commands=$(get "commands?range=1h"); echo "  /commands $commands"
 check "/commands lists fresh:hello" "$commands" "d.data.some(c=>c.key==='fresh:hello'&&c.failed===0)"
 jobs=$(get "jobs?range=1h"); echo "  /jobs $jobs"
@@ -234,5 +210,5 @@ check "/users: Fresh User with the GET /fresh-all trace" "$(show 'users?range=1h
 check "/scheduled-tasks: fresh-task processed" "$(show 'scheduled-tasks/fresh-task')" "d.data.some(s=>s.status==='processed'&&s.cron==='* * * * *')"
 
 echo
-echo "Fresh Laravel ($PKG) result: $pass passed, $fail failed. Logs: $LOGS"
+echo "Official Nightwatch agent result: $pass passed, $fail failed. Logs: $LOGS"
 [ "$fail" = 0 ]
