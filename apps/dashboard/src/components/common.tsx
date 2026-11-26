@@ -2,6 +2,7 @@ import { useEnvironment } from '@/lib/environment';
 import Link, { scopedPath } from './ScopedLink';
 import { useProject } from '@/lib/project';
 import { useRange } from '@/lib/range';
+import { ChartSyncProvider } from './charts';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
@@ -26,12 +27,14 @@ import {
   TerminalIcon,
   TrayIcon,
   WarningCircleIcon,
+  WarningIcon,
   XIcon,
 } from '@phosphor-icons/react';
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ago } from '@/lib/format';
 import type { ExecutionSource } from '@/lib/types';
+import { chartFooterDate } from './charts';
 import TelemetryControls from './TelemetryControls';
 
 /**
@@ -57,14 +60,18 @@ export function PageHeader({
   documentTitle,
   subtitle,
   back,
+  leftSlot,
   actions,
+  hideTitle = false,
   hideTelemetryControls = false,
 }: {
   title: ReactNode;
   documentTitle?: string;
   subtitle?: ReactNode;
   back?: { to: string; label: string };
+  leftSlot?: ReactNode;
   actions?: ReactNode;
+  hideTitle?: boolean;
   hideTelemetryControls?: boolean;
 }) {
   const { projectId, projects } = useProject();
@@ -76,23 +83,28 @@ export function PageHeader({
   }, [pageTitle, projectName]);
 
   return (
-    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+    <div className="!mb-3 flex min-h-12 flex-col justify-center gap-3 py-2 md:min-h-14 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
       <div className="min-w-0">
         {back && (
-          <nav aria-label="Breadcrumb" className="mb-1.5 flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+          <nav aria-label="Breadcrumb" className="mb-1.5 flex items-center gap-1.5 text-sm text-neutral-600 dark:text-neutral-400">
             <Link
               to={back.to}
-              className="transition-colors hover:text-neutral-900 dark:hover:text-white"
+              className="transition-colors hover:text-blue-600 dark:hover:text-emerald-500"
             >
               {back.label}
             </Link>
-            <CaretRightIcon size={11} className="shrink-0 text-neutral-400 dark:text-neutral-500" aria-hidden />
-            {pageTitle && <span className="truncate font-mono text-neutral-700 dark:text-neutral-300">{pageTitle}</span>}
+            <CaretRightIcon size={13} className="shrink-0 text-neutral-500 dark:text-neutral-500" aria-hidden />
+            {pageTitle && <span className="truncate font-mono text-xs text-neutral-700 dark:text-neutral-300">{pageTitle}</span>}
           </nav>
         )}
-        <h1 className="break-words text-xl font-semibold tracking-tight text-neutral-900 md:text-2xl dark:text-white">
-          {title}
-        </h1>
+        <div className="flex flex-wrap items-center gap-2">
+          {!hideTitle && (
+            <h1 className="break-words text-xl font-semibold text-neutral-900 md:text-2xl dark:text-white">
+              {title}
+            </h1>
+          )}
+          {leftSlot}
+        </div>
         {subtitle && <div className="mt-1.5 max-w-3xl text-sm leading-relaxed text-kumo-subtle">{subtitle}</div>}
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -100,6 +112,122 @@ export function PageHeader({
         {!hideTelemetryControls && <TelemetryControls />}
       </div>
     </div>
+  );
+}
+
+export interface SegmentedOption {
+  value: string;
+  label: string;
+  count?: { value: number; tone?: 'default' | 'warning' | 'error' };
+}
+
+/** 1:1 Nightwatch `ToggleGroup-CSdg-TYt.js` + `ToggleFilter-BjlkNkYQ.js` segmented control with inline count pills. */
+export function SegmentedToggle({
+  value,
+  onChange,
+  options,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: SegmentedOption[];
+  className?: string;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      className={cn(
+        'relative inline-flex h-8 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-200/40 p-0.5 dark:border-neutral-700/50 dark:bg-neutral-800',
+        className,
+      )}
+    >
+      {options.map((option) => {
+        const active = option.value === value;
+        const badgeTone = option.count?.tone ?? 'default';
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              'inline-flex h-full items-center justify-center gap-2 whitespace-nowrap rounded-md px-2.5 text-sm transition-colors',
+              active
+                ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
+                : 'text-neutral-600 hover:bg-neutral-200/30 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-900/20 dark:hover:text-neutral-100',
+            )}
+          >
+            <span>{option.label}</span>
+            {option.count !== undefined && option.count.value > 0 && (
+              <span
+                className={cn(
+                  '-mr-0.5 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded px-1 font-sans text-[11px] leading-none font-medium tabular-nums',
+                  badgeTone === 'error'
+                    ? 'bg-rose-500 text-white'
+                    : badgeTone === 'warning'
+                      ? 'bg-amber-500 text-white'
+                      : active
+                        ? 'bg-neutral-200/80 text-neutral-800 dark:bg-neutral-600 dark:text-white'
+                        : 'bg-black/[0.07] text-neutral-700 dark:bg-white/10 dark:text-neutral-200',
+                )}
+              >
+                {option.count.value.toLocaleString()}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 1:1 Nightwatch sortable column header label with dual sort triangles (`Table-yTpK8UQF.js` `P`). */
+export function SortableLabel({
+  active,
+  direction = 'desc',
+  align = 'right',
+  onClick,
+  children,
+}: {
+  active: boolean;
+  direction?: 'asc' | 'desc';
+  align?: 'left' | 'right';
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center gap-2 uppercase transition-colors hover:text-neutral-900 dark:hover:text-white',
+        align === 'right' && 'justify-end',
+        active && 'text-neutral-900 dark:text-white',
+      )}
+    >
+      <span className="relative flex items-center pr-3">
+        {children}
+        <span className="absolute right-0 flex flex-col gap-[2px]" aria-hidden>
+          <span
+            className={cn(
+              'inline-block h-0 w-0 border-x-[3.5px] border-b-[4px] border-x-transparent',
+              active && direction === 'asc'
+                ? 'border-b-blue-500 dark:border-b-white'
+                : 'border-b-neutral-300 dark:border-b-neutral-600',
+            )}
+          />
+          <span
+            className={cn(
+              'inline-block h-0 w-0 rotate-180 border-x-[3.5px] border-b-[4px] border-x-transparent',
+              active && direction === 'desc'
+                ? 'border-b-blue-500 dark:border-b-white'
+                : 'border-b-neutral-300 dark:border-b-neutral-600',
+            )}
+          />
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -116,7 +244,7 @@ export function SectionBar({
   className?: string;
 }) {
   return (
-    <div className={cn('mb-3 flex flex-col items-start justify-between gap-3 md:flex-row md:items-center md:gap-6', className)}>
+    <div className={cn('mb-4 flex flex-col items-start justify-between gap-2 md:flex-row md:items-center md:gap-12', className)}>
       <h2 className="flex shrink-0 items-center gap-2 text-lg font-medium text-neutral-900 dark:text-white [&_svg]:size-4 [&_svg]:text-blue-600 dark:[&_svg]:text-emerald-500">
         {icon}
         <span>{title}</span>
@@ -173,38 +301,40 @@ export function CardTray({
   const isLinkAction = action && typeof action === 'object' && 'to' in action && 'label' in action;
 
   return (
-    <section
-      data-slot="card-container"
-      className={cn(
-        'rounded-xl border border-neutral-200/80 bg-white/55 p-1.5 dark:border-white/[0.06] dark:bg-white/[0.03]',
-        className,
-      )}
-    >
-      {(title || action) && (
-        <div className="flex items-center justify-between gap-3 px-2 pt-1.5 pb-2">
-          <div className="flex min-w-0 items-center gap-2.5">
-            {icon && (
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-neutral-300/90 bg-white text-neutral-500 dark:border-white/10 dark:bg-neutral-800 dark:text-neutral-400">
-                {icon}
-              </span>
+    <ChartSyncProvider>
+      <section
+        data-slot="card-container"
+        className={cn(
+          'grid gap-2 rounded-xl border border-neutral-200/70 bg-white/50 p-1.5 dark:border-white/[0.05] dark:bg-white/[0.03]',
+          className,
+        )}
+      >
+        {(title || action) && (
+          <div className="flex items-center justify-between gap-3 p-2 pb-1.5">
+            <div className="flex min-w-0 items-center gap-2.5">
+              {icon && (
+                <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-neutral-300 bg-white text-neutral-400 dark:border-white/10 dark:bg-neutral-700/75 dark:text-neutral-400 [&_svg]:size-3">
+                  {icon}
+                </span>
+              )}
+              {title && <h2 className="truncate text-base font-medium text-neutral-900 dark:text-white">{title}</h2>}
+            </div>
+            {isLinkAction ? (
+              <Link
+                to={scopedPath(action.to, projectId, range, environment)}
+                className="group inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-neutral-200 bg-white/75 px-3 text-sm text-neutral-600 transition-colors hover:border-blue-500 hover:bg-white hover:text-neutral-900 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-neutral-400 dark:hover:border-white/15 dark:hover:bg-neutral-800 dark:hover:text-white"
+              >
+                <span>{action.label}</span>
+                <ArrowUpRightIcon size={14} className="text-neutral-400 transition-colors group-hover:text-blue-600 dark:group-hover:text-white" aria-hidden />
+              </Link>
+            ) : (
+              action && <div className="flex shrink-0 items-center gap-2">{action}</div>
             )}
-            {title && <h2 className="truncate text-base font-medium text-neutral-900 dark:text-white">{title}</h2>}
           </div>
-          {isLinkAction ? (
-            <Link
-              to={scopedPath(action.to, projectId, range, environment)}
-              className="group inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-neutral-200 bg-white/75 px-3 text-sm text-neutral-600 transition-colors hover:border-blue-500 hover:bg-white hover:text-neutral-900 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-neutral-400 dark:hover:border-white/15 dark:hover:bg-neutral-800 dark:hover:text-white"
-            >
-              <span>{action.label}</span>
-              <ArrowUpRightIcon size={14} className="text-neutral-400 transition-colors group-hover:text-blue-600 dark:group-hover:text-white" aria-hidden />
-            </Link>
-          ) : (
-            action && <div className="flex shrink-0 items-center gap-2">{action}</div>
-          )}
-        </div>
-      )}
-      {children}
-    </section>
+        )}
+        {children}
+      </section>
+    </ChartSyncProvider>
   );
 }
 
@@ -348,11 +478,66 @@ export function Stat({
 export function StatusBadge({ status, source }: { status: number | null; source: ExecutionSource }) {
   if (source !== 'request') {
     const ok = status === 0 || status === null;
-    return <Badge variant={ok ? 'success' : 'error'} className="font-mono">{ok ? 'OK' : `exit ${status}`}</Badge>;
+    return (
+      <span
+        className={cn(
+          'inline-flex items-center rounded px-1.5 py-0.5 font-mono text-xs font-semibold uppercase',
+          ok
+            ? 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
+            : 'bg-rose-600 text-white',
+        )}
+      >
+        {ok ? 'OK' : `exit ${status}`}
+      </span>
+    );
   }
   const s = status ?? 0;
-  const variant = s >= 500 ? 'error' : s >= 400 ? 'warning' : s >= 300 ? 'info' : 'success';
-  return <Badge variant={variant} className="font-mono">{s}</Badge>;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded px-1.5 py-0.5 font-mono text-xs font-semibold tabular-nums',
+        s >= 500
+          ? 'bg-rose-600 text-white'
+          : s >= 400
+            ? 'bg-amber-500/15 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300'
+            : 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300',
+      )}
+    >
+      {s}
+    </span>
+  );
+}
+
+/** 1:1 Capture table status code (`StatusCode-DK2EgVE-.js`): plain emerald/orange bold mono text, solid rose badge on 5xx. */
+export function StatusCodeText({ status, source = 'request' }: { status: number | null; source?: ExecutionSource }) {
+  if (source !== 'request') {
+    const ok = status === 0 || status === null;
+    return ok ? (
+      <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-500">OK</span>
+    ) : (
+      <span className="inline-flex items-center rounded bg-rose-600 px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase text-white">
+        {`exit ${status}`}
+      </span>
+    );
+  }
+  const s = status ?? 0;
+  if (s >= 500) {
+    return (
+      <span className="inline-flex items-center rounded bg-rose-600 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-white">
+        {s}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={cn(
+        'font-mono text-xs font-semibold tabular-nums',
+        s >= 400 ? 'text-orange-500 dark:text-orange-400' : 'text-emerald-600 dark:text-emerald-500',
+      )}
+    >
+      {s}
+    </span>
+  );
 }
 
 const SOURCE_META = {
@@ -373,19 +558,110 @@ export function SourceBadge({ source }: { source: ExecutionSource }) {
   );
 }
 
-const METHOD_VARIANTS: Record<string, 'info' | 'success' | 'warning' | 'error' | 'secondary'> = {
-  GET: 'secondary',
-  HEAD: 'secondary',
-  OPTIONS: 'secondary',
-  POST: 'success',
-  PUT: 'info',
-  PATCH: 'info',
-  DELETE: 'error',
-};
+/** 1:1 Capture bordered uppercase source chip (`REQUEST`, `JOB`, `COMMAND`, `SCHEDULE`) used in Logs/Queries/Issues tables. */
+export function SourceTag({ source }: { source: string }) {
+  return (
+    <span className="inline-flex h-5 shrink-0 items-center rounded border border-neutral-200 bg-white px-1.5 font-mono text-[10px] font-medium uppercase tracking-wide text-neutral-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-neutral-400">
+      {source}
+    </span>
+  );
+}
 
+/** 1:1 Capture plain colored monospace HTTP method for table rows (`HttpMethod-CaZTeVJx.js`). */
+export function HttpMethodText({ method, className }: { method: string; className?: string }) {
+  const upper = method.toUpperCase();
+  const tone =
+    upper === 'POST'
+      ? 'text-emerald-600 dark:text-emerald-500'
+      : upper === 'PUT' || upper === 'PATCH'
+        ? 'text-blue-500 dark:text-blue-400'
+        : upper === 'DELETE'
+          ? 'text-rose-600 dark:text-rose-400'
+          : 'text-neutral-500 dark:text-neutral-400';
+  return <span className={cn('font-mono text-xs font-semibold whitespace-nowrap', tone, className)}>{upper}</span>;
+}
+
+/** 1:1 Capture soft-tinted HTTP method badge for detail page headers (`HttpMethod-CaZTeVJx.js`). */
 export function MethodBadge({ method }: { method: string }) {
   const upper = method.toUpperCase();
-  return <Badge variant={METHOD_VARIANTS[upper] ?? 'secondary'} className="font-mono">{upper}</Badge>;
+  const tone =
+    upper === 'POST'
+      ? 'bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
+      : upper === 'PUT' || upper === 'PATCH'
+        ? 'bg-blue-500/15 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300'
+        : upper === 'DELETE'
+          ? 'bg-rose-500/15 text-rose-600 dark:bg-rose-500/20 dark:text-rose-300'
+          : 'bg-neutral-200/70 text-neutral-700 dark:bg-white/10 dark:text-neutral-300';
+  return (
+    <span className={cn('inline-flex items-center rounded px-1.5 py-0.5 font-mono text-xs font-semibold uppercase', tone)}>
+      {upper}
+    </span>
+  );
+}
+
+/** 1:1 Capture amber triangle warning counter cell (`4XX`, `RELEASED`, `SKIPPED`). */
+export function WarningCount({ count }: { count: number }) {
+  if (!count) return <span className="font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-500">0</span>;
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs font-medium tabular-nums text-amber-600 dark:text-amber-400">
+      <WarningIcon size={13} weight="fill" className="shrink-0 text-amber-500" aria-hidden />
+      <span>{count.toLocaleString()}</span>
+    </span>
+  );
+}
+
+/** 1:1 Capture rose alert-circle error counter cell (`5XX`, `FAILED`, `EXCEPTIONS`). */
+export function ErrorCount({ count }: { count: number }) {
+  if (!count) return <span className="font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-500">0</span>;
+  return (
+    <span className="inline-flex items-center justify-end gap-1.5 font-mono text-xs font-medium tabular-nums text-rose-600 dark:text-rose-400">
+      <WarningCircleIcon size={13} weight="fill" className="shrink-0 text-rose-500" aria-hidden />
+      <span>{count.toLocaleString()}</span>
+    </span>
+  );
+}
+
+/** 1:1 Capture right-aligned table row action button (`[↗]`, matching `Table-yTpK8UQF.js`). */
+export function RowActionLink({ to, label = 'View' }: { to: string; label?: string }) {
+  return (
+    <div className="inline-flex items-center justify-end">
+      <Link
+        to={to}
+        aria-label={label}
+        onClick={(e) => e.stopPropagation()}
+        className="inline-flex size-6 items-center justify-center rounded-sm border border-neutral-200/80 bg-neutral-50/70 text-neutral-500 transition-colors hover:border-blue-500 hover:bg-white hover:text-blue-600 dark:border-white/10 dark:bg-white/[0.03] dark:text-neutral-400 dark:hover:border-white/20 dark:hover:text-white"
+      >
+        <ArrowUpRightIcon size={13} aria-hidden />
+      </Link>
+    </div>
+  );
+}
+
+/** 1:1 Capture UTC timestamp display (`26 Nov 2026, 05:32:07 UTC`). */
+export function UtcDate({ iso, className }: { iso: string; className?: string }) {
+  return (
+    <time dateTime={iso} className={cn('whitespace-nowrap font-mono text-xs tabular-nums text-neutral-900 dark:text-neutral-200', className)}>
+      {chartFooterDate(iso)}
+      <span className="ml-1 text-neutral-400 dark:text-neutral-500">UTC</span>
+    </time>
+  );
+}
+
+/** 1:1 Capture dotted-leader key-value description list (`DescriptionList-jv5GUTHT.js`). */
+export function DescriptionList({ children, className }: { children: ReactNode; className?: string }) {
+  return <dl className={cn('flex max-w-full flex-col gap-3 text-sm', className)}>{children}</dl>;
+}
+
+export function DescriptionRow({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <div className={cn('flex max-w-full items-baseline gap-1', className)}>
+      <dt className="shrink-0 font-mono text-xs font-medium uppercase text-neutral-600 md:h-6 dark:text-neutral-400">
+        {label}
+      </dt>
+      <div className="relative -bottom-px min-w-6 grow border-b-2 border-dotted border-neutral-300 dark:border-white/20" aria-hidden />
+      <dd className="min-w-0 truncate text-right font-mono text-sm text-neutral-900 dark:text-white">{children}</dd>
+    </div>
+  );
 }
 
 export function TimeAgo({ iso, className }: { iso: string; className?: string }) {
@@ -579,11 +855,11 @@ export function Empty({
   }
 
   return (
-    <div className="relative flex min-h-52 flex-col items-center justify-center overflow-hidden rounded-lg border border-neutral-200 bg-white px-5 py-12 text-center dark:border-white/[0.06] dark:bg-white/[0.025]">
-      {/* Capture-exact deterministic monospace hash-matrix backdrop (`TableEmptyState`) */}
+    <div className="relative flex min-h-48 w-full flex-col items-center justify-center overflow-hidden rounded-lg border border-neutral-200 px-5 py-10 text-center dark:border-neutral-800/60">
+      {/* Exact TableEmptyState-Dk0HfMaw.js hash-matrix backdrop */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 flex flex-col justify-between overflow-hidden px-4 py-2.5 font-mono text-xs leading-7 tracking-widest text-neutral-300/60 select-none dark:text-neutral-700/45"
+        className="pointer-events-none absolute inset-0 flex flex-col justify-between overflow-hidden px-4 py-2 font-mono text-xs leading-6 tracking-widest text-neutral-300 uppercase select-none dark:text-neutral-700/50"
         style={{ maskImage: 'radial-gradient(ellipse 85% 85% at 50% 50%, black 45%, transparent 100%)' }}
       >
         {[...MATRIX_ROWS, ...MATRIX_ROWS].map((row, idx) => (
@@ -592,11 +868,11 @@ export function Empty({
           </div>
         ))}
       </div>
-      <div className="relative z-10 flex flex-col items-center gap-2">
-        <div className="inline-flex items-center gap-1.5 rounded-[3px] bg-yellow-300 px-2 py-0.5 font-mono text-xs font-medium uppercase tracking-wider text-neutral-950 dark:bg-amber-400 dark:text-neutral-950">
+      <div className="relative z-10 flex flex-col items-center gap-1.5">
+        <div className="inline-flex items-center rounded-[2px] bg-amber-300 px-1.5 py-0.5 font-mono text-sm/none font-medium uppercase tracking-wide text-amber-950 select-none dark:bg-amber-400 dark:text-neutral-950">
           <span>{children.replace(/\.$/, '')}</span>
         </div>
-        <div className="max-w-lg rounded-[3px] bg-neutral-950 px-2.5 py-0.5 font-mono text-xs uppercase tracking-wider text-white dark:bg-neutral-200 dark:text-neutral-950">
+        <div className="max-w-lg rounded-[2px] bg-neutral-900 px-1.5 py-0.5 font-mono text-sm/none uppercase tracking-wide text-white select-none dark:bg-neutral-500 dark:text-neutral-950">
           {description ?? 'Try adjusting any filters or time range'}
         </div>
         {action && <div className="mt-3">{action}</div>}
@@ -605,20 +881,19 @@ export function Empty({
   );
 }
 
-const SQL_KEYWORDS = /(\b(?:select|from|where|and|or|in|insert into|values|update|set|delete|inner join|left join|on|group by|order by|limit|offset|for update|as|is null|desc|asc|count|sum|exists)\b|\?)/gi;
+const SQL_TOKENS = /(\b(?:select|from|where|and|or|in|insert into|values|update|set|delete|inner join|left join|right join|join|on|group by|order by|limit|offset|for update|as|is|not|desc|asc|count|sum|exists|distinct)\b|\b(?:null|true|false|\d+)\b|\?)/gi;
 
 export function Sql({ sql, className = '' }: { sql: string; className?: string }) {
   return (
-    <code className={cn('font-mono text-xs leading-relaxed', className)}>
-      {sql.split(SQL_KEYWORDS).map((p, i) =>
-        p === '?' ? (
-          <span key={i} className="text-kumo-warning">?</span>
-        ) : i % 2 === 1 ? (
-          <span key={i} className="text-kumo-link">{p}</span>
-        ) : (
-          <span key={i}>{p}</span>
-        ),
-      )}
+    <code className={cn('font-mono text-xs leading-relaxed text-neutral-900 dark:text-neutral-100', className)}>
+      {sql.split(SQL_TOKENS).map((part, i) => {
+        if (i % 2 === 0) return <span key={i}>{part}</span>;
+        if (part === '?') return <span key={i} className="text-neutral-500 dark:text-neutral-400">?</span>;
+        if (/^(?:null|true|false|\d+)$/i.test(part)) {
+          return <span key={i} className="text-emerald-600 dark:text-emerald-400">{part}</span>;
+        }
+        return <span key={i} className="text-blue-600 dark:text-blue-400">{part}</span>;
+      })}
     </code>
   );
 }

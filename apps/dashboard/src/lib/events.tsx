@@ -11,20 +11,10 @@ import {
   UsersIcon,
 } from '@phosphor-icons/react';
 import type { ReactNode } from 'react';
-import type { MetricLegendItem } from '@/components/charts';
+import { bucketTimeSeries, durationRangeLabel, type BarDatum, type MetricLegendItem } from '@/components/charts';
+import { ErrorCount, StatusCodeText, WarningCount } from '@/components/common';
 import { compact, ms } from './format';
-import { splitClassName } from './ui-helpers';
-import type { EventGroup, EventRow } from './types';
-
-function renderClassKey(key: string) {
-  const { short, namespace } = splitClassName(key);
-  return (
-    <span className="inline-flex min-w-0 items-baseline gap-2 font-mono text-xs">
-      <span className="truncate font-medium">{short}</span>
-      {namespace && <span className="truncate text-kumo-subtle">{namespace}</span>}
-    </span>
-  );
-}
+import type { EventGroup, EventRow, Range } from './types';
 
 export interface EventColumn<T> {
   label: string;
@@ -37,10 +27,13 @@ export interface EventChartCardData {
   value: ReactNode;
   metrics?: MetricLegendItem[];
   kind: 'bar' | 'line';
+  barTone?: 'neutral' | 'brand' | 'danger' | 'success';
   unit?: string;
-  barSeries?: { label: string; value: number; warn?: number; highlight?: number }[];
-  lineValues?: number[];
+  barSeries?: BarDatum[];
+  lineValues?: (number | null)[];
+  secondaryLineValues?: (number | null)[];
   lineLabels?: string[];
+  lineTimestamps?: number[];
   format?: (n: number) => string;
 }
 
@@ -61,10 +54,10 @@ export interface EventPage {
   emptyLabel?: string;
   showUserFilter?: boolean;
   isClassKey?: boolean;
-  renderKey?: (key: string) => ReactNode;
+  renderKey?: (key: string, row?: EventGroup) => ReactNode;
   columns: EventColumn<EventGroup>[];
   rowColumns: EventColumn<EventRow>[];
-  chartDeck?: (summary: Record<string, number>, rows: EventGroup[]) => EventChartDeck;
+  chartDeck?: (summary: Record<string, number>, rows: EventGroup[], range: Range) => EventChartDeck;
   filters?: { param: string; label: string; options: string[] }[];
   searchPlaceholder: string;
 }
@@ -72,38 +65,40 @@ export interface EventPage {
 const statusBadge = (status: unknown) =>
   status ? <Badge variant={status === 'failed' ? 'error' : status === 'processed' ? 'success' : 'warning'}>{String(status)}</Badge> : <span className="text-kumo-subtle">—</span>;
 const num = (v: unknown) => compact(Number(v ?? 0));
-const pct = (v: unknown) => (v === null || v === undefined ? '—' : `${(Number(v) * 100).toFixed(1)}%`);
-const coloredPct = (v: unknown, goodThreshold: number, warnThreshold?: number) => {
-  if (v === null || v === undefined) return <span className="text-kumo-subtle">—</span>;
-  const n = Number(v);
-  const cls = n >= goodThreshold ? 'font-medium text-kumo-success' : warnThreshold !== undefined && n < warnThreshold ? 'font-medium text-kumo-danger' : 'font-medium text-kumo-warning';
-  return <span className={cls}>{`${(n * 100).toFixed(1)}%`}</span>;
-};
-const dur = (v: unknown) => (v === null || v === undefined ? <span className="text-kumo-subtle">—</span> : <span className="font-mono text-xs">{ms(Number(v))}</span>);
+const pct = (v: unknown) => (v === null || v === undefined ? '—' : `${Math.round(Number(v) * 100)}%`);
+const dur = (v: unknown) => (v === null || v === undefined ? <span className="text-neutral-400">—</span> : ms(Number(v)));
 
 const LOG_LEVELS = ['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'];
 const levelVariant = (level: string) => (LOG_LEVELS.indexOf(level) <= 3 ? 'error' : level === 'warning' ? 'warning' : 'secondary');
 
-function durationCard(rows: EventGroup[], summaryAvg?: number): EventChartCardData {
+function durationCard(rows: EventGroup[], range: Range, summaryAvg?: number): EventChartCardData {
   const avgVals = rows.map((r) => Number(r.avg_ms ?? 0)).filter((v) => v > 0);
   const maxVals = rows.map((r) => Number(r.max_ms ?? 0)).filter((v) => v > 0);
-  const overallAvg = summaryAvg !== undefined && summaryAvg > 0
-    ? summaryAvg
-    : avgVals.length
-      ? avgVals.reduce((a, b) => a + b, 0) / avgVals.length
-      : 0;
+  const overallAvg =
+    summaryAvg !== undefined && summaryAvg > 0
+      ? summaryAvg
+      : avgVals.length
+        ? avgVals.reduce((a, b) => a + b, 0) / avgVals.length
+        : 0;
   const overallMax = maxVals.length ? Math.max(...maxVals) : 0;
-  const sample = rows.slice(0, 16);
+  const timed = bucketTimeSeries(rows, range, {
+    timestamp: (r) => r.last_seen,
+    p95: (r) => Number(r.max_ms ?? r.avg_ms ?? 0),
+    avg: (r) => Number(r.avg_ms ?? 0),
+    buckets: 36,
+  });
   return {
     title: 'Duration',
-    value: overallMax > 0 ? ms(overallMax) : overallAvg > 0 ? ms(overallAvg) : '—',
+    value: durationRangeLabel([...avgVals, ...maxVals]),
     metrics: [
       { label: 'AVG', value: overallAvg > 0 ? ms(overallAvg) : '—', tone: 'charcoal' },
-      { label: 'MAX', value: overallMax > 0 ? ms(overallMax) : '—', tone: 'alert' },
+      { label: 'P95', value: overallMax > 0 ? ms(overallMax) : '—', tone: 'alert' },
     ],
     kind: 'line',
-    lineValues: sample.map((r) => Number(r.max_ms ?? r.avg_ms ?? 0)),
-    lineLabels: sample.map((r) => splitClassName(r.key).short),
+    lineValues: timed.p95Values,
+    secondaryLineValues: timed.avgValues,
+    lineLabels: timed.labels,
+    lineTimestamps: timed.timestamps,
     format: ms,
   };
 }
@@ -115,33 +110,39 @@ export const EVENT_PAGES: EventPage[] = [
     nav: 'Jobs',
     icon: BriefcaseIcon,
     subtitle: 'Background jobs grouped by class — click any job to inspect attempts',
-    keyLabel: 'Job',
+    keyLabel: 'Jobs',
     sectionUnit: ['Job', 'Jobs'],
     emptyLabel: 'No jobs found',
     showUserFilter: true,
     isClassKey: true,
-    renderKey: renderClassKey,
     columns: [
-      { label: 'Queue', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.queue ?? '—'}</span> },
       { label: 'Queued', align: 'right', render: (g) => num(g.queued) },
-      { label: 'Attempts', align: 'right', render: (g) => num(g.attempts) },
-      { label: 'Failed', align: 'right', render: (g) => <span className={Number(g.failed) ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}>{num(g.failed)}</span> },
-      { label: 'Released', align: 'right', render: (g) => num(g.released) },
+      { label: 'Processed', align: 'right', render: (g) => num(Math.max(0, Number(g.attempts ?? 0) - Number(g.failed ?? 0) - Number(g.released ?? 0))) },
+      { label: 'Released', align: 'right', render: (g) => <WarningCount count={Number(g.released ?? 0)} /> },
+      { label: 'Failed', align: 'right', render: (g) => <ErrorCount count={Number(g.failed ?? 0)} /> },
+      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(g.attempts)}</span> },
       { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'Max', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
     ],
     rowColumns: [
       { label: 'Kind', render: (r) => <Badge variant="outline">{String(r.kind)}</Badge> },
       { label: 'Status', render: (r) => statusBadge(r.status) },
       { label: 'Attempt', align: 'right', render: (r) => (r.attempt ?? '—') as ReactNode },
-      { label: 'Queue', render: (r) => <span className="font-mono text-xs text-kumo-subtle">{String(r.queue ?? '—')}</span> },
+      { label: 'Queue', render: (r) => <span className="text-neutral-500">{String(r.queue ?? '—')}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    chartDeck: (s, rows) => {
+    chartDeck: (s, rows, range) => {
       const attempts = Number(s.attempts ?? 0);
       const failed = Number(s.failed ?? 0);
       const released = Number(s.released ?? 0);
       const processed = Math.max(0, attempts - failed - released);
+      const timed = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: (r) => Number(r.attempts ?? r.count ?? 0),
+        warn: (r) => Number(r.released ?? 0),
+        highlight: (r) => Number(r.failed ?? 0),
+        buckets: 36,
+      });
       return {
         left: {
           title: 'Attempts',
@@ -153,14 +154,9 @@ export const EVENT_PAGES: EventPage[] = [
           ],
           kind: 'bar',
           unit: 'attempts',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: splitClassName(r.key).short,
-            value: Number(r.attempts ?? r.count ?? 0),
-            warn: Number(r.released ?? 0),
-            highlight: Number(r.failed ?? 0),
-          })),
+          barSeries: timed.barSeries,
         },
-        right: durationCard(rows),
+        right: durationCard(rows, range),
       };
     },
     filters: [{ param: 'status', label: 'Status', options: ['all', 'processed', 'released', 'failed'] }],
@@ -175,22 +171,28 @@ export const EVENT_PAGES: EventPage[] = [
     keyLabel: 'Command',
     sectionUnit: ['Command', 'Commands'],
     emptyLabel: 'No commands found',
-    renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
-      { label: 'Runs', align: 'right', render: (g) => num(g.count) },
-      { label: 'Failed', align: 'right', render: (g) => <span className={Number(g.failed) ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}>{num(g.failed)}</span> },
+      { label: 'Success', align: 'right', render: (g) => num(Math.max(0, Number(g.count ?? 0) - Number(g.failed ?? 0))) },
+      { label: 'Failed', align: 'right', render: (g) => <ErrorCount count={Number(g.failed ?? 0)} /> },
+      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
       { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'Max', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
     ],
     rowColumns: [
-      { label: 'Exit code', render: (r) => (r.exit_code === null || r.exit_code === undefined ? '—' : <Badge variant={Number(r.exit_code) === 0 ? 'success' : 'error'} className="font-mono">{String(r.exit_code)}</Badge>) },
-      { label: 'Command line', render: (r) => <span className="font-mono text-xs">{String(r.command ?? '—')}</span> },
+      { label: 'Exit code', render: (r) => (r.exit_code === null || r.exit_code === undefined ? '—' : <StatusCodeText status={Number(r.exit_code)} source="command" />) },
+      { label: 'Command line', render: (r) => <span>{String(r.command ?? '—')}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    chartDeck: (s, rows) => {
+    chartDeck: (s, rows, range) => {
       const runs = Number(s.runs ?? 0);
       const failed = Number(s.failed ?? 0);
       const ok = Math.max(0, runs - failed);
+      const timed = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: (r) => Number(r.count ?? 0),
+        highlight: (r) => Number(r.failed ?? 0),
+        buckets: 36,
+      });
       return {
         left: {
           title: 'Calls',
@@ -201,13 +203,9 @@ export const EVENT_PAGES: EventPage[] = [
           ],
           kind: 'bar',
           unit: 'calls',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: r.key,
-            value: Number(r.count ?? 0),
-            highlight: Number(r.failed ?? 0),
-          })),
+          barSeries: timed.barSeries,
         },
-        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+        right: durationCard(rows, range, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
       };
     },
     filters: [{ param: 'status', label: 'Status', options: ['all', 'success', 'failed'] }],
@@ -222,30 +220,42 @@ export const EVENT_PAGES: EventPage[] = [
     keyLabel: 'Key',
     sectionUnit: ['key', 'keys'],
     emptyLabel: 'No cache keys found',
-    renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
-      { label: 'Store', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.store ?? '—'}</span> },
-      { label: 'Hit ratio', align: 'right', render: (g) => coloredPct(g.hit_ratio, 0.8, 0.5) },
+      { label: 'Hit %', align: 'right', render: (g) => pct(g.hit_ratio) },
       { label: 'Hits', align: 'right', render: (g) => num(g.hits) },
       { label: 'Misses', align: 'right', render: (g) => num(g.misses) },
       { label: 'Writes', align: 'right', render: (g) => num(g.writes) },
       { label: 'Deletes', align: 'right', render: (g) => num(g.deletes) },
-      { label: 'Failures', align: 'right', render: (g) => <span className={Number(g.failures) ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}>{num(g.failures)}</span> },
-      { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
+      { label: 'Failures', align: 'right', render: (g) => <ErrorCount count={Number(g.failures ?? 0)} /> },
+      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(Number(g.hits ?? 0) + Number(g.misses ?? 0) + Number(g.writes ?? 0) + Number(g.deletes ?? 0))}</span> },
     ],
     rowColumns: [
       { label: 'Type', render: (r) => <Badge variant={r.type === 'hit' ? 'success' : String(r.type).endsWith('failure') ? 'error' : r.type === 'miss' ? 'warning' : 'secondary'}>{String(r.type)}</Badge> },
-      { label: 'Store', render: (r) => <span className="font-mono text-xs text-kumo-subtle">{String(r.store ?? '—')}</span> },
-      { label: 'TTL', align: 'right', render: (r) => (r.ttl ? <span className="font-mono text-xs">{`${r.ttl}s`}</span> : '—') },
+      { label: 'Store', render: (r) => <span className="text-neutral-500">{String(r.store ?? '—')}</span> },
+      { label: 'TTL', align: 'right', render: (r) => (r.ttl ? `${r.ttl}s` : '—') },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    chartDeck: (s, rows) => {
+    chartDeck: (s, rows, range) => {
       const hits = Number(s.hits ?? 0);
       const misses = Number(s.misses ?? 0);
       const writes = Number(s.writes ?? 0);
       const deletes = Number(s.deletes ?? 0);
       const total = hits + misses + writes + deletes;
       const totalFailures = rows.reduce((sum, r) => sum + Number(r.failures ?? 0), 0);
+      const timedEvents = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: (r) => Number(r.hits ?? 0) + Number(r.misses ?? 0) + Number(r.writes ?? 0) + Number(r.deletes ?? 0),
+        extra: (r) => Number(r.writes ?? 0),
+        warn: (r) => Number(r.misses ?? 0),
+        highlight: (r) => Number(r.deletes ?? 0),
+        buckets: 36,
+      });
+      const timedFailures = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: (r) => Number(r.failures ?? 0),
+        highlight: (r) => Number(r.failures ?? 0),
+        buckets: 36,
+      });
       return {
         left: {
           title: 'Events',
@@ -258,27 +268,18 @@ export const EVENT_PAGES: EventPage[] = [
           ],
           kind: 'bar',
           unit: 'events',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: r.key,
-            value: Number(r.hits ?? 0) + Number(r.misses ?? 0) + Number(r.writes ?? 0) + Number(r.deletes ?? 0),
-            warn: Number(r.misses ?? 0),
-            highlight: Number(r.deletes ?? 0),
-          })),
+          barSeries: timedEvents.barSeries,
         },
         right: {
           title: 'Failures',
           value: compact(totalFailures),
           metrics: [
-            { label: 'HIT RATIO', value: pct(s.hit_ratio), tone: 'success' },
-            { label: 'FAILURES', value: compact(totalFailures), tone: 'error' },
+            { label: 'DELETE', value: compact(0), tone: 'error' },
+            { label: 'WRITE', value: compact(totalFailures), tone: 'alert' },
           ],
           kind: 'bar',
           unit: 'failures',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: r.key,
-            value: Number(r.failures ?? 0),
-            highlight: Number(r.failures ?? 0),
-          })),
+          barSeries: timedFailures.barSeries,
         },
       };
     },
@@ -291,26 +292,31 @@ export const EVENT_PAGES: EventPage[] = [
     nav: 'Outgoing Requests',
     icon: GlobeIcon,
     subtitle: 'HTTP calls your app made to other services, grouped by host',
-    keyLabel: 'Domain',
+    keyLabel: 'Host',
     sectionUnit: ['Domain', 'Domains'],
     emptyLabel: 'No outgoing requests found',
-    renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
-      { label: 'Methods', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.methods ?? '—'}</span> },
-      { label: 'Requests', align: 'right', render: (g) => num(g.count) },
-      { label: 'Failed', align: 'right', render: (g) => <span className={Number(g.failed) ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}>{num(g.failed)}</span> },
+      { label: '1/2/3xx', align: 'right', render: (g) => num(Math.max(0, Number(g.count ?? 0) - Number(g.failed ?? 0))) },
+      { label: 'Failed', align: 'right', render: (g) => <ErrorCount count={Number(g.failed ?? 0)} /> },
+      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
       { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'Max', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
     ],
     rowColumns: [
-      { label: 'Status', render: (r) => (r.status_code === null || r.status_code === undefined ? <Badge variant="error">no response</Badge> : <Badge variant={Number(r.status_code) >= 400 ? 'error' : 'success'} className="font-mono">{String(r.status_code)}</Badge>) },
-      { label: 'Request', render: (r) => <span className="font-mono text-xs">{`${r.method} ${r.url ?? ''}`}</span> },
+      { label: 'Status', render: (r) => (r.status_code === null || r.status_code === undefined ? <Badge variant="error">no response</Badge> : <StatusCodeText status={Number(r.status_code)} source="request" />) },
+      { label: 'Request', render: (r) => <span>{`${r.method} ${r.url ?? ''}`}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    chartDeck: (s, rows) => {
+    chartDeck: (s, rows, range) => {
       const total = Number(s.requests ?? 0);
       const failed = Number(s.failed ?? 0);
       const ok = Math.max(0, total - failed);
+      const timed = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: (r) => Number(r.count ?? 0),
+        highlight: (r) => Number(r.failed ?? 0),
+        buckets: 36,
+      });
       return {
         left: {
           title: 'Requests',
@@ -321,13 +327,9 @@ export const EVENT_PAGES: EventPage[] = [
           ],
           kind: 'bar',
           unit: 'requests',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: r.key,
-            value: Number(r.count ?? 0),
-            highlight: Number(r.failed ?? 0),
-          })),
+          barSeries: timed.barSeries,
         },
-        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+        right: durationCard(rows, range, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
       };
     },
     filters: [
@@ -342,29 +344,30 @@ export const EVENT_PAGES: EventPage[] = [
     nav: 'Mail',
     icon: EnvelopeIcon,
     subtitle: 'Emails your app sent, grouped by mailable',
-    keyLabel: 'Mailable',
-    sectionUnit: ['mail', 'mails'],
+    keyLabel: 'Mail',
+    sectionUnit: ['Mail', 'Mails'],
     emptyLabel: 'No mail found',
     isClassKey: true,
-    renderKey: renderClassKey,
     columns: [
-      { label: 'Mailer', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.mailers ?? '—'}</span> },
-      { label: 'Sent', align: 'right', render: (g) => num(g.count) },
-      { label: 'Recipients', align: 'right', render: (g) => num(g.recipients) },
-      { label: 'Failed', align: 'right', render: (g) => <span className={Number(g.failed) ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}>{num(g.failed)}</span> },
+      { label: 'Count', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
       { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'Max', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
     ],
     rowColumns: [
       { label: 'Status', render: (r) => <Badge variant={r.failed ? 'error' : 'success'}>{r.failed ? 'failed' : 'sent'}</Badge> },
-      { label: 'Subject', render: (r) => <span className="text-sm">{String(r.subject ?? '—')}</span> },
+      { label: 'Subject', render: (r) => <span className="font-sans text-xs">{String(r.subject ?? '—')}</span> },
       { label: 'To / CC / BCC', align: 'right', render: (r) => `${num(r.to_count)} / ${num(r.cc_count)} / ${num(r.bcc_count)}` },
-      { label: 'Attachments', align: 'right', render: (r) => num(r.attachments) },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    chartDeck: (s, rows) => {
+    chartDeck: (s, rows, range) => {
       const sent = Number(s.sent ?? 0);
       const failed = Number(s.failed ?? 0);
+      const timed = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: (r) => Number(r.count ?? 0),
+        highlight: (r) => Number(r.failed ?? 0),
+        buckets: 36,
+      });
       return {
         left: {
           title: 'Mails',
@@ -377,13 +380,9 @@ export const EVENT_PAGES: EventPage[] = [
             : undefined,
           kind: 'bar',
           unit: 'mails',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: splitClassName(r.key).short,
-            value: Number(r.count ?? 0),
-            highlight: Number(r.failed ?? 0),
-          })),
+          barSeries: timed.barSeries,
         },
-        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+        right: durationCard(rows, range, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
       };
     },
     filters: [{ param: 'status', label: 'Status', options: ['all', 'sent', 'failed'] }],
@@ -399,22 +398,25 @@ export const EVENT_PAGES: EventPage[] = [
     sectionUnit: ['Notification', 'Notifications'],
     emptyLabel: 'No notifications found',
     isClassKey: true,
-    renderKey: renderClassKey,
     columns: [
-      { label: 'Channels', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.channels ?? '—'}</span> },
-      { label: 'Sent', align: 'right', render: (g) => num(g.count) },
-      { label: 'Failed', align: 'right', render: (g) => <span className={Number(g.failed) ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}>{num(g.failed)}</span> },
+      { label: 'Count', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
       { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'Max', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
     ],
     rowColumns: [
       { label: 'Status', render: (r) => <Badge variant={r.failed ? 'error' : 'success'}>{r.failed ? 'failed' : 'sent'}</Badge> },
-      { label: 'Channel', render: (r) => <span className="font-mono text-xs text-kumo-subtle">{String(r.channel ?? '—')}</span> },
+      { label: 'Channel', render: (r) => <span className="text-neutral-500">{String(r.channel ?? '—')}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    chartDeck: (s, rows) => {
+    chartDeck: (s, rows, range) => {
       const sent = Number(s.sent ?? 0);
       const failed = Number(s.failed ?? 0);
+      const timed = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: (r) => Number(r.count ?? 0),
+        highlight: (r) => Number(r.failed ?? 0),
+        buckets: 36,
+      });
       return {
         left: {
           title: 'Notifications',
@@ -427,13 +429,9 @@ export const EVENT_PAGES: EventPage[] = [
             : undefined,
           kind: 'bar',
           unit: 'notifications',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: splitClassName(r.key).short,
-            value: Number(r.count ?? 0),
-            highlight: Number(r.failed ?? 0),
-          })),
+          barSeries: timed.barSeries,
         },
-        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+        right: durationCard(rows, range, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
       };
     },
     filters: [
@@ -451,26 +449,32 @@ export const EVENT_PAGES: EventPage[] = [
     keyLabel: 'Task',
     sectionUnit: ['Task', 'Tasks'],
     emptyLabel: 'No scheduled tasks found',
-    renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
     columns: [
-      { label: 'Cron', render: (g) => <span className="font-mono text-xs text-kumo-subtle">{g.cron ?? '—'}</span> },
-      { label: 'Runs', align: 'right', render: (g) => num(g.count) },
+      { label: 'Schedule', render: (g) => <span className="text-neutral-600 dark:text-neutral-400">{g.cron ?? '—'}</span> },
       { label: 'Processed', align: 'right', render: (g) => num(g.processed) },
-      { label: 'Failed', align: 'right', render: (g) => <span className={Number(g.failed) ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}>{num(g.failed)}</span> },
-      { label: 'Skipped', align: 'right', render: (g) => num(g.skipped) },
+      { label: 'Skipped', align: 'right', render: (g) => <WarningCount count={Number(g.skipped ?? 0)} /> },
+      { label: 'Failed', align: 'right', render: (g) => <ErrorCount count={Number(g.failed ?? 0)} /> },
+      { label: 'Total', align: 'right', render: (g) => <span className="font-medium">{num(g.count)}</span> },
       { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
-      { label: 'Max', align: 'right', render: (g) => dur(g.max_ms) },
+      { label: 'P95', align: 'right', render: (g) => dur(g.max_ms) },
     ],
     rowColumns: [
       { label: 'Status', render: (r) => <Badge variant={r.status === 'failed' ? 'error' : r.status === 'skipped' ? 'secondary' : 'success'}>{String(r.status ?? '—')}</Badge> },
-      { label: 'Cron', render: (r) => <span className="font-mono text-xs text-kumo-subtle">{`${r.cron ?? '—'}${r.timezone ? ` (${r.timezone})` : ''}`}</span> },
+      { label: 'Cron', render: (r) => <span className="text-neutral-500">{`${r.cron ?? '—'}${r.timezone ? ` (${r.timezone})` : ''}`}</span> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    chartDeck: (s, rows) => {
+    chartDeck: (s, rows, range) => {
       const runs = Number(s.runs ?? 0);
       const failed = Number(s.failed ?? 0);
       const skipped = Number(s.skipped ?? 0);
       const processed = Math.max(0, runs - failed - skipped);
+      const timed = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: (r) => Number(r.count ?? 0),
+        warn: (r) => Number(r.skipped ?? 0),
+        highlight: (r) => Number(r.failed ?? 0),
+        buckets: 36,
+      });
       return {
         left: {
           title: 'Scheduled Tasks',
@@ -482,14 +486,9 @@ export const EVENT_PAGES: EventPage[] = [
           ],
           kind: 'bar',
           unit: 'runs',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: r.key,
-            value: Number(r.count ?? 0),
-            warn: Number(r.skipped ?? 0),
-            highlight: Number(r.failed ?? 0),
-          })),
+          barSeries: timed.barSeries,
         },
-        right: durationCard(rows, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
+        right: durationCard(rows, range, s.avg_ms !== undefined ? Number(s.avg_ms) : undefined),
       };
     },
     filters: [{ param: 'status', label: 'Status', options: ['all', 'processed', 'failed', 'skipped'] }],
@@ -521,37 +520,51 @@ export const EVENT_PAGES: EventPage[] = [
     nav: 'Users',
     icon: UsersIcon,
     subtitle: 'Authenticated users and the traces they triggered',
-    keyLabel: 'User ID',
+    keyLabel: 'User',
     sectionUnit: ['User', 'Users'],
     emptyLabel: 'No users found',
-    renderKey: (key) => <span className="font-mono text-xs">{key}</span>,
+    renderKey: (key, row) => (
+      <span className="inline-flex min-w-0 items-baseline gap-2.5">
+        <span className="truncate font-medium text-neutral-900 dark:text-white">{row?.name ? String(row.name) : `User #${key}`}</span>
+        <span className="truncate text-neutral-500 dark:text-neutral-400">#{key}</span>
+      </span>
+    ),
     columns: [
-      { label: 'Name', render: (g) => <span className="text-sm">{g.name ?? '—'}</span> },
-      { label: 'Traces', align: 'right', render: (g) => num(g.count) },
-      { label: 'Requests', align: 'right', render: (g) => num(g.requests) },
-      { label: '5xx', align: 'right', render: (g) => <span className={Number(g.server_errors) ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}>{num(g.server_errors)}</span> },
-      { label: 'Exceptions', align: 'right', render: (g) => <span className={Number(g.exceptions) ? 'font-medium text-kumo-danger' : 'text-kumo-subtle'}>{num(g.exceptions)}</span> },
-      { label: 'Avg', align: 'right', render: (g) => dur(g.avg_ms) },
+      { label: '1/2/3xx', align: 'right', render: (g) => num(Math.max(0, Number(g.requests ?? 0) - Number(g.server_errors ?? 0))) },
+      { label: '4xx', align: 'right', render: (g) => <WarningCount count={Number(g.client_errors ?? 0)} /> },
+      { label: '5xx', align: 'right', render: (g) => <ErrorCount count={Number(g.server_errors ?? 0)} /> },
+      { label: 'Requests', align: 'right', render: (g) => <span className="font-medium">{num(g.requests)}</span> },
+      { label: 'Queued Jobs', align: 'right', render: (g) => num(g.queued_jobs ?? 0) },
+      { label: 'Exceptions', align: 'right', render: (g) => <ErrorCount count={Number(g.exceptions ?? 0)} /> },
     ],
     rowColumns: [
-      { label: 'Status', render: (r) => (r.status_code === null || r.status_code === undefined ? '—' : <Badge variant={Number(r.status_code) >= 500 ? 'error' : Number(r.status_code) >= 400 ? 'warning' : 'success'} className="font-mono">{String(r.status_code)}</Badge>) },
+      { label: 'Status', render: (r) => (r.status_code === null || r.status_code === undefined ? '—' : <StatusCodeText status={Number(r.status_code)} source="request" />) },
       { label: 'Type', render: (r) => <Badge variant="outline">{String(r.execution_source ?? '—')}</Badge> },
       { label: 'Duration', align: 'right', render: (r) => dur(r.duration_ms) },
     ],
-    chartDeck: (s, rows) => {
+    chartDeck: (s, rows, range) => {
       const usersCount = Number(s.users ?? rows.length);
       const traces = Number(s.traces ?? 0);
       const exceptions = Number(s.exceptions ?? 0);
+      const timedUsers = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: () => 1,
+        buckets: 36,
+      });
+      const timedTraces = bucketTimeSeries(rows, range, {
+        timestamp: (r) => r.last_seen,
+        value: (r) => Number(r.count ?? 0),
+        highlight: (r) => Number(r.exceptions ?? 0),
+        buckets: 36,
+      });
       return {
         left: {
           title: 'Authenticated Users',
           value: compact(usersCount),
           kind: 'bar',
-          unit: 'requests',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: r.name ? String(r.name) : `#${r.key}`,
-            value: Number(r.requests ?? r.count ?? 0),
-          })),
+          barTone: 'success',
+          unit: 'users',
+          barSeries: timedUsers.barSeries,
         },
         right: {
           title: 'Requests',
@@ -561,12 +574,9 @@ export const EVENT_PAGES: EventPage[] = [
             { label: 'EXCEPTIONS', value: compact(exceptions), tone: 'error' },
           ],
           kind: 'bar',
-          unit: 'traces',
-          barSeries: rows.slice(0, 16).map((r) => ({
-            label: r.name ? String(r.name) : `#${r.key}`,
-            value: Number(r.count ?? 0),
-            highlight: Number(r.exceptions ?? 0),
-          })),
+          barTone: 'success',
+          unit: 'requests',
+          barSeries: timedTraces.barSeries,
         },
       };
     },

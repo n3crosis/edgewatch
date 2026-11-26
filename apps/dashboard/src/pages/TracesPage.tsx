@@ -3,7 +3,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
-import { BugIcon, FunnelSimpleIcon, GitBranchIcon, HardDrivesIcon, TimerIcon, UserIcon, WarningCircleIcon, XIcon } from '@phosphor-icons/react';
+import { BugIcon, FunnelSimpleIcon, HardDrivesIcon, TimerIcon, UserIcon, WarningCircleIcon, XIcon } from '@phosphor-icons/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
@@ -16,10 +16,11 @@ import {
   PageHeader,
   PaginationBar,
   Panel,
+  RowActionLink,
   SearchBox,
-  SourceBadge,
-  StatusBadge,
-  TimeAgo,
+  SourceTag,
+  StatusCodeText,
+  UtcDate,
   useRowNavigate,
 } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
@@ -247,43 +248,42 @@ export default function TracesPage() {
       ) : loading || !data ? (
         <Panel><Loading rows={10} /></Panel>
       ) : data.data.length === 0 ? (
-        <Panel>
-          <Empty
-            icon={<GitBranchIcon size={14} />}
-            action={hasFilters ? <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button> : undefined}
-          >
-            No traces found
-          </Empty>
-        </Panel>
+        <Empty
+          action={hasFilters ? <Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button> : undefined}
+        >
+          No traces found
+        </Empty>
       ) : (
         <FloatingTablePanel
           fetching={!loading && fetching}
           footer={
-            <PaginationBar
-              status={`Showing ${data.data.length} trace${data.data.length === 1 ? '' : 's'}`}
-              onFirst={() => pageTo(null, [])}
-              firstDisabled={!cursor}
-              onPrevious={() => pageTo(history[history.length - 1], history.slice(0, -1))}
-              previousDisabled={history.length === 0}
-              onNext={() => {
-                const next = data?.next_cursor;
-                if (next) pageTo(next, [...history, cursor]);
-              }}
-              nextDisabled={fetching || !!error || !data?.next_cursor}
-            />
+            cursor || history.length > 0 || data.next_cursor ? (
+              <PaginationBar
+                status={`Showing ${data.data.length} trace${data.data.length === 1 ? '' : 's'}`}
+                onFirst={() => pageTo(null, [])}
+                firstDisabled={!cursor}
+                onPrevious={() => pageTo(history[history.length - 1], history.slice(0, -1))}
+                previousDisabled={history.length === 0}
+                onNext={() => {
+                  const next = data?.next_cursor;
+                  if (next) pageTo(next, [...history, cursor]);
+                }}
+                nextDisabled={fetching || !!error || !data?.next_cursor}
+              />
+            ) : undefined
           }
         >
           <Table>
             <Table.Header>
               <Table.Row>
-                <Table.Head>When</Table.Head>
+                <Table.Head>Date</Table.Head>
                 <Table.Head>Type</Table.Head>
                 <Table.Head>Execution</Table.Head>
-                <Table.Head>Status</Table.Head>
+                <Table.Head className="text-right">Status</Table.Head>
                 <Table.Head className="text-right">Duration</Table.Head>
                 <Table.Head className="text-right">Queries</Table.Head>
-                <Table.Head>User</Table.Head>
-                <Table.Head>Origin</Table.Head>
+                <Table.Head>Server</Table.Head>
+                <Table.Head className="w-12" />
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -293,31 +293,26 @@ export default function TracesPage() {
                   onClick={rowNav(`/traces/${t.trace_id}`)}
                   className="cursor-pointer"
                 >
-                  <Table.Cell className="text-xs"><TimeAgo iso={t.timestamp} /></Table.Cell>
-                  <Table.Cell><SourceBadge source={t.execution_source} /></Table.Cell>
+                  <Table.Cell><UtcDate iso={t.timestamp} /></Table.Cell>
+                  <Table.Cell><SourceTag source={t.execution_source} /></Table.Cell>
                   <Table.Cell className="max-w-md">
-                    <div className="flex items-center gap-2.5">
-                      <Link title={t.name} className="truncate font-mono text-xs text-kumo-strong hover:text-kumo-link hover:underline" to={`/traces/${t.trace_id}`}>
+                    <div className="flex items-center gap-2">
+                      <Link title={t.name} className="truncate text-neutral-900 hover:underline dark:text-white" to={`/traces/${t.trace_id}`}>
                         {t.name}
                       </Link>
                       {t.exception_count > 0 && (
-                        <Badge variant="error" className="inline-flex shrink-0 items-center gap-1">
-                          <BugIcon size={12} aria-hidden />
-                          <span>{t.exception_count > 1 ? `${t.exception_count} exceptions` : 'exception'}</span>
-                        </Badge>
+                        <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded bg-rose-600 px-1.5 font-mono text-[10px] font-semibold uppercase text-white">
+                          <BugIcon size={11} aria-hidden />
+                          <span>{t.exception_count}</span>
+                        </span>
                       )}
                     </div>
                   </Table.Cell>
-                  <Table.Cell><StatusBadge status={t.status_code} source={t.execution_source} /></Table.Cell>
-                  <Table.Cell className={`text-right font-mono text-xs tabular-nums ${t.duration_ms > 2000 ? 'font-medium text-kumo-danger' : t.duration_ms > 500 ? 'font-medium text-kumo-warning' : ''}`}>
-                    {ms(t.duration_ms)}
-                  </Table.Cell>
-                  <Table.Cell className="text-right font-mono tabular-nums text-kumo-subtle">{t.query_count}</Table.Cell>
-                  <Table.Cell className="font-mono text-xs text-kumo-subtle">{t.user ? `#${t.user}` : '—'}</Table.Cell>
-                  <Table.Cell>
-                    <div className="font-mono text-xs text-kumo-default">{t.server}</div>
-                    <div className="mt-0.5 text-[11px] text-kumo-subtle">{t.environment || 'Unknown'}</div>
-                  </Table.Cell>
+                  <Table.Cell className="text-right"><StatusCodeText status={t.status_code} source={t.execution_source} /></Table.Cell>
+                  <Table.Cell className="text-right">{ms(t.duration_ms)}</Table.Cell>
+                  <Table.Cell className="text-right text-neutral-600 dark:text-neutral-400">{t.query_count}</Table.Cell>
+                  <Table.Cell className="text-neutral-600 dark:text-neutral-400">{t.server}</Table.Cell>
+                  <Table.Cell className="text-right"><RowActionLink to={`/traces/${t.trace_id}`} label={`Inspect ${t.name}`} /></Table.Cell>
                 </Table.Row>
               ))}
             </Table.Body>

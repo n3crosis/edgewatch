@@ -1,66 +1,83 @@
 import UserFilter from '@/components/UserFilter';
-import { useId, useState } from 'react';
-import LogInspector, { logLevelVariant } from '@/components/LogInspector';
-import { chartFooterDate } from '@/components/charts';
-import { Badge } from '@cloudflare/kumo/components/badge';
+import { useEffect, useId, useMemo, useState } from 'react';
+import LogInspector from '@/components/LogInspector';
+import { chartFooterDate, isoUtcTimestamp } from '@/components/charts';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Popover } from '@cloudflare/kumo/components/popover';
-import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { cn } from '@cloudflare/kumo/utils';
-import { ArrowRightIcon, CaretDownIcon, CheckIcon, FileTextIcon, XIcon } from '@phosphor-icons/react';
+import { CaretDownIcon, CheckIcon, SidebarSimpleIcon } from '@phosphor-icons/react';
 import { useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
-import { ErrorState, Loading, PageHeader, PaginationBar, Panel, SearchBox, useRowNavigate } from '@/components/common';
+import { ErrorState, Loading, PageHeader, PaginationBar, Panel, SearchBox, SourceTag } from '@/components/common';
 import { api, useAsync } from '@/lib/api';
-import { ago, time } from '@/lib/format';
 import { useRange } from '@/lib/range';
 import { inlineLogContext } from '@/lib/ui-helpers';
 
-const LEVELS = ['all', 'emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'] as const;
+const LEVELS = ['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'] as const;
+type LogLevel = (typeof LEVELS)[number];
 
-function levelAccent(level: unknown): string {
-  const variant = logLevelVariant(level);
-  if (variant === 'error') return 'border-l-[3px] border-l-kumo-danger';
-  if (variant === 'warning') return 'border-l-[3px] border-l-kumo-warning';
-  return 'border-l-[3px] border-l-transparent';
-}
-
-function LogLevelTag({ level }: { level: unknown }) {
+/** 1:1 Capture log level styling (`Logs-C7KeUP_O.js` `x`). */
+export function LogLevelTag({ level }: { level: unknown }) {
   const lower = String(level ?? 'info').toLowerCase();
-  if (lower === 'emergency') return <Badge variant="error" className="font-mono uppercase">Emergency</Badge>;
-  if (lower === 'alert') return <Badge variant="warning" className="font-mono uppercase">Alert</Badge>;
-  if (lower === 'critical') return <Badge variant="warning" className="font-mono uppercase">Critical</Badge>;
+  if (lower === 'emergency') {
+    return (
+      <span className="inline-flex h-5 items-center rounded bg-rose-600 px-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-white">
+        Emergency
+      </span>
+    );
+  }
+  if (lower === 'alert') {
+    return (
+      <span className="inline-flex h-5 items-center rounded bg-amber-500 px-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-white">
+        Alert
+      </span>
+    );
+  }
+  if (lower === 'critical') {
+    return (
+      <span className="inline-flex h-5 items-center rounded bg-amber-300/90 px-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-amber-950 dark:bg-amber-400/25 dark:text-amber-300">
+        Critical
+      </span>
+    );
+  }
   const color =
     lower === 'error'
       ? 'text-rose-500 dark:text-rose-400'
       : lower === 'warning'
-        ? 'text-orange-500 dark:text-orange-300'
+        ? 'text-orange-400 dark:text-orange-300'
         : lower === 'notice'
-          ? 'text-emerald-600 dark:text-emerald-400'
+          ? 'text-emerald-500 dark:text-emerald-400'
           : lower === 'info'
             ? 'text-blue-600 dark:text-blue-400'
-            : 'text-neutral-500 dark:text-neutral-400';
-  return <span className={`font-mono text-xs font-medium uppercase ${color}`}>[{lower}]</span>;
+            : 'text-neutral-600 dark:text-neutral-400';
+  return <span className={`font-mono text-xs uppercase ${color}`}>[{lower}]</span>;
 }
 
-function logTimestamp(iso: string): string {
-  const date = new Date(iso);
-  const now = new Date();
-  const sameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
-  const clock = sameDay ? time(iso) : `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${time(iso)}`;
-  return `${ago(iso)} · ${clock}`;
-}
-
-/** Capture-exact `[LEVEL  All v]` filter pill backed by a Kumo Popover. */
-function LevelPicker({
-  value,
-  onChange,
+/** 1:1 Capture `LevelFilter-C5qPcF6y.js` multi-select `[LEVEL All v]` popover with Clear + Apply. */
+function LevelFilter({
+  selected,
+  onApply,
 }: {
-  value: string;
-  onChange: (next: string) => void;
+  selected: LogLevel[];
+  onApply: (next: LogLevel[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const label = value === 'all' ? 'All' : value.charAt(0).toUpperCase() + value.slice(1);
+  const [draft, setDraft] = useState<LogLevel[]>(selected);
+
+  useEffect(() => {
+    setDraft(selected);
+  }, [selected, open]);
+
+  const toggle = (lvl: LogLevel) => {
+    setDraft((prev) => (prev.includes(lvl) ? prev.filter((item) => item !== lvl) : [...prev, lvl]));
+  };
+
+  const apply = (next: LogLevel[]) => {
+    onApply(next);
+    setOpen(false);
+  };
+
+  const isActive = selected.length > 0;
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
@@ -70,47 +87,85 @@ function LevelPicker({
             type="button"
             aria-label="Log level"
             className={cn(
-              'group inline-flex h-8 items-center gap-2 rounded-lg border px-2.5 text-sm transition-colors',
-              value !== 'all'
-                ? 'border-blue-500/70 bg-blue-50/70 text-blue-900 dark:border-blue-500/40 dark:bg-blue-950/50 dark:text-blue-200'
-                : 'border-neutral-200 bg-white text-neutral-800 hover:border-blue-500 hover:text-neutral-950 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-neutral-200 dark:hover:border-white/15 dark:hover:text-white',
+              'flex h-8 items-center rounded-md border px-2 py-1 transition-all',
+              isActive
+                ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+                : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-700 dark:border-white/[0.05] dark:bg-neutral-800 dark:text-neutral-200 dark:hover:border-white/10',
             )}
           >
-            <span className="font-mono text-[11px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-              Level
-            </span>
-            <span className="font-medium">{label}</span>
-            <CaretDownIcon size={12} className="shrink-0 text-neutral-500 group-hover:text-blue-600 dark:text-neutral-400 dark:group-hover:text-white" aria-hidden />
+            <div className="flex items-baseline gap-2.5">
+              <span
+                className={cn(
+                  'font-mono text-[11px] uppercase',
+                  isActive ? 'text-white/80 dark:text-white/50' : 'text-neutral-600 dark:text-white/50',
+                )}
+              >
+                Level
+              </span>
+              <span className="whitespace-nowrap text-sm">
+                {selected.length === 0
+                  ? 'All'
+                  : selected
+                      .slice(0, 2)
+                      .map((l) => l.charAt(0).toUpperCase() + l.slice(1))
+                      .join(', ')}
+              </span>
+            </div>
+            {selected.length > 2 && (
+              <span className="ml-2 inline-flex items-center rounded bg-white/20 px-1.5 py-0.5 font-mono text-[10px] leading-none text-white">
+                +{selected.length - 2}
+              </span>
+            )}
+            <CaretDownIcon size={14} className="ml-2.5 shrink-0 opacity-80" aria-hidden />
           </button>
         }
       />
       <Popover.Portal>
         <Popover.Positioner side="bottom" align="end" sideOffset={8}>
-          <Popover.Popup className="w-44 rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl shadow-black/10 dark:border-white/10 dark:bg-neutral-900">
-            <div className="space-y-0.5">
-              {LEVELS.map((option) => {
-                const active = option === value;
-                const optionLabel = option === 'all' ? 'All levels' : option.charAt(0).toUpperCase() + option.slice(1);
+          <Popover.Popup className="w-[260px] rounded-xl border border-neutral-200 bg-white p-2 shadow-xl shadow-black/15 dark:border-white/10 dark:bg-neutral-900">
+            <ul className="space-y-0.5">
+              {LEVELS.map((lvl) => {
+                const checked = draft.includes(lvl);
                 return (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => {
-                      onChange(option);
-                      setOpen(false);
-                    }}
-                    className={cn(
-                      'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs transition-colors',
-                      active
-                        ? 'bg-neutral-100 font-medium text-neutral-900 dark:bg-white/[0.08] dark:text-white'
-                        : 'text-neutral-600 hover:bg-neutral-100/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-white/[0.04] dark:hover:text-white',
-                    )}
-                  >
-                    <span>{optionLabel}</span>
-                    {active && <CheckIcon size={12} className="text-blue-600 dark:text-emerald-400" aria-hidden />}
-                  </button>
+                  <li key={lvl}>
+                    <button
+                      type="button"
+                      onClick={() => toggle(lvl)}
+                      className="flex w-full items-center justify-between rounded-lg px-4 py-2 text-sm text-neutral-800 transition-colors hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700/60"
+                    >
+                      <span className="capitalize">{lvl}</span>
+                      <CheckIcon
+                        size={14}
+                        className={cn('mr-1 shrink-0 transition-opacity', checked ? 'opacity-100 text-blue-600 dark:text-emerald-400' : 'opacity-0')}
+                        aria-hidden
+                      />
+                    </button>
+                  </li>
                 );
               })}
+            </ul>
+            <div className="mt-4 grid grid-cols-2 gap-3 px-1 pb-1">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full justify-center"
+                onClick={() => {
+                  setDraft([]);
+                  apply([]);
+                }}
+              >
+                Clear
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                className="w-full justify-center"
+                onClick={() => apply(draft)}
+              >
+                Apply
+              </Button>
             </div>
           </Popover.Popup>
         </Popover.Positioner>
@@ -121,31 +176,50 @@ function LevelPicker({
 
 export default function LogsPage() {
   const { range } = useRange();
-  const rowNav = useRowNavigate();
   const fallbackId = useId();
   const [params, setParams] = useSearchParams();
   const user = params.get('user') || undefined;
-  const level = params.get('level') ?? 'all';
+  const rawLevels = params.get('levels') ?? params.get('level') ?? '';
+  const selectedLevels = useMemo(
+    () =>
+      rawLevels
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s): s is LogLevel => (LEVELS as readonly string[]).includes(s)),
+    [rawLevels],
+  );
+  const apiLevel = selectedLevels.length === 1 ? selectedLevels[0] : 'all';
   const q = params.get('q') ?? '';
   const cursor = params.get('cursor');
   const entryId = params.get('entry');
   const { data, loading, fetching, error } = useAsync(
-    () => api.logEntries(range, level, q, cursor, user),
-    [range, level, q, cursor, user],
+    () => api.logEntries(range, apiLevel, q, cursor, user),
+    [range, apiLevel, q, cursor, user],
     { keepPreviousData: true },
   );
 
-  const update = (patch: Record<string, string | null>) => setParams((previous) => {
-    const next = new URLSearchParams(previous);
-    for (const [key, value] of Object.entries(patch)) value === null ? next.delete(key) : next.set(key, value);
-    return next;
-  });
+  const visibleRows = useMemo(() => {
+    const rows = data?.data ?? [];
+    if (selectedLevels.length <= 1) return rows;
+    const allowed = new Set<string>(selectedLevels);
+    return rows.filter((row) => allowed.has(String(row.level ?? '').toLowerCase()));
+  }, [data?.data, selectedLevels]);
 
-  const hasFilters = Boolean(q || level !== 'all' || user);
+  const update = (patch: Record<string, string | null>) =>
+    setParams((previous) => {
+      const next = new URLSearchParams(previous);
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === null) next.delete(key);
+        else next.set(key, value);
+      }
+      return next;
+    });
+
   const latestTimestamp = chartFooterDate(Date.now());
 
   return (
-    <div id={fallbackId} tabIndex={-1} className="space-y-5">
+    <div id={fallbackId} tabIndex={-1} className="space-y-4 md:space-y-6">
+      {/* 1:1 Nightwatch `Index-D7SUa4GT.js` header: Search logs + LevelFilter + UserFilter + RangePicker */}
       <PageHeader
         title="Logs"
         actions={
@@ -156,121 +230,130 @@ export default function LogsPage() {
               onChange={(value) => update({ q: value || null, cursor: null, entry: null })}
               placeholder="Search logs"
             />
-            <LevelPicker
-              value={level}
-              onChange={(value) => update({ level: value === 'all' ? null : value, cursor: null, entry: null })}
+            <LevelFilter
+              selected={selectedLevels}
+              onApply={(next) =>
+                update({
+                  level: null,
+                  levels: next.length === 0 ? null : next.join(','),
+                  cursor: null,
+                  entry: null,
+                })
+              }
             />
             <UserFilter />
-            {hasFilters && (
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={XIcon}
-                onClick={() => update({ q: null, level: null, user: null, cursor: null, entry: null })}
-              >
-                Clear
-              </Button>
-            )}
           </>
         }
       />
 
       {error ? (
         <ErrorState error={error} />
-      ) : loading || !data ? (
+      ) : loading && !data ? (
         <Panel><Loading /></Panel>
-      ) : data.data.length === 0 ? (
-        <div className="space-y-10">
-          <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 text-center font-mono text-xs uppercase tracking-widest text-neutral-900 dark:border-white/[0.06] dark:bg-white/[0.025] dark:text-neutral-200">
-            End of logs
-          </div>
-          <div className="flex flex-col items-center gap-4 text-center">
-            <div className="font-mono text-xs uppercase tracking-widest text-neutral-600 dark:text-neutral-400">
-              Latest as of {latestTimestamp} <span className="text-neutral-400 dark:text-neutral-500">UTC</span>
-            </div>
-            {hasFilters && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => update({ q: null, level: null, user: null, cursor: null, entry: null })}
-              >
-                Clear filters
-              </Button>
-            )}
-          </div>
-        </div>
       ) : (
-        <div className="space-y-3">
-          <Panel fetching={!loading && fetching}>
-            <div className="divide-y divide-kumo-hairline">
-              {data.data.map((row, i) => {
-                const contextPreview = inlineLogContext(row.context);
-                const inspectUrl = `/logs?${new URLSearchParams({ ...Object.fromEntries(params), entry: String(row.id) })}`;
+        <section>
+          {/* 1:1 Nightwatch `Index-D7SUa4GT.js`: only show "End of logs" when list is empty */}
+          {visibleRows.length === 0 && (
+            <div className="flex h-16 w-full items-center justify-center">
+              <div className="w-full rounded-lg border border-neutral-200 bg-white p-3 text-center font-mono text-sm uppercase dark:border-white/5 dark:bg-white/[0.02]">
+                End of logs
+              </div>
+            </div>
+          )}
+
+          {/* 1:1 Capture CSS subgrid single-line floating log cards (`Logs-C7KeUP_O.js`) */}
+          {visibleRows.length > 0 && (
+            <div
+              className={cn(
+                'grid grid-cols-[auto_auto_auto_1fr_auto] gap-x-4 gap-y-1 transition-opacity duration-150',
+                !loading && fetching && 'opacity-65',
+              )}
+            >
+              {visibleRows.map((row, i) => {
+                const hasContext = Boolean(inlineLogContext(row.context));
+                const isSelected = entryId === String(row.id);
+                const isEmergency = String(row.level).toLowerCase() === 'emergency';
                 return (
-                  /* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard navigation is provided by the inner Details Link */
-                  <article
-                    onClick={rowNav(inspectUrl)}
-                    className={`cursor-pointer px-5 py-3.5 transition-colors hover:bg-neutral-50 sm:px-6 dark:hover:bg-white/[0.03] ${levelAccent(row.level)}`}
+                  <div
                     key={String(row.id ?? `${row.trace_id}-${row.timestamp}-${i}`)}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-2.5 text-xs text-kumo-subtle">
-                        <LogLevelTag level={row.level} />
-                        <Tooltip asChild content={new Date(row.timestamp).toLocaleString()}>
-                          <time dateTime={row.timestamp} className="cursor-default font-mono tabular-nums">{logTimestamp(row.timestamp)}</time>
-                        </Tooltip>
-                        <span>·</span>
-                        <span className="font-mono">{row.server || 'Unknown server'}</span>
-                        {row.user && (
-                          <>
-                            <span>·</span>
-                            <span className="font-mono">#{row.user}</span>
-                          </>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-4 text-xs">
-                        <Link
-                          id={`log-${row.id}`}
-                          aria-haspopup="dialog"
-                          className="inline-flex items-center gap-1 font-medium text-kumo-link hover:underline focus-visible:outline-2"
-                          to={inspectUrl}
-                        >
-                          <FileTextIcon size={13} aria-hidden />
-                          <span>Details</span>
-                        </Link>
-                        <Link className="inline-flex items-center gap-1 font-medium text-kumo-link hover:underline" to={`/traces/${row.trace_id}`}>
-                          <span>Trace</span>
-                          <ArrowRightIcon size={12} aria-hidden />
-                        </Link>
-                      </div>
-                    </div>
-                    <p className="mt-2 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-kumo-strong">{row.message}</p>
-                    {contextPreview && (
-                      <div className="mt-2 truncate rounded-lg bg-kumo-recessed/70 px-3 py-1.5 font-mono text-xs text-kumo-subtle">
-                        {contextPreview}
-                      </div>
+                    id={`log-${row.id}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-haspopup="dialog"
+                    onClick={() => update({ entry: String(row.id) })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        update({ entry: String(row.id) });
+                      }
+                    }}
+                    className={cn(
+                      'group/log col-span-full grid cursor-pointer grid-cols-subgrid items-start rounded-md border py-1.5 pr-2 pl-3 text-left font-mono text-xs leading-loose shadow-2xs transition-colors',
+                      isEmergency
+                        ? 'border-rose-200 bg-rose-100 hover:bg-rose-200 dark:border-rose-900 dark:bg-[#4C0519]/80 dark:hover:bg-rose-800'
+                        : isSelected
+                          ? 'border-neutral-400 bg-neutral-50 dark:border-neutral-700/50 dark:bg-neutral-800/80'
+                          : 'border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-700/20 dark:bg-neutral-800/25 dark:hover:bg-neutral-800',
                     )}
-                  </article>
+                  >
+                    <time dateTime={row.timestamp} className="whitespace-nowrap tabular-nums text-neutral-900 dark:text-neutral-200">
+                      {isoUtcTimestamp(row.timestamp)}
+                      <span className="ml-1 text-neutral-400 dark:text-neutral-500">UTC</span>
+                    </time>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <SourceTag source={row.server ? 'REQUEST' : 'LOG'} />
+                      <Link
+                        to={`/traces/${row.trace_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="max-w-36 truncate text-neutral-600 hover:text-neutral-900 hover:underline dark:text-neutral-400 dark:hover:text-white"
+                        title={String(row.server || row.trace_id)}
+                      >
+                        {row.server || row.trace_id.slice(0, 12)}
+                      </Link>
+                    </span>
+                    <span className="whitespace-nowrap">
+                      <LogLevelTag level={row.level} />
+                    </span>
+                    <span className="min-w-0 break-all text-neutral-900 dark:text-neutral-100">
+                      {row.message}
+                    </span>
+                    <span className="relative flex size-6 items-center justify-center">
+                      <SidebarSimpleIcon
+                        size={13}
+                        className="hidden text-neutral-500 group-hover/log:block dark:text-neutral-400"
+                        aria-hidden
+                      />
+                      {hasContext && (
+                        <span
+                          className="size-[5px] rounded-full bg-neutral-400 group-hover/log:hidden dark:bg-neutral-700"
+                          aria-hidden
+                        />
+                      )}
+                    </span>
+                  </div>
                 );
               })}
             </div>
-            {(cursor || data.next_cursor) && (
+          )}
+
+          {(cursor || data?.next_cursor) && (
+            <div className="mt-4 rounded-lg border border-neutral-200 bg-white dark:border-white/[0.06] dark:bg-white/[0.025]">
               <PaginationBar
-                status={`Showing ${data.data.length} log ${data.data.length === 1 ? 'entry' : 'entries'}`}
+                status={`Showing ${visibleRows.length} log ${visibleRows.length === 1 ? 'entry' : 'entries'}`}
                 onFirst={() => update({ cursor: null })}
                 firstDisabled={!cursor || fetching}
-                onNext={() => update({ cursor: data.next_cursor ?? null })}
-                nextDisabled={fetching || !!error || !data.next_cursor}
+                onNext={() => update({ cursor: data?.next_cursor ?? null })}
+                nextDisabled={fetching || !!error || !data?.next_cursor}
                 nextLabel="Older"
               />
-            )}
-          </Panel>
-          {!data.next_cursor && (
-            <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3 text-center font-mono text-xs uppercase tracking-widest text-neutral-700 dark:border-white/[0.06] dark:bg-white/[0.025] dark:text-neutral-300">
-              End of logs
             </div>
           )}
-        </div>
+
+          {/* 1:1 Nightwatch `Index-D7SUa4GT.js` footer */}
+          <div className="w-full rounded-md pt-16 pb-24 text-center font-mono text-sm uppercase text-neutral-600 dark:text-white/20">
+            Latest as of {latestTimestamp} UTC
+          </div>
+        </section>
       )}
 
       <LogInspector
@@ -278,11 +361,16 @@ export default function LogsPage() {
         entryId={entryId}
         range={range}
         fallbackId={fallbackId}
-        onClose={() => setParams((previous) => {
-          const next = new URLSearchParams(previous);
-          next.delete('entry');
-          return next;
-        }, { replace: true })}
+        onClose={() =>
+          setParams(
+            (previous) => {
+              const next = new URLSearchParams(previous);
+              next.delete('entry');
+              return next;
+            },
+            { replace: true },
+          )
+        }
       />
     </div>
   );

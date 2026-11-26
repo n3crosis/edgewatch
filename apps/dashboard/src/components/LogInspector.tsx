@@ -1,10 +1,10 @@
-import { Badge } from '@cloudflare/kumo/components/badge';
-import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { ArrowSquareOutIcon, ClockIcon, CloudIcon, FolderSimpleIcon, HardDrivesIcon, ListBulletsIcon, UserIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowUpRightIcon, ListBulletsIcon, XIcon } from '@phosphor-icons/react';
 import { useRef } from 'react';
-import { scopedPath } from './ScopedLink';
+import { isoUtcTimestamp } from './charts';
+import Link, { scopedPath } from './ScopedLink';
 import { CopyButton, Empty, ErrorState, Loading } from './common';
+import { LogLevelTag } from '@/pages/LogsPage';
 import { api, useAsync } from '@/lib/api';
 import { useEnvironment } from '@/lib/environment';
 import { useProject } from '@/lib/project';
@@ -46,8 +46,12 @@ export default function LogInspector({
   const { environment } = useEnvironment();
   const lastEntry = useRef<string | null>(null);
   if (entryId) lastEntry.current = entryId;
-  const { data, error, loading } = useAsync(() => entryId ? api.logEntry(entryId, range, user) : Promise.resolve(null), [entryId, range, user]);
+  const { data, error, loading } = useAsync(
+    () => (entryId ? api.logEntry(entryId, range, user) : Promise.resolve(null)),
+    [entryId, range, user],
+  );
   const formattedContext = data ? formatLogContext(data.context) : '';
+  const hasContext = Boolean(data && data.context !== null && data.context !== undefined && data.context !== '' && data.context !== '{}' && data.context !== '[]');
 
   return (
     <Dialog.Root
@@ -57,86 +61,90 @@ export default function LogInspector({
         if (!open) (document.getElementById(`log-${lastEntry.current}`) ?? document.getElementById(fallbackId))?.focus();
       }}
     >
-      <Dialog size="xl" className="max-h-[85vh] overflow-auto p-6 sm:p-8">
-        <div className="mb-6 flex items-start justify-between gap-4 border-b border-kumo-hairline pb-5">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2.5">
-              <Dialog.Title className="text-lg font-semibold text-kumo-strong">Log entry</Dialog.Title>
-              {data && <Badge variant={logLevelVariant(data.level)}>{data.level}</Badge>}
-            </div>
-            <Dialog.Description className="mt-1 text-xs text-kumo-subtle">
-              Captured message, structured context, and originating execution
-            </Dialog.Description>
-          </div>
-          <Dialog.Close render={(props) => <Button {...props} variant="ghost" shape="square" size="sm" icon={<XIcon />} aria-label="Close log entry" />} />
+      {/* 1:1 Nightwatch `Logs-C7KeUP_O.js` (`S`) header + Source card + Log Context drawer */}
+      <Dialog size="xl" className="max-h-[85vh] overflow-hidden p-0">
+        <div className="flex h-12 items-center space-x-4 border-b border-neutral-200 dark:border-white/[0.08]">
+          <Dialog.Close
+            render={(props) => (
+              <button
+                {...props}
+                type="button"
+                aria-label="Close log entry"
+                className="flex h-full w-12 shrink-0 items-center justify-center border-r border-neutral-200 bg-neutral-100 text-neutral-600 transition-colors hover:bg-neutral-200 hover:text-neutral-900 dark:border-white/[0.08] dark:bg-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white"
+              >
+                <XIcon size={16} aria-hidden />
+              </button>
+            )}
+          />
+          <Dialog.Title className="font-mono text-sm leading-4 font-normal text-neutral-900 dark:text-white">
+            {data ? `${isoUtcTimestamp(data.timestamp)} UTC` : 'Log entry'}
+          </Dialog.Title>
         </div>
-        {error ? (
-          <ErrorState error={error} />
-        ) : loading ? (
-          <Loading />
-        ) : !data ? (
-          <Empty icon={<ListBulletsIcon size={32} className="text-kumo-subtle" />}>
-            This log entry is unavailable in the selected project, environment, user or time window. It may have expired.
-          </Empty>
-        ) : (
-          <div className="space-y-6 text-sm">
-            <dl className="grid grid-cols-2 gap-x-8 gap-y-4 rounded-xl border border-kumo-hairline bg-kumo-elevated/60 p-5 sm:grid-cols-3">
-              <div>
-                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><ClockIcon size={13} aria-hidden />Timestamp</dt>
-                <dd className="mt-1 font-mono text-xs text-kumo-strong">{new Date(data.timestamp).toLocaleString()}</dd>
+
+        <div className="max-h-[calc(85vh-3rem)] overflow-y-auto">
+          {error ? (
+            <div className="p-6"><ErrorState error={error} /></div>
+          ) : loading ? (
+            <div className="p-6"><Loading /></div>
+          ) : !data ? (
+            <div className="p-6">
+              <Empty icon={<ListBulletsIcon size={32} className="text-kumo-subtle" />}>
+                This log entry is unavailable in the selected project, environment, user or time window. It may have expired.
+              </Empty>
+            </div>
+          ) : (
+            <>
+              <div className="mx-6 mt-6 flex items-start justify-between gap-3 font-mono text-sm leading-6">
+                <div className="min-w-0 space-x-2">
+                  <LogLevelTag level={data.level} />
+                  <span className="whitespace-pre-wrap break-words text-neutral-900 dark:text-neutral-100">
+                    {data.message}
+                  </span>
+                </div>
+                <CopyButton text={String(data.message ?? '')} label="Copy message" className="shrink-0" />
               </div>
-              <div>
-                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><FolderSimpleIcon size={13} aria-hidden />Project</dt>
-                <dd className="mt-1 font-mono text-xs text-kumo-strong">{data.project_id}</dd>
+
+              <div className="space-y-4 p-6">
+                {/* Source card matching Nightwatch `Logs-C7KeUP_O.js` */}
+                <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white font-mono text-sm leading-6 dark:border-white/[0.08] dark:bg-white/[0.02]">
+                  <div className="inline-flex min-h-11 w-full items-center justify-between gap-2 border-b border-neutral-200 px-4 py-2.5 dark:border-white/[0.06] dark:bg-white/[0.02]">
+                    <p className="text-left font-sans text-sm leading-5 font-medium text-neutral-900 dark:text-white">
+                      Source
+                    </p>
+                    {data.execution_available ? (
+                      <Link
+                        to={scopedPath(`/traces/${data.trace_id}`, projectId, range, environment)}
+                        className="inline-flex h-6 items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 font-mono text-[11px] font-medium uppercase text-neutral-700 transition-colors hover:border-blue-500 hover:text-neutral-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-neutral-200 dark:hover:bg-neutral-700 dark:hover:text-white"
+                      >
+                        <span>{data.server ? 'REQUEST' : 'TRACE'}</span>
+                        <ArrowUpRightIcon size={13} className="text-emerald-500" aria-hidden />
+                      </Link>
+                    ) : (
+                      <span className="font-mono text-xs text-neutral-500">Unavailable</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-4 text-xs leading-6 text-neutral-700 dark:text-neutral-300">
+                    <span>{data.server || data.trace_id}</span>
+                    {data.user && <span className="text-neutral-500 dark:text-neutral-400">User #{data.user}</span>}
+                  </div>
+                </div>
+
+                {/* Log Context card */}
+                <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white dark:border-white/[0.08] dark:bg-white/[0.02]">
+                  <div className="inline-flex min-h-11 w-full items-center justify-between gap-2 border-b border-neutral-200 px-4 py-2.5 dark:border-white/[0.06] dark:bg-white/[0.02]">
+                    <p className="text-left text-sm leading-5 font-medium text-neutral-900 dark:text-white">
+                      Log Context
+                    </p>
+                    {hasContext && <CopyButton text={formattedContext} label="Copy context" />}
+                  </div>
+                  <pre className="overflow-x-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-neutral-700 dark:text-neutral-300">
+                    {formattedContext}
+                  </pre>
+                </div>
               </div>
-              <div>
-                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><CloudIcon size={13} aria-hidden />Environment</dt>
-                <dd className="mt-1 text-xs text-kumo-strong">{data.environment || 'Unknown'}</dd>
-              </div>
-              <div>
-                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><HardDrivesIcon size={13} aria-hidden />Server</dt>
-                <dd className="mt-1 font-mono text-xs text-kumo-strong">{data.server || 'Not captured'}</dd>
-              </div>
-              <div>
-                <dt className="flex items-center gap-1.5 text-xs font-medium text-kumo-subtle"><UserIcon size={13} aria-hidden />User</dt>
-                <dd className="mt-1 font-mono text-xs text-kumo-strong">{data.user ? `#${data.user}` : 'Not captured'}</dd>
-              </div>
-            </dl>
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-kumo-subtle">Message</h3>
-                <CopyButton text={String(data.message ?? '')} label="Copy message" />
-              </div>
-              <pre className="whitespace-pre-wrap break-words rounded-xl border border-kumo-hairline bg-kumo-recessed p-4 font-mono text-xs leading-6 text-kumo-strong">{data.message}</pre>
-            </section>
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-kumo-subtle">Context</h3>
-                {data.context !== null && data.context !== undefined && data.context !== '' && <CopyButton text={formattedContext} label="Copy context" />}
-              </div>
-              <pre className="whitespace-pre-wrap break-words rounded-xl border border-kumo-hairline bg-kumo-recessed p-4 font-mono text-xs leading-6 text-kumo-default">{formattedContext}</pre>
-            </section>
-            <section className="flex flex-wrap items-center justify-between gap-4 border-t border-kumo-hairline pt-5">
-              <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-kumo-subtle">Originating execution</h3>
-                {!data.execution_available && (
-                  <p className="mt-1 text-xs text-kumo-subtle">The originating execution is unavailable. It may not have been captured or may have expired.</p>
-                )}
-              </div>
-              {data.execution_available && (
-                <LinkButton
-                  href={scopedPath(`/traces/${data.trace_id}`, projectId, range, environment)}
-                  variant="secondary"
-                  size="sm"
-                  icon={ArrowSquareOutIcon}
-                  className="font-mono"
-                >
-                  {data.trace_id}
-                </LinkButton>
-              )}
-            </section>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </Dialog>
     </Dialog.Root>
   );

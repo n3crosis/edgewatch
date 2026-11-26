@@ -1,10 +1,10 @@
-import { exceptionHandling } from '@/lib/exception-handling';
+import { useMemo, useState } from 'react';
 import UserFilter from '@/components/UserFilter';
 import { timeWindow } from '@edgewatch/shared/time-window';
 import { useSearchParams } from 'react-router-dom';
 import { groupListState, groupListLink, updateGroupList } from '@/lib/group-list';
 import Link from '@/components/ScopedLink';
-import { BarChart, MetricChartCard, Sparkline, rangeFooterBounds } from '@/components/charts';
+import { BarChart, MetricChartCard, rangeFooterBounds } from '@/components/charts';
 import {
   CardTray,
   Empty,
@@ -14,20 +14,21 @@ import {
   PageHeader,
   PaginationBar,
   Panel,
+  RowActionLink,
   SearchBox,
   SectionBar,
+  SegmentedToggle,
+  SortableLabel,
   TimeAgo,
   useRowNavigate,
 } from '@/components/common';
-import { splitClassName } from '@/lib/ui-helpers';
-import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Table } from '@cloudflare/kumo/components/table';
-import { Tabs } from '@cloudflare/kumo/components/tabs';
-import { BugIcon, XIcon } from '@phosphor-icons/react';
 import { api, useAsync } from '@/lib/api';
 import { bucketTime, compact } from '@/lib/format';
 import { useRange } from '@/lib/range';
+
+type ExcSort = 'last_seen' | 'count' | 'users';
 
 export default function ExceptionsPage() {
   const { range } = useRange();
@@ -35,42 +36,74 @@ export default function ExceptionsPage() {
   const [params, setParams] = useSearchParams();
   const user = params.get('user') || undefined;
   const { q, handled, offset } = groupListState(params);
+  const [sortBy, setSortBy] = useState<ExcSort>('last_seen');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
   const update = (patch: Record<string, string>) => setParams((previous) => updateGroupList(previous, patch));
-  const clearFilters = () => setParams((previous) => {
-    const next = updateGroupList(previous, { q: '', handled: '' });
-    next.delete('user');
-    return next;
-  });
-  const { data: page, error, loading, fetching } = useAsync(() => api.exceptionList(range, q, handled, offset, user), [range, q, handled, offset, user], { keepPreviousData: true });
+  const clearFilters = () =>
+    setParams((previous) => {
+      const next = updateGroupList(previous, { q: '', handled: '' });
+      next.delete('user');
+      return next;
+    });
+
+  const { data: page, error, loading, fetching } = useAsync(
+    () => api.exceptionList(range, q, handled, offset, user),
+    [range, q, handled, offset, user],
+    { keepPreviousData: true },
+  );
+
   const needle = q.trim();
-  const data = page?.data ?? [];
+  const rawData = page?.data ?? [];
   const hasFilters = Boolean(needle || handled !== 'all' || user);
 
+  const toggleSort = (col: ExcSort) => {
+    if (sortBy === col) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortBy(col);
+      setSortDir('desc');
+    }
+  };
+
+  const data = useMemo(() => {
+    const dir = sortDir === 'desc' ? -1 : 1;
+    return [...rawData].sort((a, b) => {
+      if (sortBy === 'count') return (a.count - b.count) * dir;
+      if (sortBy === 'users') return (a.users - b.users) * dir;
+      return (Date.parse(a.last_seen) - Date.parse(b.last_seen)) * dir;
+    });
+  }, [rawData, sortBy, sortDir]);
+
   const win = timeWindow(range);
-  const bucketCount = data[0]?.trend.length ?? 24;
+  const bucketCount = rawData[0]?.trend.length ?? 24;
   const aggSeries = Array.from({ length: bucketCount }, (_, idx) => {
     let total = 0;
     let unhandled = 0;
-    for (const row of data) {
+    for (const row of rawData) {
       const v = row.trend[idx] ?? 0;
       total += v;
       if (!row.handled) unhandled += v;
     }
     return {
       label: win ? bucketTime(win.since + idx * win.width, range) : `#${idx + 1}`,
+      ts: win ? Math.round(win.since + idx * win.width) : undefined,
       value: total,
       highlight: unhandled,
     };
   });
-  const totalOccurrences = data.reduce((sum, e) => sum + e.count, 0);
-  const handledTotal = data.reduce((sum, e) => sum + (e.handled_count ?? (e.handled ? e.count : 0)), 0);
-  const unhandledTotal = data.reduce((sum, e) => sum + (e.unhandled_count ?? (e.handled ? 0 : e.count)), 0);
+
+  const totalOccurrences = rawData.reduce((sum, e) => sum + e.count, 0);
+  const handledTotal = rawData.reduce((sum, e) => sum + (e.handled_count ?? (e.handled ? e.count : 0)), 0);
+  const unhandledTotal = rawData.reduce((sum, e) => sum + (e.unhandled_count ?? (e.handled ? 0 : e.count)), 0);
+  const handledGroups = rawData.filter((e) => e.handled).length;
+  const unhandledGroups = rawData.filter((e) => !e.handled).length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6 xl:space-y-10">
       <PageHeader title="Exceptions" actions={<UserFilter />} />
 
-      {/* Capture-exact full-width Occurrences chart card */}
+      {/* 1:1 Nightwatch `Index-SImc_d6u.js` full-width Occurrences chart card */}
       <CardTray>
         <MetricChartCard
           fetching={!loading && fetching}
@@ -81,29 +114,32 @@ export default function ExceptionsPage() {
             { label: 'Unhandled', value: compact(unhandledTotal), tone: 'error' },
           ]}
         >
-          <BarChart bounds={rangeFooterBounds(range)} series={aggSeries} tone="neutral" unit="occurrences" />
+          <BarChart height={238} bounds={rangeFooterBounds(range)} series={aggSeries} tone="neutral" unit="occurrences" />
         </MetricChartCard>
       </CardTray>
 
-      <div>
+      {/* 1:1 Nightwatch `Index-SImc_d6u.js` section — no SectionBar icon, Search + Handled/Unhandled toggle with counts */}
+      <div className="grid gap-1 md:gap-4">
         <SectionBar
-          icon={<BugIcon />}
           title={`${data.length} Exception${data.length === 1 ? '' : 's'}`}
           controls={
             <>
-              <SearchBox value={q} onChange={(value) => update({ q: value })} placeholder="Search exceptions" className="w-full sm:w-64" />
-              <Tabs
-                variant="segmented"
-                size="sm"
-                value={handled}
-                onValueChange={(value) => update({ handled: value })}
-                tabs={[{ value: 'all', label: 'View all' }, { value: 'handled', label: 'Handled' }, { value: 'unhandled', label: 'Unhandled' }]}
+              <SearchBox
+                value={q}
+                onChange={(value) => update({ q: value })}
+                placeholder="Search exceptions"
+                className="w-full sm:w-64"
               />
-              {hasFilters && (
-                <Button variant="ghost" size="sm" icon={XIcon} onClick={clearFilters}>
-                  Clear
-                </Button>
-              )}
+              <SegmentedToggle
+                className="max-md:hidden"
+                value={handled}
+                onChange={(value) => update({ handled: value })}
+                options={[
+                  { value: 'all', label: 'View all' },
+                  { value: 'handled', label: 'Handled', count: { value: handledGroups, tone: 'default' } },
+                  { value: 'unhandled', label: 'Unhandled', count: { value: unhandledGroups, tone: 'error' } },
+                ]}
+              />
             </>
           }
         />
@@ -122,48 +158,72 @@ export default function ExceptionsPage() {
           <FloatingTablePanel
             fetching={!loading && fetching}
             footer={
-              <PaginationBar
-                status={`${data.length} exception group${data.length === 1 ? '' : 's'} on this page`}
-                onPrevious={() => update({ offset: String(Math.max(0, offset - 100)) })}
-                previousDisabled={offset === 0 || fetching}
-                onNext={() => update({ offset: String(page?.next_offset ?? 0) })}
-                nextDisabled={fetching || !!error || page?.next_offset == null}
-              />
+              offset > 0 || page?.next_offset != null ? (
+                <PaginationBar
+                  status={`${data.length} exception group${data.length === 1 ? '' : 's'} on this page`}
+                  onPrevious={() => update({ offset: String(Math.max(0, offset - 100)) })}
+                  previousDisabled={offset === 0 || fetching}
+                  onNext={() => update({ offset: String(page?.next_offset ?? 0) })}
+                  nextDisabled={fetching || !!error || page?.next_offset == null}
+                />
+              ) : undefined
             }
           >
             <Table>
               <Table.Header>
                 <Table.Row>
+                  <Table.Head className="w-28 text-right">
+                    <SortableLabel align="right" active={sortBy === 'last_seen'} direction={sortDir} onClick={() => toggleSort('last_seen')}>
+                      Last Seen
+                    </SortableLabel>
+                  </Table.Head>
                   <Table.Head>Exception</Table.Head>
-                  <Table.Head>Trend</Table.Head>
-                  <Table.Head className="text-right">Events</Table.Head>
-                  <Table.Head className="text-right">Users</Table.Head>
-                  <Table.Head className="text-right">Last seen</Table.Head>
-                  <Table.Head className="text-right">First seen</Table.Head>
+                  <Table.Head className="w-24 text-right">
+                    <SortableLabel align="right" active={sortBy === 'count'} direction={sortDir} onClick={() => toggleSort('count')}>
+                      Count
+                    </SortableLabel>
+                  </Table.Head>
+                  <Table.Head className="w-24 text-right">
+                    <SortableLabel align="right" active={sortBy === 'users'} direction={sortDir} onClick={() => toggleSort('users')}>
+                      Users
+                    </SortableLabel>
+                  </Table.Head>
+                  <Table.Head className="w-12" />
                 </Table.Row>
               </Table.Header>
               <Table.Body>
                 {data.map((e) => {
-                  const { short, namespace } = splitClassName(e.class);
                   const target = groupListLink(`/exceptions/${e.group}`, params);
                   return (
                     <Table.Row key={e.group} onClick={rowNav(target)} className="cursor-pointer">
-                      <Table.Cell className="max-w-xl whitespace-normal">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link to={target} className="truncate font-mono text-sm font-semibold text-kumo-danger hover:underline">
-                            {short}
-                          </Link>
-                          <Badge variant={e.handled ? 'secondary' : 'error'} className="shrink-0 font-mono uppercase">{exceptionHandling(e)}</Badge>
-                          {namespace && <span className="truncate font-mono text-xs text-kumo-subtle">{namespace}</span>}
-                        </div>
-                        <div title={e.message} className="mt-1 truncate text-xs text-kumo-default">{e.message}</div>
-                        <div title={`${e.file}:${e.line}`} className="mt-0.5 truncate font-mono text-[11px] text-kumo-subtle">{e.file}:{e.line}</div>
+                      <Table.Cell className="text-right">
+                        <TimeAgo iso={e.last_seen} />
                       </Table.Cell>
-                      <Table.Cell><Sparkline values={e.trend} className="text-kumo-danger" label="occurrences" /></Table.Cell>
-                      <Table.Cell className="text-right font-mono font-medium tabular-nums">{compact(e.count)}</Table.Cell>
-                      <Table.Cell className="text-right font-mono tabular-nums text-kumo-subtle">{compact(e.users)}</Table.Cell>
-                      <Table.Cell className="text-right text-xs"><TimeAgo iso={e.last_seen} /></Table.Cell>
-                      <Table.Cell className="text-right text-xs"><TimeAgo iso={e.first_seen} /></Table.Cell>
+                      <Table.Cell className="max-w-2xl">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          {!e.handled && (
+                            <span className="inline-flex h-5 shrink-0 items-center rounded bg-rose-600 px-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-white">
+                              Unhandled
+                            </span>
+                          )}
+                          <Link
+                            to={target}
+                            className="shrink-0 font-mono text-xs font-medium text-neutral-700 hover:underline max-md:truncate dark:text-neutral-100"
+                          >
+                            {e.class}
+                          </Link>
+                          {e.message && (
+                            <span title={e.message} className="min-w-0 truncate text-neutral-500 max-md:hidden dark:text-neutral-400">
+                              {e.message}
+                            </span>
+                          )}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell className="text-right font-medium">{compact(e.count)}</Table.Cell>
+                      <Table.Cell className="text-right text-neutral-600 dark:text-neutral-400">{compact(e.users)}</Table.Cell>
+                      <Table.Cell className="text-right">
+                        <RowActionLink to={target} label={`Inspect ${e.class}`} />
+                      </Table.Cell>
                     </Table.Row>
                   );
                 })}

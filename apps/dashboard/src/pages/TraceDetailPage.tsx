@@ -1,7 +1,22 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import Link from '@/components/ScopedLink';
-import { CardTray, CopyButton, Empty, ErrorState, Loading, PageHeader, Panel, SourceBadge, Sql, Stat, StatusBadge, useRowNavigate } from '@/components/common';
+import {
+  CopyButton,
+  DescriptionList,
+  DescriptionRow,
+  Empty,
+  ErrorState,
+  HttpMethodText,
+  Loading,
+  PageHeader,
+  Panel,
+  SourceBadge,
+  Sql,
+  StatusBadge,
+  UtcDate,
+  useRowNavigate,
+} from '@/components/common';
 import Waterfall, { SPAN_COLORS, SPAN_ICONS, SPAN_LABELS } from '@/components/Waterfall';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Banner } from '@cloudflare/kumo/components/banner';
@@ -11,19 +26,13 @@ import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { cn } from '@cloudflare/kumo/utils';
 import {
-  BugIcon,
+  ArrowUpRightIcon,
   CaretLeftIcon,
   CaretRightIcon,
-  ClockIcon,
-  CloudIcon,
-  CpuIcon,
-  DatabaseIcon,
   GitBranchIcon,
   GitForkIcon,
-  HardDrivesIcon,
+  GlobeIcon,
   MagnifyingGlassIcon,
-  TimerIcon,
-  UserIcon,
   WarningIcon,
   XIcon,
 } from '@phosphor-icons/react';
@@ -32,6 +41,25 @@ import { bytes, ms } from '@/lib/format';
 import { traceView, updateTraceView } from '@/lib/trace-view';
 import { filterSpansByQuery, traceTimeBreakdown } from '@/lib/ui-helpers';
 import type { Span, SpanType } from '@/lib/types';
+
+/** 1:1 Nightwatch `Show-CzNI7yfT.js` (`V`) URL formatter highlighting origin/path/query/hash. */
+function FormattedUrl({ url, className }: { url: string; className?: string }) {
+  try {
+    const parsed = new URL(url);
+    return (
+      <span className={cn('font-mono text-sm', className)}>
+        <span className="font-medium text-neutral-900 dark:text-white">
+          {`${parsed.protocol}//${parsed.hostname}`}
+        </span>
+        <span className="text-neutral-900 dark:text-white">{parsed.pathname}</span>
+        {parsed.search && <span className="text-neutral-500 dark:text-neutral-400">{parsed.search}</span>}
+        {parsed.hash && <span className="text-neutral-500 dark:text-neutral-400">{parsed.hash}</span>}
+      </span>
+    );
+  } catch {
+    return <span className={cn('font-mono text-sm text-neutral-700 dark:text-neutral-300', className)}>{url}</span>;
+  }
+}
 
 function SpanSheet({
   span,
@@ -86,23 +114,19 @@ function SpanSheet({
                 </pre>
                 <CopyButton text={span.label} label="Copy span" className="absolute right-2.5 top-2.5" />
               </div>
-              <dl className="grid grid-cols-[120px_1fr] gap-x-5 gap-y-3.5 rounded-xl border border-kumo-hairline bg-kumo-elevated/60 p-5 text-xs">
-                <dt className="font-medium text-kumo-subtle">Start</dt>
-                <dd className="font-mono text-kumo-strong">+{ms(span.start_ms)}</dd>
-                <dt className="font-medium text-kumo-subtle">Duration</dt>
-                <dd className="font-mono text-kumo-strong">{ms(span.duration_ms)}</dd>
-                {Object.entries(span.meta ?? {}).map(([k, v]) => {
-                  const metaLabel = k.replace(/_/g, ' ').replace(/\bsql\b/i, 'SQL').replace(/^\w/, (c) => c.toUpperCase());
-                  return (
-                    <div key={k} className="contents">
-                      <dt className="font-medium text-kumo-subtle">{metaLabel}</dt>
-                      <dd className="break-all font-mono text-kumo-strong">
-                        {k === 'sql_hash' ? <Link className="text-kumo-link hover:underline" to={`/queries/${v}`}>{String(v)}</Link> : v}
-                      </dd>
-                    </div>
-                  );
-                })}
-              </dl>
+              <DescriptionList className="rounded-lg border border-neutral-200 bg-neutral-50/50 p-4 dark:border-white/[0.08] dark:bg-white/[0.02]">
+                <DescriptionRow label="Start">+{ms(span.start_ms)}</DescriptionRow>
+                <DescriptionRow label="Duration">{ms(span.duration_ms)}</DescriptionRow>
+                {Object.entries(span.meta ?? {}).map(([k, v]) => (
+                  <DescriptionRow key={k} label={k.replace(/_/g, ' ')}>
+                    {k === 'sql_hash' ? (
+                      <Link className="text-kumo-link hover:underline" to={`/queries/${v}`}>{String(v)}</Link>
+                    ) : (
+                      String(v)
+                    )}
+                  </DescriptionRow>
+                ))}
+              </DescriptionList>
               {spans.length > 1 && index >= 0 && (
                 <div className="flex items-center justify-between border-t border-kumo-hairline pt-4">
                   <span className="text-xs tabular-nums text-kumo-subtle">Span {index + 1} of {spans.length}</span>
@@ -164,74 +188,124 @@ export default function TraceDetailPage() {
   if (loading) return <Loading />;
   if (!data) {
     return (
-      <>
-        <PageHeader back={{ to: '/traces', label: 'Traces' }} title="Trace not found" />
-        <Panel>
-          <Empty
-            icon={<GitBranchIcon size={32} className="text-kumo-subtle" />}
-            description="This trace may have expired or belongs to another project."
-          >
-            Trace not found.
-          </Empty>
-        </Panel>
-      </>
+      <div className="space-y-5">
+        <PageHeader hideTelemetryControls back={{ to: '/requests', label: 'Requests' }} title="Trace not found" />
+        <Empty description="This trace may have expired or belongs to another project">Trace not found</Empty>
+      </div>
     );
   }
 
   const { trace, spans, capture, repeated_queries: repeated = [], user, related = [] } = data;
-  const userLabel = user ? user.name || user.username || `#${user.id}` : trace.user ? `#${trace.user}` : '—';
-  const queryTime = spans.filter((s) => s.type === 'query').reduce((a, s) => a + s.duration_ms, 0);
+  const split = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i.exec(trace.name);
+  const method = split ? split[1].toUpperCase() : null;
+  const routePath = split ? split[2] : trace.name;
+  const statusCode = Number(trace.status_code ?? 0);
+  const globeTone =
+    statusCode >= 500
+      ? 'text-rose-500 dark:text-rose-400'
+      : statusCode >= 400
+        ? 'text-amber-600 dark:text-amber-500'
+        : 'text-emerald-600 dark:text-emerald-500';
+
+  const spanStats = (type: SpanType) => {
+    const list = spans.filter((s) => s.type === type);
+    const total = list.reduce((sum, s) => sum + s.duration_ms, 0);
+    if (!list.length) return <span className="text-neutral-400">0 EVENTS</span>;
+    return (
+      <span>
+        {list.length} <span className="text-neutral-400">{list.length === 1 ? 'EVENT' : 'EVENTS'}</span>
+        {total > 0 && <span className="text-neutral-400"> / </span>}
+        {total > 0 && <span>{ms(total)}</span>}
+      </span>
+    );
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6 xl:space-y-10">
       <PageHeader
-        back={{ to: '/traces', label: 'Traces' }}
+        hideTelemetryControls
+        back={{ to: '/requests', label: 'Requests' }}
         documentTitle={trace.name}
-        title={<span className="font-mono">{trace.name}</span>}
-        subtitle={
-          <span className="mt-1.5 flex flex-wrap items-center gap-2.5">
-            <SourceBadge source={trace.execution_source} />
-            <StatusBadge status={trace.status_code} source={trace.execution_source} />
-            {trace.status && <Badge variant={trace.status === 'failed' ? 'error' : trace.status === 'processed' ? 'success' : 'warning'}>{trace.status}</Badge>}
-            {trace.route_action && <span className="font-mono text-xs text-kumo-subtle">{trace.route_action}</span>}
-            <span className="inline-flex items-center gap-1.5 rounded-md bg-kumo-recessed px-2.5 py-1 font-mono text-xs text-kumo-subtle">
-              {trace.trace_id}
-              <CopyButton text={trace.trace_id} label="Copy trace ID" toastMessage="Trace ID copied." className="size-5" />
-            </span>
+        title={
+          <span className="inline-flex flex-wrap items-center gap-2">
+            {method ? <HttpMethodText method={method} className="text-xl" /> : <SourceBadge source={trace.execution_source} />}
+            <span className="font-mono">{routePath}</span>
           </span>
         }
       />
 
-      <CardTray>
-        <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat label="Duration" icon={<TimerIcon size={13} />} value={ms(trace.duration_ms)} hint={`${spans.length} span${spans.length === 1 ? '' : 's'}`} tone={trace.duration_ms > 2000 ? 'bad' : trace.duration_ms > 500 ? 'warn' : 'default'} />
-          <Stat label="Queries" icon={<DatabaseIcon size={13} />} value={trace.query_count} hint={`${ms(queryTime)} in database`} />
-          <Stat label="Exceptions" icon={<BugIcon size={13} />} value={trace.exception_count} hint={trace.exception_count ? 'captured in trace' : 'clean execution'} tone={trace.exception_count ? 'bad' : 'good'} />
-          <Stat label="Peak memory" icon={<CpuIcon size={13} />} value={trace.peak_memory_usage ? bytes(trace.peak_memory_usage) : '—'} />
-        </section>
-      </CardTray>
+      {/* 1:1 Capture `Show-CzNI7yfT.js` Direct Card with status-colored Globe + Method + URL + 3-col DescriptionList + Events */}
+      <div className="grid overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-md shadow-black/[0.04] dark:border-white/[0.06] dark:bg-white/[0.02]">
+        <div className="border-b border-neutral-200/80 p-5 py-4 dark:border-white/5">
+          <div className="float-left mt-[3px] mr-1.5 flex items-center gap-1.5 font-mono text-sm font-semibold">
+            <GlobeIcon size={14} className={cn('shrink-0', globeTone)} aria-hidden />
+            {method && <span className="text-neutral-900 dark:text-white">{method}</span>}
+          </div>
+          <FormattedUrl url={routePath} className="break-all" />
+        </div>
 
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-xl border border-kumo-hairline bg-kumo-elevated/55 px-5 py-4 text-xs sm:grid-cols-4 sm:px-6">
-        <div>
-          <dt className="flex items-center gap-1.5 font-medium text-kumo-subtle"><UserIcon size={13} aria-hidden />User</dt>
-          <dd className="mt-1 truncate text-kumo-strong">
-            {userLabel}
-            {user?.username && user.name && <span className="ml-1.5 text-kumo-subtle">({user.username})</span>}
-          </dd>
+        <div className="grid gap-10 p-5">
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-2 xl:grid-cols-3">
+            <div className="flex-1">
+              <DescriptionList>
+                <DescriptionRow label="Date"><UtcDate iso={trace.timestamp} /></DescriptionRow>
+                <DescriptionRow label="Status Code"><StatusBadge status={trace.status_code} source={trace.execution_source} /></DescriptionRow>
+                <DescriptionRow label="Duration">{ms(trace.duration_ms)}</DescriptionRow>
+              </DescriptionList>
+            </div>
+            <div className="flex-1">
+              <DescriptionList>
+                <DescriptionRow label="Server">{trace.server || '—'}</DescriptionRow>
+                <DescriptionRow label="Peak Memory">{trace.peak_memory_usage ? bytes(trace.peak_memory_usage) : '—'}</DescriptionRow>
+                <DescriptionRow label="Environment">{trace.environment || '—'}</DescriptionRow>
+              </DescriptionList>
+            </div>
+            {(user || trace.user) && (
+              <div className="flex-1 space-y-2">
+                <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">User</h3>
+                <DescriptionList>
+                  {user?.name && <DescriptionRow label="Name">{user.name}</DescriptionRow>}
+                  <DescriptionRow label="Username">
+                    <Link
+                      to={`/users/${encodeURIComponent(user?.id ?? trace.user ?? '')}`}
+                      className="group inline-flex items-center gap-1.5 hover:underline"
+                    >
+                      <span>{user?.username ?? `#${user?.id ?? trace.user}`}</span>
+                      <ArrowUpRightIcon size={12} className="text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white" aria-hidden />
+                    </Link>
+                  </DescriptionRow>
+                </DescriptionList>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">Events</h3>
+              <div className="inline-flex items-center divide-x divide-neutral-200 rounded border border-neutral-200 bg-white font-mono text-[11px] dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.03]">
+                <span className="px-2 py-0.5 text-neutral-500">
+                  EVENTS <strong className="ml-1 font-medium text-neutral-900 dark:text-white">{spans.length}</strong>
+                </span>
+                <span className="px-2 py-0.5 text-neutral-500">
+                  DURATION <strong className="ml-1 font-medium text-neutral-900 dark:text-white">{ms(trace.duration_ms)}</strong>
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-x-8 gap-y-2.5 md:grid-cols-2">
+              <DescriptionList>
+                <DescriptionRow label="Queries">{spanStats('query')}</DescriptionRow>
+                <DescriptionRow label="Mail">{spanStats('mail')}</DescriptionRow>
+                <DescriptionRow label="Cache">{spanStats('cache')}</DescriptionRow>
+              </DescriptionList>
+              <DescriptionList>
+                <DescriptionRow label="Outgoing Requests">{spanStats('outgoing-request')}</DescriptionRow>
+                <DescriptionRow label="Queued Jobs">{spanStats('queued-job')}</DescriptionRow>
+                <DescriptionRow label="Exceptions">{spanStats('exception')}</DescriptionRow>
+              </DescriptionList>
+            </div>
+          </div>
         </div>
-        <div>
-          <dt className="flex items-center gap-1.5 font-medium text-kumo-subtle"><CloudIcon size={13} aria-hidden />Environment</dt>
-          <dd className="mt-1 truncate text-kumo-strong">{trace.environment || 'Unknown'}</dd>
-        </div>
-        <div>
-          <dt className="flex items-center gap-1.5 font-medium text-kumo-subtle"><HardDrivesIcon size={13} aria-hidden />Server</dt>
-          <dd className="mt-1 truncate font-mono text-kumo-strong">{trace.server || '—'}</dd>
-        </div>
-        <div>
-          <dt className="flex items-center gap-1.5 font-medium text-kumo-subtle"><ClockIcon size={13} aria-hidden />Recorded at</dt>
-          <dd className="mt-1 truncate font-mono tabular-nums text-kumo-strong">{new Date(trace.timestamp).toLocaleString()}</dd>
-        </div>
-      </dl>
+      </div>
 
       {capture && (!capture.records_available || capture.dropped_records > 0) && (
         <Banner
@@ -262,7 +336,7 @@ export default function TraceDetailPage() {
                 <li
                   key={q.sql_hash}
                   onClick={rowNav(`/queries/${q.sql_hash}`)}
-                  className="flex cursor-pointer items-center justify-between gap-4 px-6 py-3.5 text-xs transition-colors hover:bg-kumo-tint/50"
+                  className="flex cursor-pointer items-center justify-between gap-4 px-5 py-3 text-xs transition-colors hover:bg-neutral-50 dark:hover:bg-white/[0.03]"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <Badge variant="warning" className="shrink-0 font-mono">{q.count}×</Badge>
@@ -275,7 +349,7 @@ export default function TraceDetailPage() {
               ))}
             </ul>
           ) : (
-            <div className="px-6 py-4 text-xs text-kumo-subtle">
+            <div className="px-5 py-4 text-xs text-kumo-subtle">
               Detected {trace.lazy_loads} Eloquent lazy load{trace.lazy_loads === 1 ? '' : 's'} during this execution.
             </div>
           )}
@@ -297,7 +371,7 @@ export default function TraceDetailPage() {
               <li
                 key={r.trace_id}
                 onClick={rowNav(`/traces/${r.trace_id}`)}
-                className="flex cursor-pointer items-center gap-3.5 px-6 py-3.5 text-sm transition-colors hover:bg-kumo-tint/50"
+                className="flex cursor-pointer items-center gap-3.5 px-5 py-3 text-sm transition-colors hover:bg-neutral-50 dark:hover:bg-white/[0.03]"
               >
                 <SourceBadge source={r.execution_source} />
                 <Link className="truncate font-mono text-xs text-kumo-link hover:underline" to={`/traces/${r.trace_id}`}>{r.name}</Link>
@@ -313,20 +387,21 @@ export default function TraceDetailPage() {
         title={
           <span className="flex items-center gap-2.5">
             <span>Timeline</span>
-            <span className="text-xs font-normal text-kumo-subtle">
+            <span className="font-mono text-xs font-normal text-kumo-subtle">
               {filteredSpans.length === spans.length ? `${spans.length} spans` : `${filteredSpans.length} of ${spans.length} spans`}
             </span>
           </span>
         }
         actions={
-          <InputGroup size="sm" className="w-52 sm:w-64">
-            <InputGroup.Addon align="start"><MagnifyingGlassIcon className="text-kumo-subtle" /></InputGroup.Addon>
+          <InputGroup className="h-8 w-52 bg-white sm:w-64 dark:bg-white/[0.03]">
+            <InputGroup.Addon align="start"><MagnifyingGlassIcon size={14} className="text-kumo-subtle" /></InputGroup.Addon>
             <InputGroup.Input
               value={spanQuery}
               onChange={(e) => setSpanQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Escape' && spanQuery) setSpanQuery(''); }}
               placeholder="Filter spans…"
               aria-label="Filter spans"
+              className="h-8 text-sm"
             />
             {spanQuery && (
               <InputGroup.Addon align="end">
@@ -344,8 +419,8 @@ export default function TraceDetailPage() {
         }
       >
         {timeShare.length > 0 && (
-          <div className="border-b border-kumo-hairline px-5 py-4 sm:px-6">
-            <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-kumo-fill">
+          <div className="border-b border-kumo-hairline px-5 py-4">
+            <div className="flex h-2 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-white/10">
               {timeShare.map((segment) => (
                 <Tooltip key={segment.key} asChild content={`${segment.label}: ${ms(segment.ms)} (${segment.percent.toFixed(1)}%)`}>
                   <div
@@ -358,7 +433,7 @@ export default function TraceDetailPage() {
             <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-kumo-subtle">
               {timeShare.map((segment) => (
                 <span key={segment.key} className="inline-flex items-center gap-2">
-                  <span className={cn('size-2.5 rounded-full', BREAKDOWN_COLORS[segment.key])} />
+                  <span className={cn('size-2 rounded-full', BREAKDOWN_COLORS[segment.key])} />
                   <span>{segment.label}</span>
                   <span className="font-mono tabular-nums text-kumo-default">{ms(segment.ms)}</span>
                   <span className="tabular-nums">({segment.percent.toFixed(0)}%)</span>
@@ -368,17 +443,17 @@ export default function TraceDetailPage() {
           </div>
         )}
         {spanBreakdown.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 border-b border-kumo-hairline bg-kumo-elevated/40 px-5 py-3.5 sm:px-6" role="group" aria-label="Filter spans by type">
+          <div className="flex flex-wrap items-center gap-2 border-b border-kumo-hairline bg-neutral-50/60 px-5 py-3 dark:bg-white/[0.02]" role="group" aria-label="Filter spans by type">
             <button
               id={eventTypeId}
               type="button"
               aria-pressed={!eventType}
               onClick={() => updateView({ type: null, span: null })}
               className={cn(
-                'inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
+                'inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs transition-colors',
                 !eventType
-                  ? 'border-kumo-line bg-kumo-base font-medium text-kumo-strong shadow-2xs'
-                  : 'border-transparent text-kumo-subtle hover:bg-kumo-tint/60 hover:text-kumo-default',
+                  ? 'border-neutral-200 bg-white font-medium text-neutral-900 shadow-2xs dark:border-white/15 dark:bg-white/[0.06] dark:text-white'
+                  : 'border-transparent text-kumo-subtle hover:bg-white/60 hover:text-kumo-default dark:hover:bg-white/[0.04]',
               )}
             >
               <span>All</span>
@@ -394,10 +469,10 @@ export default function TraceDetailPage() {
                   aria-pressed={active}
                   onClick={() => updateView({ type: active ? null : type, span: null })}
                   className={cn(
-                    'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
+                    'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors',
                     active
-                      ? 'border-kumo-line bg-kumo-base font-medium text-kumo-strong shadow-2xs'
-                      : 'border-transparent text-kumo-subtle hover:bg-kumo-tint/60 hover:text-kumo-default',
+                      ? 'border-neutral-200 bg-white font-medium text-neutral-900 shadow-2xs dark:border-white/15 dark:bg-white/[0.06] dark:text-white'
+                      : 'border-transparent text-kumo-subtle hover:bg-white/60 hover:text-kumo-default dark:hover:bg-white/[0.04]',
                   )}
                 >
                   <span className={cn('size-2 rounded-full', SPAN_COLORS[type])} />
@@ -409,20 +484,9 @@ export default function TraceDetailPage() {
                 </button>
               );
             })}
-            {eventType && !spanBreakdown.some(([t]) => t === eventType) && (
-              <button
-                type="button"
-                aria-pressed="true"
-                onClick={() => updateView({ type: null, span: null })}
-                className="inline-flex items-center gap-2 rounded-lg border border-kumo-line bg-kumo-base px-2.5 py-1.5 text-xs font-medium text-kumo-strong"
-              >
-                <span>{eventType}</span>
-                <XIcon size={11} />
-              </button>
-            )}
           </div>
         )}
-        <div className="p-6">
+        <div className="p-5">
           {spanId && !selected && (
             <div role="status" className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-kumo-hairline bg-kumo-elevated px-4 py-2.5 text-xs text-kumo-subtle">
               <span>This event is no longer available in the stored trace.</span>
@@ -433,7 +497,8 @@ export default function TraceDetailPage() {
             <Waterfall spans={filteredSpans} total={trace.duration_ms} onSelect={(span) => updateView({ tab: 'timeline', span: span.id })} selected={selected?.id} />
           ) : (
             <Empty
-              icon={<GitBranchIcon size={32} className="text-kumo-subtle" />}
+              variant="clean"
+              icon={<GitBranchIcon size={28} className="text-kumo-subtle" />}
               action={
                 eventType || spanQuery ? (
                   <Button variant="secondary" size="sm" onClick={() => { setSpanQuery(''); updateView({ type: null, span: null }); }}>
@@ -458,4 +523,3 @@ export default function TraceDetailPage() {
     </div>
   );
 }
-
