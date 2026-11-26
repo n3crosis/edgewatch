@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqlKeyStore } from '@edgewatch/shared';
-import { createEdgeWatch, memoryRateLimiter, type EdgeWatch } from '../src/app';
+import { clientIp, createEdgeWatch, memoryRateLimiter, withClientIp, type EdgeWatch } from '../src/app';
 import { FsBlobStore } from '../src/fs-blob';
 import { SqliteQueueStore } from '../src/queue-store';
 import { LocalQueue, QueueFullError } from '../src/queue';
@@ -327,5 +327,20 @@ describe('GET /healthz on the single-process server', () => {
   it('keeps GET /health as a plain liveness check', async () => {
     const res = await (await start()).fetch(new Request('http://edgewatch.test/health'));
     expect(await res.json()).toEqual({ ok: true });
+  });
+});
+
+describe('client address', () => {
+  const spoofed = () => new Request('http://edgewatch.test/auth/login', { headers: { 'cf-connecting-ip': '1.2.3.4', 'x-forwarded-for': '9.9.9.9, 10.0.0.1' } });
+  it('replaces a client-supplied cf-connecting-ip with the socket address', () => {
+    const req = spoofed();
+    expect(withClientIp(req, clientIp(req, '203.0.113.7')).headers.get('cf-connecting-ip')).toBe('203.0.113.7');
+  });
+  it('removes cf-connecting-ip when no address is known', () => {
+    expect(withClientIp(spoofed(), null).headers.has('cf-connecting-ip')).toBe(false);
+  });
+  it('uses the first entry of the trusted proxy header when configured', () => {
+    expect(clientIp(spoofed(), '10.0.0.1', 'x-forwarded-for')).toBe('9.9.9.9');
+    expect(clientIp(new Request('http://edgewatch.test/'), '10.0.0.1', 'x-forwarded-for')).toBeNull();
   });
 });

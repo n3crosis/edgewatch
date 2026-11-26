@@ -62,6 +62,30 @@ class Context {
   passThroughOnException(): void {}
 }
 
+const STATIC_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  'x-frame-options': 'DENY',
+  'content-security-policy': "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'",
+};
+
+/**
+ * The API throttles sign-in attempts per `cf-connecting-ip`. Outside Cloudflare a client could send that header itself,
+ * so the server always replaces it with the address it observed (or removes it when there is none).
+ */
+export function withClientIp(req: Request, ip: string | null | undefined): Request {
+  const headers = new Headers(req.headers);
+  if (ip) headers.set('cf-connecting-ip', ip);
+  else headers.delete('cf-connecting-ip');
+  return new Request(req, { headers });
+}
+
+/** Client address: the first entry of `proxyHeader` (when the server sits behind a trusted proxy), else the socket peer. */
+export function clientIp(req: Request, peer: string | null | undefined, proxyHeader?: string): string | null {
+  if (proxyHeader) return req.headers.get(proxyHeader)?.split(',')[0]?.trim() || null;
+  return peer || null;
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.ico': 'image/x-icon', '.json': 'application/json', '.woff2': 'font/woff2', '.map': 'application/json', '.txt': 'text/plain',
@@ -83,7 +107,7 @@ function staticFile(dir: string, pathname: string): Response | null {
   if (!existsSync(file)) return null;
   const type = MIME[extname(file)] ?? 'application/octet-stream';
   const cache = file.includes(`${sep}assets${sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache';
-  return new Response(Bun.file(file), { headers: { 'content-type': type, 'cache-control': cache } });
+  return new Response(Bun.file(file), { headers: { ...STATIC_HEADERS, 'content-type': type, 'cache-control': cache } });
 }
 
 /** One process running the ingest, consumer and API Workers over the given stores, with an in-process queue. */

@@ -111,6 +111,7 @@ of them from its environment. Scripts read theirs from the shell.
 | `OWNER_SETUP_TOKEN` | api, server | secret | unset | Required on the browser owner claim. See [first-owner setup](#dashboard-account-routing). |
 | `OWNER_EMAIL`, `OWNER_PASSWORD`, `OWNER_NAME` | api, server | secret | unset | Creates the owner on the first request. Without these or `OWNER_SETUP_TOKEN`, setup is refused. |
 | `PORT`, `HOST` | server | env | `8080`, `0.0.0.0` | Listen address. |
+| `TRUSTED_PROXY_HEADER` | server | env | unset | Header holding the client address when the server runs behind a reverse proxy (for example `x-forwarded-for`; the first entry is used). Unset: the socket address is used and any client-sent `cf-connecting-ip` is replaced, so sign-in throttling cannot be bypassed. Only set it when every request passes through that proxy. |
 | `EDGEWATCH_DATA_DIR` | server | env | `./data` (`/data` in Docker) | SQLite file, local blobs, generated signing secret. |
 | `DATABASE_URL`, `DATABASE_POOL` | server | env | SQLite; pool `10` | `postgres://`, `mysql://` or libSQL URL for the event store. |
 | `DASHBOARD_DIR` | server | env | set in Docker | Serves the built dashboard. |

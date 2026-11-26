@@ -29,7 +29,7 @@ import { migrate as migrateMysql } from '../../../scripts/mysql-migrate';
 import { migrate as migratePostgres } from '../../../scripts/pg-migrate';
 import { Accounts } from '../../../workers/api/src/accounts';
 import { defaultDisplayName, hashPassword, normalizeEmail, passwordProblem } from '../../../workers/api/src/passwords';
-import { createEdgeWatch, VAR_NAMES } from './app';
+import { clientIp, createEdgeWatch, VAR_NAMES, withClientIp } from './app';
 import { SqliteQueueStore } from './queue-store';
 import type { IngestMessage } from '@edgewatch/shared';
 import { FsBlobStore } from './fs-blob';
@@ -160,13 +160,12 @@ if (command === 'migrate') {
     port: Number(env.PORT ?? 8080),
     hostname: env.HOST ?? '0.0.0.0',
     maxRequestBodySize: Number(env.MAX_BODY_BYTES ?? 20_000_000) + 1024,
-    fetch: env.ACCESS_LOG
-      ? async (req) => {
-          const res = await app.fetch(req);
-          console.log(`${req.method} ${new URL(req.url).pathname} ${res.status}`);
-          return res;
-        }
-      : app.fetch,
+    async fetch(raw, srv) {
+      const req = withClientIp(raw, clientIp(raw, srv.requestIP(raw)?.address, env.TRUSTED_PROXY_HEADER));
+      const res = await app.fetch(req);
+      if (env.ACCESS_LOG) console.log(`${req.method} ${new URL(req.url).pathname} ${res.status}`);
+      return res;
+    },
   });
   const ownerExists = await accounts.hasOwner();
   log('server', 'info', 'listening', {
