@@ -27,8 +27,10 @@ bun run setup:cloudflare             # find-or-create, write IDs over placeholde
 - Applies D1 migrations (`wrangler d1 migrations apply --remote`; already-applied files are skipped). `--skip-migrations` to skip.
 - Creates the ingest queue and DLQ with 14-day message retention by default. Set `EDGEWATCH_QUEUE_RETENTION_SECONDS=86400` for Workers Free on every setup run; paid plans support up to 1209600 seconds.
 - Sets R2 lifecycle rules (`incoming/` 1 day, `traces/` `EDGEWATCH_RETENTION_DAYS`+1 days), keeping other rules on the bucket.
-- Sets `TOKEN_SIGNING_SECRET` on `edgewatch-ingest` if missing; before the first deploy it reports that and you re-run it after
-  `scripts/deploy.sh`. `--skip-secret` to skip.
+- Sets `TOKEN_SIGNING_SECRET` on `edgewatch-ingest` if missing. Before the first deploy the Worker does not exist yet, so
+  the run ends with `Status: pending`, prints the exact next commands (`scripts/deploy.sh`, then `bun run setup:cloudflare`)
+  and exits 0. The second run reuses every resource and sets the secret (`Status: complete`). `--skip-secret` to skip.
+- It is one idempotent bootstrap: run it before the first deploy and again after it (or after any upgrade); both succeed.
 - `--dry-run` changes nothing: offline plan without a token, read-only API calls with one.
 - **Preflight.** Every run first checks, with reads only: each wrangler config parses and has the bindings its Worker
   reads (`API_KEYS`, `TRACES`, `INGEST_QUEUE`, and `DB` unless the config selects Hyperdrive or libSQL); the consumer

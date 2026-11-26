@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { configString, hyperdriveOrigin, parseJsonc, QUEUE_RETENTION_SECONDS, SetupError, setup, type SetupOptions } from './setup-cloudflare';
+import { configString, hyperdriveOrigin, parseJsonc, QUEUE_RETENTION_SECONDS, SetupError, setup, summary, type SetupOptions } from './setup-cloudflare';
 
 const REPO = join(import.meta.dir, '..');
 const FILES = ['workers/ingest/wrangler.jsonc', 'workers/consumer/wrangler.jsonc', 'workers/api/wrangler.jsonc'];
@@ -241,10 +241,28 @@ describe('setup-cloudflare', () => {
     expect(r.account).toBe('b');
   });
 
-  it('defers the signing secret until the ingest Worker exists, and fails loudly on migration errors', async () => {
+  it('is one idempotent bootstrap: before deploy the secret is pending with the exact next command, after deploy a re-run sets it', async () => {
     const cf = fakeCloudflare();
-    const r = await setup(opts({ token: 't', fetch: cf.fetcher }));
-    expect(r.secret).toBe('after-deploy');
+    const before = await setup(opts({ token: 't', fetch: cf.fetcher }));
+    expect(before.secret).toBe('pending');
+    expect(before.next).toEqual(['scripts/deploy.sh', 'bun run setup:cloudflare']);
+    expect(before.warnings).toEqual([]);
+    const text = summary(before, false);
+    expect(text).toMatch(/Status: pending/);
+    expect(text).toContain('  scripts/deploy.sh\n  bun run setup:cloudflare');
+
+    cf.state.scripts.set('edgewatch-ingest', []); // scripts/deploy.sh ran
+    const after = await setup(opts({ token: 't', fetch: cf.fetcher }));
+    expect(after.secret).toBe('set');
+    expect(after.next).toEqual([]);
+    expect(Object.values(after.resources).every((r) => r.action === 'exists')).toBe(true);
+    expect(summary(after, false)).toMatch(/Status: complete/);
+    expect((await setup(opts({ token: 't', fetch: cf.fetcher }))).secret).toBe('exists');
+    expect(summary(await setup(opts({ dryRun: true })), true)).toMatch(/Dry run/);
+  });
+
+  it('fails loudly on migration errors', async () => {
+    const cf = fakeCloudflare();
     await expect(setup(opts({ token: 't', fetch: cf.fetcher, run: () => ({ status: 1, output: 'boom' }) }))).rejects.toThrow(/D1 migrations failed/);
   });
 

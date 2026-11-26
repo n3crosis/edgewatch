@@ -70,7 +70,10 @@ export interface SetupResult {
   migrations: 'applied' | 'skipped' | 'planned';
   /** Migrations of the Hyperdrive database (Postgres or MySQL). */
   postgresMigrations: 'applied' | 'skipped' | 'planned' | 'off';
-  secret: 'exists' | 'set' | 'skipped' | 'planned' | 'after-deploy';
+  /** 'pending': the ingest Worker is not deployed yet, so the secret is set by re-running after scripts/deploy.sh (not an error). */
+  secret: 'exists' | 'set' | 'skipped' | 'planned' | 'pending';
+  /** The exact command(s) to run next, printed by the CLI. */
+  next: string[];
   warnings: string[];
   preflight: PreflightCheck[];
 }
@@ -177,7 +180,7 @@ export async function setup(o: SetupOptions): Promise<SetupResult> {
     const r = spawnSync(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, encoding: 'utf8' });
     return { status: r.status ?? 1, output: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   });
-  const result: SetupResult = { account: null, resources: {}, configs: [], migrations: 'skipped', postgresMigrations: 'off', secret: 'skipped', warnings: [], preflight: [] };
+  const result: SetupResult = { account: null, resources: {}, configs: [], migrations: 'skipped', postgresMigrations: 'off', secret: 'skipped', next: [], warnings: [], preflight: [] };
   const report = (checks: PreflightCheck[]) => {
     result.preflight = checks;
     for (const c of checks) log(`[preflight] ${c.status.padEnd(7)} ${c.check}: ${c.message}`);
@@ -325,8 +328,8 @@ export async function setup(o: SetupOptions): Promise<SetupResult> {
     if (!o.skipSecret) {
       const secrets = await cf<{ name: string }[]>('GET', `${a}/workers/scripts/${names.ingestScript}/secrets`, undefined, [404]);
       if (secrets.status === 404) {
-        result.secret = 'after-deploy';
-        result.warnings.push(`Worker ${names.ingestScript} is not deployed yet: run this script again after scripts/deploy.sh to set TOKEN_SIGNING_SECRET.`);
+        result.secret = 'pending';
+        if (!o.dryRun) result.next = [...DEPLOY_THEN_RERUN];
       } else if (secrets.result.some((s) => s.name === 'TOKEN_SIGNING_SECRET')) {
         result.secret = 'exists';
       } else if (o.dryRun) {
@@ -335,7 +338,7 @@ export async function setup(o: SetupOptions): Promise<SetupResult> {
         await cf('PUT', `${a}/workers/scripts/${names.ingestScript}/secrets`, { name: 'TOKEN_SIGNING_SECRET', text: randomBytes(32).toString('base64url'), type: 'secret_text' });
         result.secret = 'set';
       }
-      log(`secret  TOKEN_SIGNING_SECRET: ${result.secret}`);
+      log(`secret  TOKEN_SIGNING_SECRET: ${result.secret}${result.secret === 'pending' ? ` (Worker ${names.ingestScript} is not deployed yet)` : ''}`);
     }
   }
 
@@ -398,6 +401,22 @@ export async function setup(o: SetupOptions): Promise<SetupResult> {
 
   for (const w of result.warnings) log(`warning: ${w}`);
   return result;
+}
+
+const DEPLOY_THEN_RERUN = ['scripts/deploy.sh', 'bun run setup:cloudflare'];
+
+/** Final CLI lines for a non-validate run; a pending secret is a normal first-run state and still exits 0. */
+export function summary(result: SetupResult, dryRun: boolean): string {
+  if (dryRun) return '\nDry run: nothing was created or written.';
+  if (result.secret === 'pending') {
+    return [
+      '\nStatus: pending. Resources and configs are ready; TOKEN_SIGNING_SECRET is set once the ingest Worker exists.',
+      'Next, run exactly:',
+      ...result.next.map((cmd) => `  ${cmd}`),
+      'Re-running the setup is safe: it reuses every resource and only sets what is missing.',
+    ].join('\n');
+  }
+  return '\nStatus: complete. Next: scripts/deploy.sh (see docs/deployment.md). Re-running is safe.';
 }
 
 export interface PreflightCheck {
@@ -560,7 +579,7 @@ if (import.meta.main) {
       console.log(errors ? `\nValidation failed: ${errors} error(s). Nothing was changed.` : '\nValidation passed. Nothing was changed.');
       process.exit(errors ? 1 : 0);
     }
-    console.log(argv.includes('--dry-run') ? '\nDry run: nothing was created or written.' : '\nDone. Next: scripts/deploy.sh (see docs/deployment.md).');
+    console.log(summary(result, argv.includes('--dry-run')));
   } catch (e) {
     console.error(`\nsetup-cloudflare: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
