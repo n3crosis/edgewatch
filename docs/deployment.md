@@ -41,9 +41,84 @@ bun run setup:cloudflare             # find-or-create, write IDs over placeholde
   before the first remote change. `--validate` runs only this and exits 1 on an error; without a token the account and
   secret checks are reported as skipped. A Worker that is not deployed yet is a warning, not an error.
 
-Commit the updated configs (IDs are not secrets). The repo keeps the placeholders until a real provisioning run happens.
+Commit the updated configs (IDs are not secrets). See [Configuration reference](#configuration-reference) for the
+placeholder rules, which resources the Workers share, and every variable.
 
-The `ratelimits` binding in `workers/ingest/wrangler.jsonc` uses `namespace_id: "1001"`; pick any integer unique within your account.
+## Configuration reference
+
+### `REPLACE_WITH_*` placeholders
+
+This is the only place the placeholder rules are defined.
+
+- A resource ID in `workers/*/wrangler.jsonc` whose value starts with `REPLACE_WITH_` (for example
+  `REPLACE_WITH_KV_NAMESPACE_ID`, `REPLACE_WITH_D1_DATABASE_ID`) means "not provisioned yet".
+- `bun run setup:cloudflare` writes real IDs only over placeholders. A real ID that differs from what Cloudflare has is
+  kept with a warning unless you pass `--force`; `--dry-run` shows what it would write.
+- `scripts/deploy.sh workers` refuses to run while any `REPLACE_WITH_` value is left in a Worker config, and
+  `scripts/d1-migrate.sh --remote` while the D1 ID is still `REPLACE_WITH_D1_DATABASE_ID`.
+- The checked-in configs carry the IDs of the project's test installation, not placeholders. To use your own account,
+  put the placeholders back (or run the setup with `--force`) so the setup writes your IDs.
+
+### Shared resources (intentional)
+
+| Resource | Bound by | Why it is shared |
+|---|---|---|
+| D1 `edgewatch` (`DB`, same `database_id`) | `workers/consumer`, `workers/api` | One event store: the consumer writes, the API reads. Different IDs would split the data. `workers/ingest` has no D1 binding (it only needs one with `KEY_STORE=sql`, then it must be the same database). |
+| KV `API_KEYS` (same `id`) | ingest, consumer, api | One key store: keys created once are checked by ingest and the API; the consumer reads project quotas. |
+| R2 `edgewatch-traces` (`TRACES`) | ingest, consumer, api | Raw batches and trace blobs written by ingest/consumer are served by the API. |
+| Queue `edgewatch-ingest` (+ `-dlq`) | ingest (producer), consumer | The pipeline between them. |
+
+The setup preflight fails if the Workers bind different databases or buckets.
+
+### `ratelimits` `namespace_id`
+
+`workers/ingest/wrangler.jsonc` binds `RATE_LIMITER` with `namespace_id: "1001"` and `simple: { limit: 600, period: 60 }`.
+`namespace_id` is required by Cloudflare: a positive integer, written as a string, that identifies the counter. It must
+be unique among the rate-limit namespaces in your account, and stay the same across deploys (changing it resets the
+counters). Keep `simple.period` equal to `RATE_LIMIT_PERIOD` (10 or 60). The binding is optional: without it ingest does
+not rate limit and `/healthz` reports `rate_limiter: not_configured`.
+
+### Environment variables
+
+Worker vars live in `vars` in `workers/<name>/wrangler.jsonc`; secrets are set with
+`bunx wrangler secret put <NAME>` in that Worker's directory. The single-process server (`apps/server`, Docker) reads all
+of them from its environment. Scripts read theirs from the shell.
+
+| Variable | Used by | Kind | Default | Meaning |
+|---|---|---|---|---|
+| `TOKEN_SIGNING_SECRET` | ingest, server | secret, required | server: generated in `EDGEWATCH_DATA_DIR` | Signs short-lived agent ingest tokens. Set by `setup:cloudflare` (pending until ingest is deployed). |
+| `TOKEN_TTL` | ingest | var | `3600` | Agent ingest token lifetime, seconds. |
+| `MAX_BODY_BYTES` | ingest, server | var | `20000000` | Ingest body ceiling in decoded bytes; larger bodies get 413. Malformed values use the default. |
+| `RATE_LIMIT_PERIOD` | ingest, server | var | `60` | Rate-limit window, seconds (10 or 60 on Workers; match `ratelimits.simple.period`). |
+| `RATE_LIMIT` | server | var | `600` | Requests per project per window on the server; `0` disables. Workers use `ratelimits.simple.limit`. |
+| `INGEST_URL` | ingest, server | var | request origin + `/api/ingest` | Public ingest URL returned to agents (set it behind a custom domain). |
+| `KEY_STORE` | ingest, consumer, api | var | `kv` | `sql` stores API keys in the event store instead of KV. |
+| `HYPERDRIVE` | consumer, api | binding | unset | Postgres/MySQL event store via Hyperdrive instead of D1. |
+| `LIBSQL_URL` | consumer, api | var | unset | libSQL/Turso event store instead of D1. Cannot be combined with `HYPERDRIVE`. |
+| `LIBSQL_AUTH_TOKEN` | consumer, api, server | secret | unset | libSQL auth token; required when `LIBSQL_URL` (or a libSQL `DATABASE_URL`) is set. |
+| `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION` | ingest, consumer, api, server | var | unset; region `auto` | S3-compatible blob store instead of R2. |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | ingest, consumer, api, server | secret | unset | Required when `S3_BUCKET` is set. |
+| `RETENTION_DAYS` | consumer, server | var | `30` | Default event retention; per-project `retention_days` overrides it. |
+| `DEAD_LETTER_QUEUE` | consumer | var | `edgewatch-ingest-dlq` | Must match the consumer's `dead_letter_queue`. |
+| `ALERT_LAG_SECONDS` | consumer, server | var | `600` | Pipeline lag before an alert. |
+| `ALERT_WEBHOOK_URL` | consumer, server | secret | unset | Slack-compatible webhook for pipeline alerts. |
+| `DAILY_RECORD_QUOTA` | consumer, server | var | `0` (off) | Records per project per day before ingest answers 429. |
+| `CORS_ORIGIN` | api, server | var | `*` | Allowed origin for the read API; set it to the dashboard origin. |
+| `DASHBOARD_ORIGIN` | api, server | var | unset | Extra origin accepted for cookie-authenticated `/auth/*` and account requests. |
+| `OWNER_SETUP_TOKEN` | api, server | secret | unset | Required on the browser owner claim. See [first-owner setup](#dashboard-account-routing). |
+| `OWNER_EMAIL`, `OWNER_PASSWORD`, `OWNER_NAME` | api, server | secret | unset | Creates the owner on the first request. Without these or `OWNER_SETUP_TOKEN`, setup is refused. |
+| `PORT`, `HOST` | server | env | `8080`, `0.0.0.0` | Listen address. |
+| `EDGEWATCH_DATA_DIR` | server | env | `./data` (`/data` in Docker) | SQLite file, local blobs, generated signing secret. |
+| `DATABASE_URL`, `DATABASE_POOL` | server | env | SQLite; pool `10` | `postgres://`, `mysql://` or libSQL URL for the event store. |
+| `DASHBOARD_DIR` | server | env | set in Docker | Serves the built dashboard. |
+| `ACCESS_LOG` | server | env | off | One log line per request. |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | `setup:cloudflare`, wrangler | shell | unset | API token (required for real runs); account ID when the token sees several. |
+| `EDGEWATCH_KV_TITLE`, `EDGEWATCH_HYPERDRIVE_NAME` | `setup:cloudflare` | shell | `edgewatch-api-keys`, `edgewatch-pg` | Resource names to find or create. |
+| `EDGEWATCH_QUEUE_RETENTION_SECONDS` | `setup:cloudflare` | shell | `1209600` | Queue retention; `86400` on Workers Free. |
+| `EDGEWATCH_RETENTION_DAYS` | `setup:cloudflare` | shell | `30` | R2 lifecycle for `traces/`; use the longest retention you configure, or `0`. |
+| `EDGEWATCH_POSTGRES_URL`, `EDGEWATCH_MYSQL_URL` | `setup:cloudflare` | shell | unset | Creates Hyperdrive and runs the external-database migrations. |
+| `VITE_API_URL`, `VITE_PROJECT_ID` | dashboard build | build | unset (seed-data demo mode) | API base (`/` = same origin, or an HTTP(S) URL) and default project. Never put a key, token or password in a `VITE_*` variable. |
+| `EDGEWATCH_PAGES_PROJECT` | `deploy.sh` | shell | `edgewatch-dashboard` | Pages project name. |
 
 ## 2. Apply D1 migrations (already done by step 1; manual alternative)
 
