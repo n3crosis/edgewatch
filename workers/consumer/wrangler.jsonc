@@ -1,0 +1,25 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "edgewatch-consumer",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Workers Logs: the JSON log lines (request_id, project_id, event, ...) become queryable fields.
+  "observability": { "enabled": true },
+  // Serialize batches: trace blob merges and SQL child-row rebuilds require a single writer.
+  // max_retries with the 5 s → 10 min backoff in src/index.ts gives about 2.3 hours of retries before the DLQ.
+  "queues": {
+    "producers": [{ "binding": "INGEST_QUEUE", "queue": "edgewatch-ingest" }],
+    "consumers": [{ "queue": "edgewatch-ingest", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 20, "max_concurrency": 1, "dead_letter_queue": "edgewatch-ingest-dlq" },
+      // Dead letters: stored in D1 dead_letters + R2 dead/ for inspection and replay (GET/POST /v1/dead-letters).
+      { "queue": "edgewatch-ingest-dlq", "max_batch_size": 50, "max_batch_timeout": 5, "max_retries": 20 }]
+  },
+  // API_KEYS: the consumer writes project:<id> over-quota blocks when DAILY_RECORD_QUOTA (or a per-project quota) is reached.
+  "kv_namespaces": [{ "binding": "API_KEYS", "id": "f59e8276e5434a1c9c1912214828ba11" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "edgewatch", "database_id": "237a6592-fa23-48c4-ae87-2aa7bb710986", "migrations_dir": "../migrations" }],
+  "r2_buckets": [{ "binding": "TRACES", "bucket_name": "edgewatch-traces" }],
+  // Hourly retention job: deletes D1 rows and R2 traces older than RETENTION_DAYS (0 = keep forever).
+  // Every 5 minutes: replays requested dead letters and alerts on queue lag (ALERT_WEBHOOK_URL, set as a secret).
+  "triggers": { "crons": ["17 * * * *", "*/5 * * * *"] },
+  "vars": { "RETENTION_DAYS": "30", "DEAD_LETTER_QUEUE": "edgewatch-ingest-dlq", "ALERT_LAG_SECONDS": "600", "DAILY_RECORD_QUOTA": "0" }
+}

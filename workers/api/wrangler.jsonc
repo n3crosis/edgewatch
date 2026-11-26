@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "edgewatch-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Workers Logs: the JSON log lines (request_id, project_id, event, ...) become queryable fields.
+  "observability": { "enabled": true },
+  "kv_namespaces": [{ "binding": "API_KEYS", "id": "f59e8276e5434a1c9c1912214828ba11" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "edgewatch", "database_id": "237a6592-fa23-48c4-ae87-2aa7bb710986", "migrations_dir": "../migrations" }],
+  "r2_buckets": [{ "binding": "TRACES", "bucket_name": "edgewatch-traces" }],
+  "vars": { "CORS_ORIGIN": "*" }
+}

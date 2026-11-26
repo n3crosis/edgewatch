@@ -1,0 +1,266 @@
+# Deploying EdgeWatch to Cloudflare
+
+The Cloudflare deployment uses three Workers and a Pages dashboard. The dashboard proxies account and read API
+requests through a service binding, so browser traffic stays on its own origin. The checked-in resource IDs belong
+to the test installation; provision your own account before reusing these configs.
+
+## Prerequisites
+
+- Bun 1.4.5+ (`bun install` at the repo root) and Node 22.12+ (Wrangler runs on Node).
+- A Cloudflare account (Workers Free supports Queues with 24-hour retention), and either `bunx wrangler login` or `CLOUDFLARE_API_TOKEN`
+  (+ `CLOUDFLARE_ACCOUNT_ID`) with Workers, KV, D1, R2, Queues and Pages edit permissions.
+
+## 1. Create resources and write IDs into wrangler configs
+
+```bash
+bun run setup:cloudflare --validate  # preflight only: every binding, queue, cron, URL, the token and Worker secrets; exits 1 on errors
+bun run setup:cloudflare --dry-run   # no changes; offline plan without a token, read-only with one
+bun run setup:cloudflare             # find-or-create, write IDs over placeholders, apply migrations, set the signing secret
+```
+
+`scripts/setup-cloudflare.ts` (Cloudflare REST API, needs `CLOUDFLARE_API_TOKEN`; exits 1 with instructions if it is missing):
+
+- Finds or creates, by name: KV namespace `edgewatch-api-keys` (`EDGEWATCH_KV_TITLE`), and the D1 database, R2 bucket, queue and
+  DLQ named in the wrangler configs. Re-running reuses them, so nothing is duplicated.
+- Writes the KV and D1 IDs into `workers/*/wrangler.jsonc`, but only over `REPLACE_WITH_*` placeholders. A different real ID is
+  kept with a warning unless you pass `--force`. Comments in the configs are preserved.
+- Applies D1 migrations (`wrangler d1 migrations apply --remote`; already-applied files are skipped). `--skip-migrations` to skip.
+- Creates the ingest queue and DLQ with 14-day message retention by default. Set `EDGEWATCH_QUEUE_RETENTION_SECONDS=86400` for Workers Free on every setup run; paid plans support up to 1209600 seconds.
+- Sets R2 lifecycle rules (`incoming/` 1 day, `traces/` `EDGEWATCH_RETENTION_DAYS`+1 days), keeping other rules on the bucket.
+- Sets `TOKEN_SIGNING_SECRET` on `edgewatch-ingest` if missing; before the first deploy it reports that and you re-run it after
+  `scripts/deploy.sh`. `--skip-secret` to skip.
+- `--dry-run` changes nothing: offline plan without a token, read-only API calls with one.
+- **Preflight.** Every run first checks, with reads only: each wrangler config parses and has the bindings its Worker
+  reads (`API_KEYS`, `TRACES`, `INGEST_QUEUE`, and `DB` unless the config selects Hyperdrive or libSQL); the consumer
+  consumes the ingest queue and its dead-letter queue, `DEAD_LETTER_QUEUE` matches, and both crons are set; the Workers
+  bind the same bucket and database; `EDGEWATCH_POSTGRES_URL`/`EDGEWATCH_MYSQL_URL` are complete; the token is accepted;
+  and the secrets each config needs exist on the deployed Worker (`TOKEN_SIGNING_SECRET`; `LIBSQL_AUTH_TOKEN` when
+  `LIBSQL_URL` is set; `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` when `S3_BUCKET` is set). Any error stops the run
+  before the first remote change. `--validate` runs only this and exits 1 on an error; without a token the account and
+  secret checks are reported as skipped. A Worker that is not deployed yet is a warning, not an error.
+
+Commit the updated configs (IDs are not secrets). The repo keeps the placeholders until a real provisioning run happens.
+
+The `ratelimits` binding in `workers/ingest/wrangler.jsonc` uses `namespace_id: "1001"`; pick any integer unique within your account.
+
+## 2. Apply D1 migrations (already done by step 1; manual alternative)
+
+```bash
+scripts/d1-migrate.sh --remote    # refuses to run while the D1 placeholder is still present
+scripts/d1-migrate.sh --local     # local wrangler dev state
+```
+
+## 3. Deploy the Workers
+
+On every upgrade, back up the database and apply pending migrations before deploying. `deploy.sh` does not apply
+migrations; use step 2 for D1 or the matching `bun run migrate:<backend>` command for an external database.
+
+```bash
+scripts/deploy.sh workers         # consumer, then ingest, then api (wrangler deploy in each)
+```
+
+Each Worker can also be deployed alone: `cd workers/<name> && bunx wrangler deploy`.
+Optional ingest vars: `TOKEN_TTL`, `MAX_BODY_BYTES`, `RATE_LIMIT_PERIOD`, `INGEST_URL` (public ingest URL if behind a custom domain).
+API var: `CORS_ORIGIN` (default `*`; set it to the dashboard origin).
+
+## 4. Create API keys
+
+```bash
+bun run --filter @edgewatch/ingest create-key my-app ingest server --remote    # NIGHTWATCH_TOKEN / EDGEWATCH_TOKEN
+bun run --filter @edgewatch/ingest create-key my-app read dashboard --remote   # optional credential for API integrations
+bun run --filter @edgewatch/ingest create-key my-app browser web --remote      # @edgewatch/browser key (public)
+```
+
+Each key is printed once. Add `--expires 90d` to make it expire, and `--origins https://shop.example.com` to lock a browser key.
+Manage keys afterwards with the same CLI (`--remote` is the default; use `--local` for `wrangler dev` state):
+
+```bash
+bun run --filter @edgewatch/ingest keys list                   # id, status (active/expired/revoked), scopes, project, expiry
+bun run --filter @edgewatch/ingest keys rotate <id> --grace 7d  # new key, same project/scopes; old one expires in 7 days
+bun run --filter @edgewatch/ingest keys revoke <id>
+bun run --filter @edgewatch/ingest keys audit                  # who created, rotated or revoked which key, and when
+```
+
+A revoked key can pass for up to 60 s (KV edge cache), and agent tokens it already issued stay valid until `TOKEN_TTL`.
+
+## 5. Deploy the dashboard (Cloudflare Pages)
+
+```bash
+VITE_API_URL=/ VITE_PROJECT_ID=my-app \
+  scripts/deploy.sh dashboard
+```
+
+The deploy script rejects unknown targets and extra arguments. For `all`, it validates configuration and completes
+the dashboard build before deploying any Worker. Dashboard-only deployment does not require local Worker resource IDs.
+`VITE_API_URL` accepts an HTTP(S) base URL or a root-relative path, without credentials, query parameters or a fragment.
+
+Builds `apps/dashboard` and runs `wrangler pages deploy` to project `edgewatch-dashboard` (`EDGEWATCH_PAGES_PROJECT` to change).
+`public/_redirects` provides SPA routing. **Users sign in with email and password; sessions use HttpOnly cookies**: put the dashboard behind
+Cloudflare Access (or similar) when SSO is required.
+
+### Dashboard account routing
+
+Deploy the account-enabled dashboard with `VITE_API_URL=/`. Its Pages Worker forwards `/auth/*` and `/v1/*`
+to the `API` service binding in `apps/dashboard/wrangler.jsonc`, keeping session cookies on the dashboard origin.
+If the API Worker is renamed, update that binding. The standalone server also routes `/auth/*` to the API.
+Apply migrations 0022 and 0023 before deploying the account-enabled API. Account creation is invite-only after the
+owner account exists. Three ways to complete first-time owner setup:
+
+1. **In the browser (default):** open the dashboard on a fresh installation—it automatically opens the **Set up your owner account** screen. Enter an email and password (minimum 8 characters; display name is optional) and you are signed in immediately. Setup locks permanently once the owner account exists.
+2. **Pre-configured credentials (`OWNER_EMAIL` + `OWNER_PASSWORD`):** set `OWNER_EMAIL` and `OWNER_PASSWORD` (and optional `OWNER_NAME`) as Worker secrets or server environment variables so the owner account is created automatically on first start/request without visiting the setup screen.
+3. **Token-gated bootstrap (`OWNER_SETUP_TOKEN`, optional):** set `cd workers/api && bunx wrangler secret put OWNER_SETUP_TOKEN` to require a setup token before anyone can claim a fresh public installation in the browser. After setup, remove it with `bunx wrangler secret delete OWNER_SETUP_TOKEN`.
+
+The owner can create seven-day invitation links in **Accounts**. Share links privately; email delivery is not configured.
+Viewers can read telemetry; admins can also triage issues and replay dead letters; only the owner manages accounts.
+Disabling a member ends their sessions. Logout revokes the current session; normal sessions expire after 12 hours,
+or 30 days when remembered. All roles can access all projects in this single-owner installation. Never put a setup token or password in a Vite variable.
+
+Manage or recover dashboard accounts directly against Cloudflare D1 without deleting any telemetry or other accounts (`--remote` is the default; use `--local` for `wrangler dev` state):
+
+```bash
+bun run --filter @edgewatch/api accounts list
+bun run --filter @edgewatch/api accounts create --email admin@example.com --password 'changeme123' --role owner
+bun run --filter @edgewatch/api accounts reset-password --email admin@example.com --password 'new-password'
+bun run --filter @edgewatch/api accounts reset-password --owner --password 'new-password' --new-email admin@example.com
+```
+
+Passwords can also be piped via `--password-stdin` or passed via `EDGEWATCH_PASSWORD`. Resetting a password revokes only that account's active sessions and clears its login rate-limit window.
+
+## 6. Point applications at it
+
+See [nightwatch-migration.md](nightwatch-migration.md).
+
+## Optional: Postgres or MySQL through Hyperdrive instead of D1
+
+For more traffic or retention than D1's 10 GB holds (see [capacity.md](capacity.md#choosing-a-backend)). The Workers,
+R2, KV and Queues stay the same; only the event store moves.
+
+**With the setup script** (token also needs Hyperdrive:Edit):
+
+```bash
+EDGEWATCH_POSTGRES_URL="postgres://user:pass@host:5432/edgewatch" bun run setup:cloudflare
+```
+
+This finds or creates the Hyperdrive configuration `edgewatch-pg` (`EDGEWATCH_HYPERDRIVE_NAME` to rename it), adds
+the `HYPERDRIVE` binding to the consumer and API configs, and runs the Postgres migrations. The URL is never logged.
+Deploy both Workers afterwards.
+
+**By hand:**
+
+1. Create the schema with a direct connection string (not the Hyperdrive one):
+   `bun run migrate:postgres "postgres://user:pass@host:5432/edgewatch"`. Re-run it after upgrades; it applies only new files.
+2. Create a Hyperdrive configuration: `bunx wrangler hyperdrive create edgewatch-pg --connection-string="postgres://..."`.
+3. Add the binding to `workers/consumer/wrangler.jsonc` and `workers/api/wrangler.jsonc`:
+   `"hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<id from step 2>" }]`, then deploy both.
+
+The D1 binding stays in the configs but is unused while `HYPERDRIVE` is bound. `backup:d1` does not cover Postgres; use
+your provider's backups. This path has only been tested locally (`bun run e2e:postgres`), not on a real account.
+
+**MySQL 8.0.19+** works the same way: `EDGEWATCH_MYSQL_URL="mysql://user:pass@host:3306/edgewatch" bun run setup:cloudflare`
+(Hyperdrive configuration `edgewatch-mysql`), or by hand with `bun run migrate:mysql "mysql://..."` and
+`wrangler hyperdrive create edgewatch-mysql --connection-string="mysql://..."`. The consumer and API pick the MySQL
+driver from the `mysql://` scheme. MySQL commits each DDL statement on its own, so a migration file that fails halfway
+stays half-applied: fix the cause and finish that file by hand before rerunning. Indexed text values (project IDs,
+routes, users, hashes) are limited to 255 characters, and longer values are cut with a warning. Tested locally only
+(`bun run e2e:mysql`, `bun run test:mysql`).
+
+## Optional: libSQL / Turso instead of D1
+
+libSQL speaks SQLite, so the D1 migrations and queries run on it unchanged. No Hyperdrive is involved: the consumer and
+API reach it over HTTP.
+
+1. Create the schema: `LIBSQL_AUTH_TOKEN=... bun run migrate:libsql "libsql://<db>-<org>.turso.io"`. Re-run it after
+   upgrades; each file is applied in one transaction.
+2. In `workers/consumer/wrangler.jsonc` and `workers/api/wrangler.jsonc`, add `"LIBSQL_URL": "libsql://..."` to `vars`.
+   Then set the token on both: `bunx wrangler secret put LIBSQL_AUTH_TOKEN`. Deploy both.
+
+`setup:cloudflare` does not automate this yet. `LIBSQL_URL` and `HYPERDRIVE` together are rejected at startup. Each
+request or consumer batch opens its own HTTP client. Tested locally against `sqld` only (`bun run e2e:libsql`,
+`bun run test:libsql`), not against Turso.
+
+## Optional: S3-compatible storage and SQL keys instead of R2 and KV
+
+Both are independent of the event store and of each other (details in [architecture.md](architecture.md#storage-backends)).
+
+- **S3 instead of R2:** create the bucket, then set on all three Workers `S3_ENDPOINT`, `S3_BUCKET` and `S3_REGION` as
+  vars and `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` as secrets (`bunx wrangler secret put ...`). Add a lifecycle rule
+  on the bucket like the R2 one, and remove the `r2_buckets` binding if you no longer want it. Every blob read or write
+  is then an S3 request from the Worker, so latency and egress follow your provider.
+- **SQL keys instead of KV:** set `KEY_STORE=sql` on all three Workers. The ingest Worker then needs the event store
+  too: bind `HYPERDRIVE` on it as well (or D1 as `DB`). Create keys with
+  `bun run --filter @edgewatch/ingest keys create <project> ... --postgres <url>`; keys already in KV are not copied.
+
+With Postgres, S3 and SQL keys together, only Queues is still Cloudflare-specific.
+
+## Operations notes
+
+- Over-quota block: `bunx wrangler kv key put --binding API_KEYS project:my-app '{"over_quota_until": 1767225600}' --remote` (from `workers/ingest`).
+- Daily record quota: set `DAILY_RECORD_QUOTA` in `workers/consumer/wrangler.jsonc` (0 = none), or per project with
+  `curl -X PUT -H "Authorization: Bearer $READ_KEY" -d '{"daily_record_quota": 100000}' $API/v1/projects/my-app/settings`
+  (`null` = use the default, `0` = no quota). When a project reaches it, the consumer writes the KV block above until the next
+  UTC midnight; raising or removing the quota lifts it. Counts: `GET /v1/usage?days=30` or the Pipeline page.
+- Messages that fail all 20 retries land in `edgewatch-ingest-dlq`; the consumer stores them in D1 `dead_letters` and R2 `dead/`
+  (kept until replayed). Replay from the dashboard's Pipeline page or `POST /v1/dead-letters/replay` (optional `{"ids": [...]}`);
+  the consumer's 5-minute cron re-processes them.
+- Alerts: `bunx wrangler secret put ALERT_WEBHOOK_URL` (from `workers/consumer`; a Slack incoming webhook works) sends dead-letter
+  and queue-lag alerts (`ALERT_LAG_SECONDS`, default 600), each at most once per hour.
+- Retention: `RETENTION_DAYS` in `workers/consumer/wrangler.jsonc` (hourly cron), or per project with
+  `PUT /v1/projects/my-app/settings` `{"retention_days": 7}` (`null` = default, `0` = keep forever), plus R2 lifecycle rules
+  from `setup-cloudflare.ts` (bucket-wide: use `EDGEWATCH_RETENTION_DAYS` = the longest retention, or 0).
+- Logs: Workers Logs is enabled (`observability.enabled`); filter on `request_id` (also in the `X-Request-Id` response header) or `project_id`.
+- Backups: see "Backups and restore" below.
+- CI is configured in `.github/workflows/ci.yml`; its [first successful hosted run](https://github.com/n3crosis/edgewatch/actions/runs/45364773853) passed. Deployments are manual via the scripts above. Release steps: [release-checklist.md](release-checklist.md).
+
+## Backups and restore
+
+- **Point in time (D1 Time Travel):** Cloudflare keeps D1 history for 30 days on the Workers Paid plan (7 days on Free).
+  `bunx wrangler d1 time-travel info edgewatch --timestamp <unix or RFC3339>` shows the bookmark;
+  `bunx wrangler d1 time-travel restore edgewatch --timestamp <...>` rewinds the database in place (run from `workers/consumer`).
+- **Dumps:** `bun run backup:d1` runs `wrangler d1 export --remote`, gzips the SQL to `backups/edgewatch-d1-<time>.sql.gz` and keeps
+  the newest 14 (`--keep N`, `--out DIR`). `--r2 <bucket>` also uploads it to `<bucket>/backups/`; use a bucket without the traces
+  lifecycle rule. `--local` dumps the self-hosting state in `.wrangler/state`. Cloudflare notes a remote export can block other
+  queries to the database while it runs, so schedule it at a quiet time; the queue buffers ingest meanwhile.
+- **Restore a dump** into a new database, then point the Workers at it:
+  ```bash
+  cd workers/consumer
+  bunx wrangler d1 create edgewatch-restore
+  gunzip -k ../../backups/edgewatch-d1-<time>.sql.gz
+  bunx wrangler d1 execute edgewatch-restore --remote --file ../../backups/edgewatch-d1-<time>.sql
+  # put the new database_id in workers/consumer and workers/api wrangler.jsonc, then deploy
+  ```
+- **Not in the dump:** trace JSON and dead-letter payloads in R2, and API keys in KV. Copy R2 with any S3-compatible tool (R2 has an
+  S3 API), and keep raw API keys in your own secret store (KV only holds hashes). A restored D1 with missing R2 objects still lists
+  traces; their detail view shows the summary without raw records.
+- Schema and record compatibility rules: [record-versions.md](record-versions.md).
+
+### Read and operator permissions
+
+Read keys can inspect every project but cannot change settings or request dead-letter replay. Those actions require
+the `admin` scope, which also permits reads. Create an operator credential with
+`bun run --filter @edgewatch/ingest keys create <project> admin dashboard-admin` for programmatic API access. Dashboard users sign in with their account password.
+Existing read keys remain valid for reads; create a separate admin key when upgrading. Ingest and browser keys
+do not gain administrative access. Projects remain filters within a single-owner installation.
+
+## Health checks
+
+Every Worker answers `GET /healthz` without a key (the consumer's only HTTP route). The body is typed
+(`HealthReport` in `packages/shared/src/health.ts`):
+
+```json
+{ "status": "ok", "service": "api", "checked_at": "2026-11-25T03:00:00.000Z",
+  "checks": { "config": { "status": "ok", "required": true, "latency_ms": 0 },
+              "events": { "status": "ok", "required": true, "latency_ms": 2, "backend": "d1" },
+              "schema": { "status": "ok", "required": true, "latency_ms": 1, "backend": "d1" } } }
+```
+
+| Service | Checks (required unless noted) |
+| --- | --- |
+| ingest | backend config, key store read, blob store read, `INGEST_QUEUE` bound, `TOKEN_SIGNING_SECRET` set, `RATE_LIMITER` bound (optional), event store when `KEY_STORE=sql` |
+| consumer | backend config, event store `SELECT 1`, schema (`traces` table), blob store read, key store read (optional: only the quota block uses it) |
+| api | backend config, event store, schema, blob store read, key store read |
+
+`status` is `ok`, `degraded` (an optional check failed; HTTP 200) or `down` (a required check failed; HTTP 503).
+Each check has a 3 s limit (`timeout`). Failures carry only a fixed reason (`timeout`, `unavailable`,
+`not_configured`, `schema_missing`, `over_capacity`); the real error goes to Workers Logs as `health_check_failed`.
+Probes read a key that never exists, so they write nothing. `GET /health` stays a plain liveness check.
+The queue binding is only checked for presence: Queues has no read API from a Worker.

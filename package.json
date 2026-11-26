@@ -1,0 +1,50 @@
+{
+  "name": "edgewatch",
+  "private": true,
+  "packageManager": "bun@1.4.5",
+  "engines": {
+    "node": ">=22.12.0",
+    "bun": ">=1.4.5"
+  },
+  "workspaces": [
+    "apps/*",
+    "workers/*",
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "dev": "bun run dev:dashboard",
+    "dev:dashboard": "bun run --filter @edgewatch/dashboard dev",
+    "dev:ingest": "bun run --filter @edgewatch/ingest dev",
+    "dev:consumer": "bun run --filter @edgewatch/consumer dev",
+    "dev:api": "bun run --filter @edgewatch/api dev",
+    "build": "bun run --workspaces --if-present build",
+    "test": "bun run --workspaces --sequential --if-present test && bun test scripts",
+    "test:php": "cd packages/laravel-edgewatch && composer test && cd ../../examples/laravel-sandbox && ./vendor/bin/pest",
+    "typecheck": "bun run --workspaces --if-present typecheck",
+    "lint": "biome lint .",
+    "e2e": "bash scripts/e2e.sh",
+    "e2e:postgres": "bash scripts/e2e-postgres.sh",
+    "e2e:mysql": "bash scripts/e2e-mysql.sh",
+    "e2e:libsql": "bash scripts/e2e-libsql.sh",
+    "test:postgres": "bash scripts/test-postgres.sh",
+    "test:mysql": "bash scripts/test-mysql.sh",
+    "test:libsql": "bash scripts/test-libsql.sh",
+    "migrate:postgres": "bun scripts/pg-migrate.ts",
+    "migrate:mysql": "bun scripts/mysql-migrate.ts",
+    "migrate:libsql": "bun scripts/libsql-migrate.ts",
+    "fresh-laravel": "bash scripts/fresh-laravel.sh",
+    "fresh-laravel:nightwatch": "CLIENT=nightwatch bash scripts/fresh-laravel.sh",
+    "fresh-laravel:server": "RUNTIME=server bash scripts/fresh-laravel.sh && RUNTIME=server CLIENT=nightwatch bash scripts/fresh-laravel.sh",
+    "server": "bun apps/server/src/main.ts",
+    "setup:cloudflare": "bun scripts/setup-cloudflare.ts",
+    "accounts": "bun scripts/accounts.ts",
+    "backup:d1": "bun scripts/d1-backup.ts",
+    "load-test": "bash scripts/load-test.sh",
+    "bench:consumer": "bun scripts/consumer-bench.ts",
+    "e2e:portable": "bash scripts/e2e-portable.sh"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.2.4"
+  }
+}

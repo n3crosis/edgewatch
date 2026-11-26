@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+.DS_Store
+vendor/
+.phpunit.result.cache
+.phpunit.cache/
+*.tsbuildinfo
+backups/
+workers/ingest/wrangler.load.jsonc
+workers/*/wrangler.e2e.jsonc

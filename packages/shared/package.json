@@ -1,0 +1,33 @@
+{
+  "name": "@edgewatch/shared",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./hono": "./src/hono.ts",
+    "./postgres": "./src/postgres-js.ts",
+    "./backends": "./src/backends.ts",
+    "./mysql": "./src/mysql2.ts",
+    "./libsql": "./src/libsql-client.ts",
+    "./time-window": "./src/time-window.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@libsql/client": "0.17.4",
+    "aws4fetch": "1.0.20",
+    "hono": "^4.9.0",
+    "mysql2": "3.14.5",
+    "postgres": "3.4.9",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "~5.9.3",
+    "vitest": "~3.2.4"
+  }
+}

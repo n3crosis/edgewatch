@@ -1,0 +1,277 @@
+/**
+ * Translates EdgeWatch's SQLite-dialect SQL (what D1 runs) to Postgres. EdgeWatch writes one dialect and translates
+ * the handful of SQLite-only constructs it uses, instead of keeping a second copy of every query.
+ */
+
+const MARK = '\u0000';
+
+/** Hides string literals and quoted identifiers so rewrites only touch SQL syntax. */
+function mask(sql: string): { text: string; restore: (s: string, literal?: (saved: string) => string) => string } {
+  const saved: string[] = [];
+  const text = sql.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"/g, (m) => `${MARK}${saved.push(m) - 1}${MARK}`);
+  return {
+    text,
+    restore: (s, literal = (x) => x) => s.replace(new RegExp(`${MARK}(\\d+)${MARK}`, 'g'), (_, i: string) => literal(saved[Number(i)] ?? '')),
+  };
+}
+
+function matching(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+function splitTop(args: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '(') depth++;
+    else if (args[i] === ')') depth--;
+    else if (args[i] === ',' && depth === 0) {
+      out.push(args.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  out.push(args.slice(start).trim());
+  return out;
+}
+
+/** Rewrites every `name(...)` call (innermost first); `fn` returns null to keep a call unchanged. */
+function rewriteCalls(text: string, name: string, fn: (args: string[]) => string | null): string {
+  const re = new RegExp(`(?<![\\w.])${name}\\s*\\(`, 'i');
+  let out = '';
+  let rest = text;
+  for (;;) {
+    const m = re.exec(rest);
+    if (!m) return out + rest;
+    const open = m.index + m[0].length - 1;
+    const close = matching(rest, open);
+    if (close < 0) return out + rest;
+    const inner = rewriteCalls(rest.slice(open + 1, close), name, fn);
+    out += rest.slice(0, m.index) + (fn(splitTop(inner)) ?? `${rest.slice(m.index, open)}(${inner})`);
+    rest = rest.slice(close + 1);
+  }
+}
+
+/** `user` is reserved in Postgres; SQLite accepts it bare as a column name. */
+const quoteReserved = (text: string) => text.replace(/(?<!\w)user(?!\w)/gi, '"user"');
+
+export function toPostgres(sql: string): string {
+  const { text: masked, restore } = mask(sql);
+  let text = masked;
+  let ignoreConflicts = false;
+  text = text.replace(/\bINSERT\s+OR\s+IGNORE\s+INTO\b/gi, () => {
+    ignoreConflicts = true;
+    return 'INSERT INTO';
+  });
+  text = text.replace(/\bGROUP\s+BY\s+\+/gi, 'GROUP BY ');
+  text = text.replace(/\browid\b/gi, 'ctid');
+  text = text.replace(/\bAS\s+INTEGER\b/gi, 'AS BIGINT');
+  text = text.replace(/(?<!I)\bLIKE\b/gi, 'ILIKE');
+  text = rewriteCalls(text, 'group_concat', (args) => {
+    const [value = '', sep] = args;
+    const distinct = /^DISTINCT\s+/i.exec(value);
+    const expr = distinct ? value.slice(distinct[0].length) : value;
+    return `string_agg(${distinct ? 'DISTINCT ' : ''}CAST(${expr} AS text), ${sep ?? "','"})`;
+  });
+  // SQLite sums comparisons as 0/1; Postgres has no sum(boolean).
+  text = rewriteCalls(text, 'sum', (args) => {
+    const [expr = ''] = args;
+    const top = expr.replace(/\([^()]*\)/g, '()').replace(/\([^()]*\)/g, '()');
+    return args.length === 1 && !/^\s*CASE\b/i.test(expr) && /[=<>]|\b(IN|IS|OR|AND|NOT|LIKE)\b/i.test(top) ? `sum(CASE WHEN ${expr} THEN 1 ELSE 0 END)` : null;
+  });
+  text = rewriteCalls(text, 'max', (args) => (args.length > 1 ? `greatest(${args.join(', ')})` : null));
+  text = rewriteCalls(text, 'min', (args) => (args.length > 1 ? `least(${args.join(', ')})` : null));
+  text = quoteReserved(text);
+  // SQLite numbers a bare `?` one past the highest parameter so far.
+  let highest = 0;
+  text = text.replace(/\?(\d*)/g, (_, n: string) => {
+    const index = n ? Number(n) : highest + 1;
+    highest = Math.max(highest, index);
+    return `$${index}`;
+  });
+  // A parameter compared only with NULL has no inferable type in Postgres.
+  text = text.replace(/(\$\d+)(\s+IS\s+(?:NOT\s+)?NULL)/gi, '$1::text$2');
+  text = text.replace(/\bAS\s+([A-Za-z_]+)\b/g, (m, alias: string) => (/[a-z]/.test(alias) && /[A-Z]/.test(alias) ? `AS "${alias}"` : m));
+  if (ignoreConflicts) text = `${text.replace(/;\s*$/, '')} ON CONFLICT DO NOTHING`;
+  return restore(text);
+}
+
+const UTC_NOW = `to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+
+/** Translates a D1 migration file (DDL) to Postgres. */
+export function toPostgresSchema(sql: string): string {
+  const { text: masked, restore } = mask(sql.replace(/--[^\n]*/g, ''));
+  let text = masked;
+  text = text.replace(new RegExp(`DEFAULT\\s*\\(\\s*strftime\\(${MARK}\\d+${MARK},\\s*${MARK}\\d+${MARK}\\)\\s*\\)`, 'gi'), `DEFAULT (${MARK}u${MARK})`);
+  text = text.replace(/\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b/gi, 'BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY');
+  text = text.replace(/\bINTEGER\b/gi, 'BIGINT');
+  text = text.replace(/\bREAL\b/gi, 'DOUBLE PRECISION');
+  text = quoteReserved(text);
+  return restore(text).replaceAll(`${MARK}u${MARK}`, UTC_NOW);
+}
+
+/** Functions SQLite has that EdgeWatch's queries rely on, installed once per Postgres database. */
+export const POSTGRES_COMPAT = `CREATE OR REPLACE FUNCTION round(double precision, integer) RETURNS double precision
+  LANGUAGE sql IMMUTABLE AS 'SELECT round($1::numeric, $2)::double precision';`;
+
+// ---- MySQL (8.0.19+) ----------------------------------------------------------------------------------------------
+
+/**
+ * Session settings every EdgeWatch MySQL connection runs first: `"` quotes identifiers and `||` concatenates, as in
+ * SQLite; timestamps are UTC; group_concat isn't cut at 1 KB.
+ */
+export const MYSQL_SESSION =
+  "SET SESSION sql_mode = 'ANSI_QUOTES,PIPES_AS_CONCAT,NO_ENGINE_SUBSTITUTION', time_zone = '+00:00', group_concat_max_len = 1048576";
+
+/** Tables are case- and accent-sensitive like SQLite; LIKE is made case-insensitive per comparison instead. */
+const MYSQL_TABLE_OPTIONS = ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin';
+const MYSQL_LIKE_COLLATION = 'utf8mb4_0900_ai_ci';
+
+/** Column names EdgeWatch uses that MySQL reserves (`key`, `sql`); SQL keywords in EdgeWatch are upper case. */
+const quoteMysqlReserved = (text: string) => text.replace(/(?<![\w"])(key|sql)(?![\w"])/g, '"$1"');
+
+/** MySQL treats `\` in string literals as an escape; SQLite doesn't. */
+const mysqlLiteral = (saved: string) => (saved.startsWith("'") ? saved.replace(/\\/g, '\\\\') : saved);
+
+export interface MysqlQuery {
+  text: string;
+  /** For each `?` in `text`, the index of the bound value it takes (SQLite's `?N` can repeat or reorder values). */
+  order: number[];
+}
+
+/** Translates EdgeWatch's SQLite-dialect SQL to MySQL; run it on a connection that ran MYSQL_SESSION. */
+export function toMysql(sql: string): MysqlQuery {
+  const { text: masked, restore } = mask(sql);
+  let text = quoteMysqlReserved(masked);
+  text = text.replace(/\bINSERT\s+OR\s+IGNORE\s+INTO\b/gi, 'INSERT IGNORE INTO');
+  let ignore = false;
+  text = text.replace(/\s*\bON\s+CONFLICT\s+DO\s+NOTHING\b/gi, () => {
+    ignore = true;
+    return '';
+  });
+  if (ignore) text = text.replace(/\bINSERT\s+INTO\b/i, 'INSERT IGNORE INTO');
+  // The row alias keeps `excluded.col` working (MySQL 8.0.19+).
+  text = text.replace(/\bON\s+CONFLICT\s*\([^)]*\)\s*DO\s+UPDATE\s+SET\b/gi, 'AS excluded ON DUPLICATE KEY UPDATE');
+  // Retention deletes in chunks via rowid; MySQL can't LIMIT an IN subquery on the same table, but DELETE takes LIMIT.
+  text = text.replace(
+    /\bDELETE\s+FROM\s+(\w+)\s+WHERE\s+rowid\s+IN\s*\(\s*SELECT\s+rowid\s+FROM\s+\1\s+WHERE\s+([\s\S]*)\)\s*;?\s*$/i,
+    'DELETE FROM $1 WHERE $2',
+  );
+  text = text.replace(/,\s*rowid\b/gi, '');
+  text = text.replace(/\bGROUP\s+BY\s+\+/gi, 'GROUP BY ');
+  text = rewriteCalls(text, 'group_concat', (args) => `GROUP_CONCAT(${args[0] ?? ''} SEPARATOR ${args[1] ?? "','"})`);
+  text = rewriteCalls(text, 'max', (args) => (args.length > 1 ? `GREATEST(${args.join(', ')})` : null));
+  text = rewriteCalls(text, 'min', (args) => (args.length > 1 ? `LEAST(${args.join(', ')})` : null));
+  // MySQL's `/` never truncates and CAST rounds; SQLite's integer division and CAST truncate toward zero.
+  text = rewriteCalls(text, 'CAST', (args) => {
+    const m = args.length === 1 ? /^([\s\S]+?)\s+AS\s+(INTEGER|BIGINT|REAL|TEXT)$/i.exec(args[0] ?? '') : null;
+    if (!m) return null;
+    const type = (m[2] ?? '').toUpperCase();
+    if (type === 'REAL') return `CAST(${m[1]} AS DOUBLE)`;
+    if (type === 'TEXT') return `CAST(${m[1]} AS CHAR)`;
+    return `CAST(TRUNCATE(${m[1]}, 0) AS SIGNED)`;
+  });
+  text = text.replace(/(\s+NOT)?\s+LIKE\b/gi, (m) => ` COLLATE ${MYSQL_LIKE_COLLATION}${m}`);
+  const order: number[] = [];
+  let highest = 0;
+  text = text.replace(/\?(\d*)/g, (_, n: string) => {
+    const index = n ? Number(n) : highest + 1;
+    highest = Math.max(highest, index);
+    order.push(index - 1);
+    return '?';
+  });
+  return { text: restore(text, mysqlLiteral), order };
+}
+
+function splitStatements(text: string): string[] {
+  return text.split(';').map((s) => s.trim()).filter(Boolean);
+}
+
+const keyName = (table: string, column: string) => `${table}.${column}`.toLowerCase();
+
+/**
+ * `table.column` for every column used in a primary key, unique constraint, index or foreign key across the given
+ * migration files. MySQL can only index bounded VARCHAR columns, so these become VARCHAR(255) and other TEXT columns
+ * MEDIUMTEXT. Computed from all migrations up front because a later file may index an earlier column.
+ */
+export function mysqlKeyColumns(files: string[]): Set<string> {
+  const keyed = new Set<string>();
+  const add = (table: string, columns: string) => {
+    for (const c of splitTop(columns)) {
+      const name = /^"?(\w+)"?/.exec(c)?.[1];
+      if (name) keyed.add(keyName(table, name));
+    }
+  };
+  for (const raw of files) {
+    const { text } = mask(raw.replace(/--[^\n]*/g, ''));
+    for (const m of text.matchAll(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?\w+\s+ON\s+(\w+)\s*\(/gi)) {
+      const open = m.index + m[0].length - 1;
+      add(m[1] ?? '', text.slice(open + 1, matching(text, open)));
+    }
+    for (const m of text.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(/gi)) {
+      const table = m[1] ?? '';
+      const open = m.index + m[0].length - 1;
+      for (const def of splitTop(text.slice(open + 1, matching(text, open)))) {
+        const constraint = /^(?:PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY)\s*\(([^)]*)\)/i.exec(def);
+        if (constraint) add(table, constraint[1] ?? '');
+        else if (/\b(PRIMARY\s+KEY|UNIQUE|REFERENCES)\b/i.test(def)) add(table, def);
+      }
+    }
+  }
+  return keyed;
+}
+
+function mysqlColumn(def: string, table: string, keyed: Set<string>): string {
+  const m = /^("?)(\w+)\1\s+(INTEGER|TEXT|REAL|BLOB)\b/i.exec(def);
+  if (!m) return def;
+  const [head, quote = '', name = '', sqliteType = ''] = m;
+  let rest = def.slice(head.length);
+  let type: string;
+  switch (sqliteType.toUpperCase()) {
+    case 'INTEGER':
+      type = 'BIGINT';
+      rest = rest.replace(/\bAUTOINCREMENT\b/i, 'AUTO_INCREMENT');
+      break;
+    case 'REAL':
+      type = 'DOUBLE';
+      break;
+    case 'BLOB':
+      type = 'LONGBLOB';
+      break;
+    default:
+      type = keyed.has(keyName(table, name)) ? 'VARCHAR(255)' : 'MEDIUMTEXT';
+  }
+  // TEXT and BLOB columns only accept expression defaults.
+  if (type === 'MEDIUMTEXT' || type === 'LONGBLOB') rest = rest.replace(new RegExp(`\\bDEFAULT\\s+(${MARK}\\d+${MARK}|-?[\\d.]+)`, 'i'), 'DEFAULT ($1)');
+  return `${quote}${name}${quote} ${type}${rest}`;
+}
+
+const MYSQL_UTC_NOW = `CONCAT(LEFT(DATE_FORMAT(UTC_TIMESTAMP(3), '%Y-%m-%dT%H:%i:%s.%f'), 23), 'Z')`;
+
+/** Translates a D1 migration file (DDL) to MySQL statements, run one at a time. `keyed` is from mysqlKeyColumns. */
+export function toMysqlSchema(sql: string, keyed: Set<string>): string[] {
+  const { text: masked, restore } = mask(sql.replace(/--[^\n]*/g, ''));
+  const text = masked.replace(new RegExp(`DEFAULT\\s*\\(\\s*strftime\\(${MARK}\\d+${MARK},\\s*${MARK}\\d+${MARK}\\)\\s*\\)`, 'gi'), `DEFAULT (${MARK}u${MARK})`);
+  return splitStatements(text).map((statement) => {
+    let stmt = statement;
+    const create = /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(/i.exec(stmt);
+    const alter = /^ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+/i.exec(stmt);
+    if (create) {
+      const table = create[1] ?? '';
+      const open = create[0].length - 1;
+      const defs = splitTop(stmt.slice(open + 1, matching(stmt, open))).map((d) => mysqlColumn(d, table, keyed));
+      stmt = `${stmt.slice(0, open)}(\n  ${defs.join(',\n  ')}\n)${MYSQL_TABLE_OPTIONS}`;
+    } else if (alter) {
+      stmt = stmt.slice(0, alter[0].length) + mysqlColumn(stmt.slice(alter[0].length), alter[1] ?? '', keyed);
+    } else if (/^CREATE\s+(?:UNIQUE\s+)?INDEX\b/i.test(stmt)) {
+      // No IF NOT EXISTS for indexes, and no partial indexes: a full index serves the same queries.
+      stmt = stmt.replace(/\s+IF\s+NOT\s+EXISTS\b/i, '').replace(/\)\s*WHERE\s[\s\S]*$/i, ')');
+    }
+    return restore(quoteMysqlReserved(stmt), mysqlLiteral).replaceAll(`${MARK}u${MARK}`, MYSQL_UTC_NOW);
+  });
+}

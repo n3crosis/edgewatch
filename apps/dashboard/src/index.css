@@ -1,0 +1,69 @@
+/* Kumo (Cloudflare's design system) is the design system of record: https://kumo-ui.com/installation */
+@source "../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import "@cloudflare/kumo/styles/tailwind";
+@import "tailwindcss";
+
+@theme {
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+html,
+body {
+  @apply bg-kumo-canvas text-sm leading-relaxed text-kumo-default antialiased;
+}
+
+/* Subtle, theme-aware scrollbars for data tables and sidebars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-kumo-hairline) transparent;
+}
+
+/* Spacious, consistent table density inside dashboard panels */
+.ew-panel table {
+  border-collapse: collapse;
+}
+
+.ew-panel thead th {
+  padding: 0.8125rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--color-kumo-subtle);
+  white-space: nowrap;
+}
+
+.ew-panel tbody td {
+  padding: 0.9375rem 1rem;
+  vertical-align: middle;
+}
+
+.ew-panel thead th:first-child,
+.ew-panel tbody td:first-child {
+  padding-left: 1.5rem;
+}
+
+.ew-panel thead th:last-child,
+.ew-panel tbody td:last-child {
+  padding-right: 1.5rem;
+}
+
+@keyframes ew-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.ew-indeterminate {
+  animation: ew-indeterminate 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ew-indeterminate {
+    animation: none;
+    width: 100%;
+    opacity: 0.45;
+  }
+}

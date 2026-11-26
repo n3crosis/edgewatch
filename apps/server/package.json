@@ -1,0 +1,19 @@
+{
+  "name": "@edgewatch/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/main.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@edgewatch/shared": "workspace:*",
+    "hono": "^4.9.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250920.0",
+    "@types/bun": "1.2.23",
+    "typescript": "~5.9.3"
+  }
+}

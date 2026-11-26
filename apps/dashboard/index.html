@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" class="h-full" data-mode="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>EdgeWatch</title>
+    <script>
+      (function () {
+        var t = localStorage.getItem('edgewatch.theme');
+        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.mode = t;
+        document.documentElement.style.colorScheme = t;
+      })();
+    </script>
+  </head>
+  <body class="h-full">
+    <div id="root" class="isolate h-full"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

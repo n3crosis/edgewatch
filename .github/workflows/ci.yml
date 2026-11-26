@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+
+      # wrangler, vitest-pool-workers and scripts/e2e.sh run on Node.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl, zlib, sqlite3, pdo_sqlite
+          tools: composer:v2
+          coverage: none
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ hashFiles('packages/laravel-edgewatch/composer.json', 'examples/laravel-sandbox/composer.lock') }}
+
+      - name: bun install (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: composer install
+        run: |
+          composer install --no-interaction --no-progress --working-dir=packages/laravel-edgewatch
+          composer install --no-interaction --no-progress --working-dir=examples/laravel-sandbox
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Vitest + script tests (bun test scripts)
+        run: bun run test
+
+      - name: Pest
+        run: bun run test:php
+
+      - name: Build
+        run: bun run build
+
+      - name: Docker build and startup
+        run: |
+          docker build -t edgewatch:ci .
+          docker run --rm edgewatch:ci migrate
+          container=$(docker run -d --rm edgewatch:ci)
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if docker exec "$container" wget -qO- http://127.0.0.1:8080/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container"
+          exit 1
+
+      - name: E2E (sandbox -> ingest -> queue -> consumer -> D1/R2 -> api, two projects)
+        run: bun run e2e
+
+      - name: Upload e2e logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: .wrangler/e2e-logs
+
+  databases:
+    name: Database integration (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [postgres, mysql, libsql]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run test:${{ matrix.database }}
+
+  fresh-laravel:
+    name: Fresh Laravel (${{ matrix.client }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        client: [edgewatch, nightwatch]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl, zlib, sqlite3, pdo_sqlite, pcntl, posix, sockets
+          tools: composer:v2
+          coverage: none
+      - run: bun install --frozen-lockfile
+      - run: composer install --no-interaction --no-progress --working-dir=packages/laravel-edgewatch
+      - name: Fresh application installation and telemetry
+        env:
+          CLIENT: ${{ matrix.client }}
+        run: bun run fresh-laravel
+      - name: Upload fresh application logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fresh-laravel-${{ matrix.client }}-logs
+          path: .wrangler/fresh-logs

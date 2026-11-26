@@ -1,0 +1,6 @@
+{
+  "name": "edgewatch-dashboard",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2025-09-01",
+  "services": [{ "binding": "API", "service": "edgewatch-api" }]
+}

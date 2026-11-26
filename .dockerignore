@@ -1,0 +1,8 @@
+**/node_modules
+**/dist
+**/.wrangler
+**/vendor
+.git
+backups
+examples/laravel-sandbox/*
+!examples/laravel-sandbox/package.json
