@@ -115,7 +115,8 @@ Unknown record types with an integer `v` and a string `t` are accepted and kept 
 - Sends every record type above over HTTPS (gzip, 500 ms timeouts, 500-record buffer) or through the Nightwatch agent
   framing, honours 429 / `stop`, strips SQL literals and redacts PII before sending.
 - `edgewatch` log channel, plus a `nightwatch` alias so existing `LOG_STACK` settings keep working.
-- Supports Laravel 11 and 12 on PHP 8.2+.
+- Supports Laravel 11 and 12 on PHP 8.2+ (Laravel 12 tested in CI; Laravel 11 allowed by the constraints and checked
+  with the package suite, not in CI). Laravel 10 is not supported.
 
 ### Browser SDK (`@edgewatch/browser`)
 

@@ -86,6 +86,16 @@ Without Cloudflare: `docker build -t edgewatch . && docker run -p 8080:8080 -v e
 
 Details: [docs/deployment.md](docs/deployment.md). For more data than D1's 10 GB, the consumer and API can use Postgres or MySQL through Hyperdrive ([docs/deployment.md](docs/deployment.md#optional-postgres-or-mysql-through-hyperdrive-instead-of-d1)), or libSQL/Turso ([docs/deployment.md](docs/deployment.md#optional-libsql--turso-instead-of-d1)).
 
+## Supported Laravel versions
+
+`edgewatch/laravel-edgewatch` supports **Laravel 11 and 12 on PHP 8.2 or newer**. Laravel 10 is not supported.
+
+| Laravel | PHP | Allowed by `packages/laravel-edgewatch/composer.json` | Tested |
+| --- | --- | --- | --- |
+| 12 | 8.2+ | yes (`illuminate/*` `^12.0`, Testbench `^10.0`) | yes: package Pest suite, `examples/laravel-sandbox` (`laravel/framework` `^12.0`), `bun run fresh-laravel`, CI |
+| 11 | 8.2+ | yes (`illuminate/*` `^11.0`, Testbench `^9.0`) | package Pest suite only, run manually against Laravel 11.57 / Testbench 9.18; not in CI, and no Laravel 11 app is tested |
+| 10 | - | **no**: the constraints exclude it | no; Laravel 10 is not supported |
+
 ## Release status
 
 Version **1.0.0 is a release candidate**: not tagged, not on npm or Packagist. Every local suite passes (Vitest, Pest,

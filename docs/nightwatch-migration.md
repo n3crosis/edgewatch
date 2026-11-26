@@ -23,6 +23,8 @@ NIGHTWATCH_BASE_URL=https://edgewatch-ingest.<subdomain>.workers.dev php artisan
 
 ## Option B: replace the package with edgewatch/laravel-edgewatch (agentless)
 
+Requires Laravel 11 or 12 on PHP 8.2+ (Laravel 10 is not supported; see the [README](../README.md#supported-laravel-versions)).
+
 ```bash
 composer remove laravel/nightwatch
 composer require edgewatch/laravel-edgewatch   # not on Packagist yet: use a path/VCS repository
