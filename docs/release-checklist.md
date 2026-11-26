@@ -23,9 +23,9 @@ database-adapter jobs. All jobs must pass on the release commit.
 
 Verification snapshot (2026-11-24): implementation commit `6e02443` passed
 [hosted core CI and all database jobs](https://github.com/n3crosis/edgewatch/actions/runs/45390925087).
-Local snapshot after the PHP client and browser extension removal (2026-11-26): typecheck and lint clean; Vitest 330
-passed (ingest 44, consumer 54, api 78, shared 73, dashboard 81); `bun test` 20 (server) + 154 (scripts) passed; `e2e` 68 passed;
-`nightwatch-agent` 27 passed; 0 failed. Hosted CI for the final commit is pending. These are local Workers/Miniflare checks, not evidence of a live Cloudflare deployment.
+Local snapshot after the zod 4, Vitest 5 and `@cloudflare/vitest-plugin` upgrade (2026-11-26): typecheck and lint clean; Vitest 332
+passed (ingest 45, consumer 54, api 79, shared 73, dashboard 81); `bun test` 23 (server) + 154 (scripts) passed; `e2e` 68 passed;
+`nightwatch-agent` 27 passed; 0 failed; `bun audit` reports no vulnerabilities. Hosted CI for the final commit is pending. These are local Workers/Miniflare checks, not evidence of a live Cloudflare deployment.
 Wrangler authentication was rechecked and is expired; resource placeholders remain. Gates 2-4 are still unverified.
 
 ## 2. Create the Cloudflare resources
