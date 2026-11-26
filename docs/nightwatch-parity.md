@@ -62,11 +62,11 @@ Known differences:
 | Gate | State |
 | --- | --- |
 | Every matrix cell done | yes |
-| Vitest (ingest, consumer, api, shared, browser, dashboard); `bun test` (server, scripts) | green locally: 50 / 55 / 79 / 76 / 9 / 81 passed; 20 / 158 passed; 0 failed |
-| e2e on Miniflare, all 13 record types, several projects | green locally: 71 passed, 0 failed (`bun run e2e`) |
+| Vitest (ingest, consumer, api, shared, dashboard); `bun test` (server, scripts) | see the local snapshot in [release-checklist.md](release-checklist.md) |
+| e2e on Miniflare, all 13 record types, several projects | see the local snapshot (`bun run e2e`) |
 | Unmodified `laravel/nightwatch` + `nightwatch:agent` against EdgeWatch | green locally: 27 passed, 0 failed (`bun run nightwatch-agent`, Laravel 12.74.0, agent 1.30.6) |
 | CI on GitHub Actions | **passed**: [first successful hosted run](https://github.com/n3crosis/edgewatch/actions/runs/45364773853); recheck the final release commit |
 | Deploy to a real Cloudflare account | **not verified**: configs carry the test installation's IDs; setup/deploy scripts are tested only against a fake Cloudflare API |
-| Versions | 1.0.0 in `packages/browser/package.json`; not tagged or published |
+| Versions | 1.0.0 (git tag only); not tagged, nothing published |
 
 Remaining owner steps: [release-checklist.md](release-checklist.md).

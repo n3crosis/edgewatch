@@ -35,11 +35,6 @@ official agent do not carry it and show as Unknown. The dashboard Environment se
 Setup remain project-wide, as do issue status changes and lifecycle history. Server and deployment names are never used
 to infer an environment.
 
-## Browser errors (EdgeWatch only)
-
-Nightwatch has no browser telemetry. EdgeWatch adds `POST /api/browser` and `@edgewatch/browser`
-([packages/browser](../packages/browser/README.md)).
-
 ## What you lose vs Nightwatch cloud
 
 No alerts, issue assignment, user management, team accounts, long-term retention policies or the Nightwatch UI.

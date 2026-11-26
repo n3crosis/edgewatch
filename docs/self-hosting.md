@@ -87,8 +87,7 @@ bun run e2e     # = scripts/e2e.sh
 ```
 
 Starts `wrangler dev` for ingest + consumer (one process, so they share the local queue) on :8787 and the API on :8788 with
-fresh state in `.wrangler/e2e-state`, applies migrations, creates ingest/read/browser/admin keys in local KV, posts browser
-events, an agent-format gzip batch tagged for a second project, and agent-format batches with all 13 record types for two
+fresh state in `.wrangler/e2e-state`, applies migrations, creates ingest/read/admin keys in local KV, posts an agent-format gzip batch tagged for a second project, and agent-format batches with all 13 record types for two
 more projects, then asserts the results through `workers/api` (D1 rows, R2 raw records, exception grouping/PII scrubbing,
 `sql_hash` groups, project isolation), the agent-auth handshake and the 429 `stop` response. Exits non-zero on any failure; logs in `.wrangler/e2e-logs`. `E2E_KEEP=1` leaves everything running.
 
@@ -111,7 +110,7 @@ Without `VITE_API_URL` the dashboard shows generated seed data, and its header b
 ## Tests
 
 ```bash
-bun run test     # Vitest: shared, browser, ingest, consumer, api (workerd pool), dashboard, server; then bun test scripts
+bun run test     # Vitest: shared, ingest, consumer, api (workerd pool), dashboard, server; then bun test scripts
 ```
 
 ## Limits of local mode

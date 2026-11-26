@@ -13,7 +13,6 @@ More screenshots (overview, traces, exceptions, queries, pipeline): [docs/dashbo
 
 ```
 Laravel app + laravel/nightwatch --TCP--> php artisan nightwatch:agent --HTTPS gzip (NIGHTWATCH_BASE_URL)--+
-Browser + @edgewatch/browser --POST /api/browser (EdgeWatch extension)------------------------------------+
                                                                         v
                          workers/ingest (Hono, Zod, KV keys) --Queue--> workers/consumer --> D1 (metadata) + R2 (raw traces)
                                                                                                    ^
@@ -22,9 +21,8 @@ Browser + @edgewatch/browser --POST /api/browser (EdgeWatch extension)----------
 
 | Path | What |
 | --- | --- |
-| `packages/browser` | `@edgewatch/browser` (1.0.0, not on npm yet): dependency-free browser error reporter for EdgeWatch's own `POST /api/browser` (not part of the Nightwatch wire format). |
-| `packages/shared` | TypeScript shared by the Workers: Zod schemas for every Nightwatch record type, SQL normalizer, PII scrubber, HMAC ingest tokens, browser-event mapping. |
-| `workers/ingest` | `POST /api/agent-auth` and `POST /api/ingest` (Nightwatch agent contract), `POST /api/browser`. Hashed API keys in KV, Zod validation, per-trace queue messages, 429 `stop`/`refresh_in` + `Retry-After` when rate-limited or blocked by a manual over-quota flag in KV (no usage metering). |
+| `packages/shared` | TypeScript shared by the Workers: Zod schemas for every Nightwatch record type, SQL normalizer, PII scrubber, HMAC ingest tokens. |
+| `workers/ingest` | `POST /api/agent-auth` and `POST /api/ingest` (Nightwatch agent contract). Hashed API keys in KV, Zod validation, per-trace queue messages, 429 `stop`/`refresh_in` + `Retry-After` when rate-limited or blocked by a manual over-quota flag in KV (no usage metering). |
 | `workers/consumer` | Queue consumer: normalizes SQL, computes `sql_hash`, scrubs PII, writes D1 rows and raw traces to R2 at `traces/{project_id}/{date}/{trace_id}.json`. |
 | `workers/api` | API: overview, route-grouped Requests, persistent Issues, chronological Logs, traces (filters, search, range, cursor, waterfall, raw R2 trace, related job/request traces), exceptions, queries, jobs, commands, cache, outgoing requests, mail, notifications, scheduled tasks, logs, users. Full list in [CHANGELOG.md](CHANGELOG.md#endpoints). |
 | `workers/migrations` | D1 schema `0001`-`0020`: traces, exceptions, queries, users, job attempts, commands, cache events, outgoing requests, mail, notifications, scheduled tasks, logs, dead letters, pipeline stats, daily usage, web vitals, issue state/history, captured route templates and the optional SQL key table. |
@@ -46,10 +44,10 @@ bun install
 
 - **Dev:** `bun run dev:dashboard` serves the dashboard at http://localhost:5173 on seed data (set `VITE_API_URL` for a real API; the dashboard uses email/password accounts and secure session cookies; use same-origin routing for production).
   `bun run dev:ingest`, `dev:consumer`, `dev:api` run each Worker on `wrangler dev`; `bun run e2e` wires them all together.
-- **Test:** `bun run test` runs Vitest in every workspace (shared, browser, ingest, consumer, api, dashboard).
+- **Test:** `bun run test` runs Vitest in every workspace (shared, ingest, consumer, api, dashboard, server).
 - **Lint:** `bun run lint` runs Biome's linter over the TypeScript sources (`biome.json`).
 - **Typecheck:** `bun run typecheck` runs `tsc --noEmit` in every workspace.
-- **E2E:** `bun run e2e` starts the three Workers locally, sends agent-format gzip batches for every record type plus browser events, and checks ingest -> queue -> consumer -> D1/R2 -> api across several projects (see [self-hosting](docs/self-hosting.md)). `bun run e2e:postgres` runs the same checks with Postgres as the event store, `bun run e2e:portable` runs them on Postgres + an S3 bucket (local moto) + SQL keys, and `bun run test:postgres` runs the Postgres adapter tests (both start a Postgres container with Docker unless `E2E_POSTGRES_URL` / `EDGEWATCH_TEST_POSTGRES_URL` is set).
+- **E2E:** `bun run e2e` starts the three Workers locally, sends agent-format gzip batches for every record type and checks ingest -> queue -> consumer -> D1/R2 -> api across several projects (see [self-hosting](docs/self-hosting.md)). `bun run e2e:postgres` runs the same checks with Postgres as the event store, `bun run e2e:portable` runs them on Postgres + an S3 bucket (local moto) + SQL keys, and `bun run test:postgres` runs the Postgres adapter tests (both start a Postgres container with Docker unless `E2E_POSTGRES_URL` / `EDGEWATCH_TEST_POSTGRES_URL` is set).
 - **Official agent:** `bun run nightwatch-agent` creates a new Laravel 12 app in a temp dir, installs `laravel/nightwatch`, runs its unmodified `php artisan nightwatch:agent` with `NIGHTWATCH_BASE_URL` pointed at a local ingest Worker, sends a request, commands, a queued job, cache calls, a log line, a handled exception, an outgoing HTTP call, a mail, a notification, a scheduled task and a signed-in user, and reads every record type back from the API. `bun run nightwatch-agent:server` does the same against the single-process server.
 - **CI:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `bun install --frozen-lockfile`, typecheck, lint, Vitest, build, Docker, the e2e and the official-agent check. The [first successful hosted run](https://github.com/n3crosis/edgewatch/actions/runs/45364773853) passed; require CI on the final release commit.
 - **Logs and errors:** see [architecture](docs/architecture.md#errors-and-logs).
@@ -93,7 +91,7 @@ PHP 8.3), by `bun run nightwatch-agent`. No other Laravel or `laravel/nightwatch
 
 ## Release status
 
-Version **1.0.0 is a release candidate**: not tagged, `@edgewatch/browser` not on npm. Every local suite passes (Vitest,
+Version **1.0.0 is a release candidate**: not tagged; no packages are published. Every local suite passes (Vitest,
 script tests, e2e on Miniflare, the official-agent check). Hosted CI has passed. A deploy to a real Cloudflare account remains unverified. The owner's remaining steps are in [docs/release-checklist.md](docs/release-checklist.md); the
 Nightwatch parity matrix and known differences are in [docs/nightwatch-parity.md](docs/nightwatch-parity.md).
 
@@ -104,8 +102,7 @@ Nightwatch parity matrix and known differences are in [docs/nightwatch-parity.md
 3. **Usage metering:** records are counted per project per UTC day (`/v1/usage`, Pipeline page), and an optional daily record quota (`DAILY_RECORD_QUOTA` on the consumer, or per project via `PUT /v1/projects/:id/settings`) sets the 429 `stop` until UTC midnight. Counting happens in the consumer, so records already queued when the quota is hit are still stored, and stable message receipts prevent redeliveries from being counted twice. There is no billing.
 4. **Retention:** hourly D1/R2 retention uses `RETENTION_DAYS` or a per-project `retention_days` (`PUT /v1/projects/:id/settings`). The R2 lifecycle backstop from the setup script is bucket-wide, so set `EDGEWATCH_RETENTION_DAYS` to the longest retention you use (or 0). Not yet run on a real account.
 5. **Real-account validation:** setup/deploy scripts and the `RATE_LIMITER` binding are untested against a real Cloudflare account. The Vitest pool bundles wrangler 4.35, which warns `Unexpected fields ... "ratelimits"` (tests inject a mock limiter); wrangler 4.166 used for dev/deploy accepts it.
-6. **Security review:** seeded fuzz tests cover the ingest and browser body parsers (raw bytes, corrupt gzip, wrong shapes), record and browser-event validation, SQL normalization, PII scrubbing and ingest tokens. There has been no external review, and CORS/origin checks are only unit-tested.
+6. **Security review:** seeded fuzz tests cover the ingest body parser (raw bytes, corrupt gzip, wrong shapes), record validation, SQL normalization, PII scrubbing and ingest tokens. There has been no external review, and CORS/origin checks are only unit-tested.
 7. **Load testing:** `bun run load-test` measures local Miniflare throughput (numbers in [docs/capacity.md](docs/capacity.md#local-load-test)); there are no numbers from a real Cloudflare account.
 8. **Self-observability:** the Pipeline page and `/v1/pipeline` show consumer throughput, queue lag and dead letters; dead letters can be replayed, and `ALERT_WEBHOOK_URL` sends dead-letter and queue-lag alerts. Ingest-side errors (4xx/5xx) are only in Workers Logs, with no alert.
-9. **Browser SDK:** breadcrumbs and Core Web Vitals are reported (averages and "good" share, no p75); no source maps or session replay.
-10. **Ops:** `bun run backup:d1` dumps D1 (Time Travel covers point-in-time restore); R2 traces and KV keys need their own copies. Version policy: [docs/record-versions.md](docs/record-versions.md).
+9. **Ops:** `bun run backup:d1` dumps D1 (Time Travel covers point-in-time restore); R2 traces and KV keys need their own copies. Version policy: [docs/record-versions.md](docs/record-versions.md).

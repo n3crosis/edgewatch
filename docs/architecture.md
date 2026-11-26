@@ -5,7 +5,6 @@ on `main`; see "Not implemented" at the end.
 
 ```
 Laravel app --(a) laravel/nightwatch --TCP--> nightwatch:agent --HTTPS (NIGHTWATCH_BASE_URL)--+
-Browser -----(b) @edgewatch/browser -- sendBeacon --> POST /api/browser (EdgeWatch extension) -+
                                                                                               v
                                          workers/ingest (Hono)  -- KV API_KEYS (hashed keys, quota blocks)
                                            |  Queue edgewatch-ingest (one message per trace; >100 KB parked in R2 incoming/, in parts of at most 1 MB)
@@ -21,12 +20,11 @@ apps/dashboard (React, Kumo UI) --> workers/api (Hono, read keys) -- D1 + R2
 
 | Path | Role |
 | --- | --- |
-| `packages/shared` | Zod record schemas (Nightwatch v1.30.6 shapes), SQL normalizer + `sql_hash`, PII scrubber, HMAC ingest tokens, browser-event mapping. Used by all Workers. |
-| `workers/ingest` | `POST /api/agent-auth` and `POST /api/ingest` (the official agent's contract), `POST /api/browser`, `GET /health`. Validates records, groups by `trace_id`, enqueues. Returns `429 {stop, refresh_in}` + `Retry-After` for over-quota/rate-limited projects. |
+| `packages/shared` | Zod record schemas (Nightwatch v1.30.6 shapes), SQL normalizer + `sql_hash`, PII scrubber, HMAC ingest tokens. Used by all Workers. |
+| `workers/ingest` | `POST /api/agent-auth` and `POST /api/ingest` (the official agent's contract), `GET /health`. Validates records, groups by `trace_id`, enqueues. Returns `429 {stop, refresh_in}` + `Retry-After` for over-quota/rate-limited projects. |
 | `workers/consumer` | Queue consumer. Normalizes SQL (literals stripped, `sql_hash`), scrubs PII from exception/log messages, merges records per trace, writes raw JSON to R2 and summary rows to D1. Retries are idempotent: exact duplicate records are skipped in R2 and a trace's child rows are rebuilt from the merged records. D1 writes go in batches of 50 statements; a stored trace keeps at most 5000 records / 8 MB (root records always kept, the rest counted in `dropped_records`). |
 | `workers/api` | Read API for the dashboard: `/v1/projects/:id/{overview,traces,traces/:traceId,traces/:traceId/raw,exceptions,exceptions/:group,queries,queries/:sqlHash}` plus `jobs`, `commands`, `cache`, `outgoing-requests`, `mail`, `notifications`, `scheduled-tasks`, `logs`, `users` (each with `/:key`). Optional project filter (`/v1/projects/:id/...` or `/v1/...?project_id=`), read-scope keys, CORS. Waterfall spans derived from raw R2 records. |
 | `workers/migrations` | D1 schema (`0001_init.sql` ... `0020_issue_revisions.sql`); representative API reads and consumer write/retention queries are checked for index use by `scripts/d1-indexes.test.ts`. |
-| `packages/browser` | `@edgewatch/browser`, dependency-free browser error reporter. |
 | `apps/dashboard` | React + Vite + Tailwind v4 + Kumo UI (`@cloudflare/kumo`, the design system of record; Base UI primitives, Phosphor icons). Seed data by default, `workers/api` when `VITE_API_URL` is set. Filters, search, 1h/6h/24h range, 15 s live polling, data-source badge. |
 | `apps/server` | The three Workers' fetch, queue and scheduled handlers composed in one Bun process: SQLite (`bun:sqlite`) or Postgres, files or S3, `kv_store` keys, a SQLite-journaled queue with the Workers' retry/DLQ policy, an in-memory rate limiter, timers for the crons, and the built dashboard. Root `Dockerfile`. |
 | `scripts/` | `e2e.sh` (local live pipeline check), `nightwatch-agent.sh` (official agent in a fresh Laravel app), `setup-cloudflare.ts`, `d1-migrate.sh`, `deploy.sh`. |
@@ -87,16 +85,16 @@ so the Worker code is shared unchanged; see [self-hosting.md](self-hosting.md#si
 
 - EdgeWatch is single-tenant: one owner plus invited dashboard accounts (owner, admin, viewer roles), no orgs or tenants.
   Dashboard users sign in with email and password (HttpOnly session cookie); API keys only prove "this is the owner's app" or integration.
-- API keys are random strings; only `sha256(key)` is stored in KV as `apikey:<hex>` -> `{project_id, name, scopes, created_at?, expires_at?, disabled?, allowed_origins?}`.
+- API keys are random strings; only `sha256(key)` is stored in KV as `apikey:<hex>` -> `{project_id, name, scopes, created_at?, expires_at?, disabled?}`.
   A key authenticates only if it is not disabled (revoked) and `expires_at` has not passed; an agent token never outlives its key.
   `scripts/keys.ts` creates, lists, rotates and revokes keys and appends each change to `audit:<ms>:<random>` in the same namespace.
   `project_id` is the key's default project for untagged data; it does not limit what the key can write or read.
-- Scopes: `ingest` (agent/client, secret), `read` (dashboard/API), `browser` (public; only `/api/browser`, optional origin allow-list).
+- Scopes: `ingest` (agent, secret), `read` (dashboard/API), `admin` (writes).
 - `/api/agent-auth` exchanges an ingest key for a short-lived HMAC token (`TOKEN_SIGNING_SECRET`, `TOKEN_TTL`, default 3600 s); `/api/ingest` accepts that token or the raw key.
 
 ## Quota and rate limiting
 
-- KV `project:<id>` = `{"over_quota_until": <unix s>, "message": "..."}` blocks a project on agent-auth, ingest and browser endpoints.
+- KV `project:<id>` = `{"over_quota_until": <unix s>, "message": "..."}` blocks a project on agent-auth and ingest.
   It is set by hand, or by the consumer (`"reason": "daily_quota"`) when a project reaches its daily record quota.
 - D1 `usage_daily`: records per project per UTC day, added by the consumer after a message is processed (kept 400 days).
   The quota is `projects.daily_record_quota`, else the consumer's `DAILY_RECORD_QUOTA`; it is checked after each batch, so the
@@ -163,7 +161,7 @@ so the Worker code is shared unchanged; see [self-hosting.md](self-hosting.md#si
 - SSO: dashboard accounts use email and password with HttpOnly session cookies; use Cloudflare Access for SSO. A read key
   entered for API access stays in that tab's sessionStorage and is cleared on sign-out and on a 401.
 - Key management UI or API: keys are managed with the `scripts/keys.ts` CLI only.
-- Alerts for ingest-side errors (only pipeline alerts exist), source maps for browser errors.
+- Alerts for ingest-side errors (only pipeline alerts exist).
 
 ## Projects (single-tenant)
 

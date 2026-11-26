@@ -23,8 +23,8 @@ database-adapter jobs. All jobs must pass on the release commit.
 
 Verification snapshot (2026-11-24): implementation commit `6e02443` passed
 [hosted core CI and all database jobs](https://github.com/n3crosis/edgewatch/actions/runs/45390925087).
-Local snapshot after the PHP client removal (2026-11-26): typecheck and lint clean; Vitest 350 passed (ingest 50,
-consumer 55, api 79, shared 76, browser 9, dashboard 81); `bun test` 20 (server) + 158 (scripts) passed; `e2e` 71 passed;
+Local snapshot after the PHP client and browser extension removal (2026-11-26): typecheck and lint clean; Vitest 330
+passed (ingest 44, consumer 54, api 78, shared 73, dashboard 81); `bun test` 20 (server) + 154 (scripts) passed; `e2e` 68 passed;
 `nightwatch-agent` 27 passed; 0 failed. Hosted CI for the final commit is pending. These are local Workers/Miniflare checks, not evidence of a live Cloudflare deployment.
 Wrangler authentication was rechecked and is expired; resource placeholders remain. Gates 2-4 are still unverified.
 
@@ -65,9 +65,7 @@ VITE_API_URL=https://edgewatch-api.<subdomain>.workers.dev scripts/deploy.sh das
 
 ## 5. Tag and publish (only after 1-4 pass)
 
-- [x] Include MIT license files at the root and in both client packages, and npm license/repository metadata.
+- [x] Include the MIT license file at the root.
 - [ ] Change `## [1.0.0] - Unreleased` in `CHANGELOG.md` to the release date and remove the "not yet verified" line.
-- [ ] Tag: `git tag -a 1.0.0 -m "EdgeWatch 1.0.0" && git push origin 1.0.0`, matching `"version": "1.0.0"` in
-  `packages/browser/package.json`.
-- [ ] npm: `cd packages/browser && bun run build && npm publish --access public` (needs an npm account that owns the `@edgewatch` scope).
+- [ ] Tag: `git tag -a 1.0.0 -m "EdgeWatch 1.0.0" && git push origin 1.0.0`. Nothing is published to npm or Packagist.
 - [ ] GitHub release from the `1.0.0` tag with the CHANGELOG entry.

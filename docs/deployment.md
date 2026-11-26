@@ -146,7 +146,7 @@ Optional ingest vars: `TOKEN_TTL`, `MAX_BODY_BYTES`, `RATE_LIMIT_PERIOD`, `INGES
 than this with `413 payload_too_large` before buffering it: a `Content-Length` above the limit is refused before any
 byte is read, and a body without `Content-Length` (chunked) is counted while it streams and cut off at the first byte
 over the limit. The limit applies to the decoded size, so a gzip body cannot inflate past it. A missing, empty or
-malformed value uses the default; it is never treated as "no limit". `POST /api/browser` has a fixed 256 KB limit.
+malformed value uses the default; it is never treated as "no limit".
 API var: `CORS_ORIGIN` (default `*`; set it to the dashboard origin).
 
 ## 4. Create API keys
@@ -154,10 +154,9 @@ API var: `CORS_ORIGIN` (default `*`; set it to the dashboard origin).
 ```bash
 bun run --filter @edgewatch/ingest create-key my-app ingest server --remote    # NIGHTWATCH_TOKEN for the official agent
 bun run --filter @edgewatch/ingest create-key my-app read dashboard --remote   # optional credential for API integrations
-bun run --filter @edgewatch/ingest create-key my-app browser web --remote      # @edgewatch/browser key (public)
 ```
 
-Each key is printed once. Add `--expires 90d` to make it expire, and `--origins https://shop.example.com` to lock a browser key.
+Each key is printed once. Add `--expires 90d` to make it expire.
 Manage keys afterwards with the same CLI (`--remote` is the default; use `--local` for `wrangler dev` state):
 
 ```bash

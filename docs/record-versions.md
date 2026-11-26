@@ -1,11 +1,10 @@
 # Record and schema version policy
 
-EdgeWatch stores data in five formats. Each has its own compatibility rule for 1.x.
+EdgeWatch stores data in four formats. Each has its own compatibility rule for 1.x.
 
 | Format | Where | Rule within 1.x |
 | --- | --- | --- |
 | Wire records (`v`, `t`) | Ingest body from the official `laravel/nightwatch` agent | Accept every `v` the supported clients send; additive handling only |
-| EdgeWatch extensions (`web-vital`, `browser` field on exceptions, `execution_source: "browser"`) | `/api/browser`, `packages/shared/src/browser.ts` | `v: 1`; fields are only added, never renamed or removed |
 | D1 schema | `workers/migrations/NNNN_*.sql` | Forward-only, additive migrations |
 | Stored trace JSON | R2 `traces/<project>/<trace>.json` (`StoredTrace`: `project_id`, `trace_id`, `records`, optional `dropped_records`) | New optional fields only; readers ignore unknown fields |
 | Read API | `/v1/...` | Additive; a breaking change gets `/v2` |
@@ -43,7 +42,3 @@ EdgeWatch stores data in five formats. Each has its own compatibility rule for 1
 - A size or encoding change (for example gzip) would need a marker field and readers that handle both forms first; it is not
   planned for 1.x.
 
-## Packages
-
-- `@edgewatch/browser` follows semver. A minor release may add record fields or options; a
-  removal or rename is a major release.

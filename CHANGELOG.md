@@ -9,6 +9,10 @@ All notable changes to EdgeWatch are recorded here. Versions follow [Semantic Ve
   Composer/Pest CI steps. EdgeWatch now receives Laravel telemetry only from the official `laravel/nightwatch` agent
   (`NIGHTWATCH_BASE_URL` + `NIGHTWATCH_TOKEN`); `bun run nightwatch-agent` checks that path in a fresh Laravel app, and
   `bun run e2e` sends agent-format batches directly.
+- Removed before release: the browser extension (`@edgewatch/browser`, `POST /api/browser`, `browser`-scope keys and
+  their origin allow-list, browser breadcrumbs, Core Web Vitals, `/v1/web-vitals` and the dashboard's Web vitals view and
+  Browser trace filter). EdgeWatch only ingests what the official `laravel/nightwatch` agent sends. Migration `0015`
+  stays (migrations are forward-only); retention still prunes old `web_vitals` rows.
 - Dashboard command palette (Cmd+K / Ctrl+K): fuzzy page navigation, trace search, open by trace ID, full keyboard
   and focus handling. On phones the header keeps search, theme and sign-out on the first row.
 - Docs explain why the dashboard has no query EXPLAIN view (the wire format carries no bindings or plans).
@@ -79,9 +83,8 @@ replays, idempotent usage receipts (migration `0017_usage_receipts.sql`), recove
 writes, and Docker startup verification in CI. Apply migrations before deploying the updated consumer.
 
 First stable release of the self-hosted, single-tenant EdgeWatch stack: Cloudflare Workers (ingest, consumer, API),
-D1 + R2 storage, the React/Kumo dashboard, and `@edgewatch/browser` (npm). Laravel apps send telemetry with the official
-`laravel/nightwatch` agent. Only `@edgewatch/browser` is a versioned client package; the Workers, dashboard and
-`@edgewatch/shared` are private.
+D1 + R2 storage and the React/Kumo dashboard. Laravel apps send telemetry with the official `laravel/nightwatch` agent.
+No client packages are published; the Workers, dashboard and `@edgewatch/shared` are private.
 
 ### Nightwatch compatibility
 
@@ -102,20 +105,15 @@ Unknown record types with an integer `v` and a string `t` are accepted and kept 
 
 ### Endpoints
 
-- Ingest Worker: `POST /api/agent-auth`, `POST /api/ingest`, `POST /api/browser`, `GET /health`.
+- Ingest Worker: `POST /api/agent-auth`, `POST /api/ingest`, `GET /health`.
 - API Worker (read or admin key; every route also under `/v1/projects/:projectId/...` or with `?project_id=`):
   `/v1/projects`, `/v1/overview`, `/v1/requests`, `/v1/log-entries`, `/v1/issues`, `/v1/issues/:group`, `/v1/permissions`, `/v1/traces`, `/v1/traces/:traceId`, `/v1/traces/:traceId/raw`,
   `/v1/exceptions`, `/v1/exceptions/:group`, `/v1/queries`, `/v1/queries/:sqlHash`,
   `/v1/jobs`, `/v1/commands`, `/v1/cache`, `/v1/outgoing-requests`, `/v1/mail`, `/v1/notifications`,
-  `/v1/scheduled-tasks`, `/v1/logs`, `/v1/users`, `/v1/web-vitals` (each with a `/:key` detail route), `GET /health`.
+  `/v1/scheduled-tasks`, `/v1/logs`, `/v1/users` (each with a `/:key` detail route), `GET /health`.
 - Mutations require an admin key. Issues: `PUT /v1/projects/:projectId/issues/:group` (`status`, `reason`, `expected_revision`, optional `expected_status`).
 - Pipeline: `GET /v1/pipeline`, `GET /v1/dead-letters`, `POST /v1/dead-letters/replay`.
 - Usage and settings: `GET /v1/usage`, `PUT /v1/projects/:id/settings` (`daily_record_quota`, `retention_days`); `/v1/projects` includes both settings.
-
-### Browser SDK (`@edgewatch/browser`)
-
-- Reports uncaught errors and unhandled rejections to `POST /api/browser`. This is EdgeWatch's own format, not part of
-  the Nightwatch wire protocol.
 
 ### Reliability
 - Consumer retries are idempotent: duplicate records are skipped in R2 and a trace's D1 child rows are rebuilt on merge.
@@ -128,7 +126,7 @@ Unknown record types with an integer `v` and a string `t` are accepted and kept 
 - Usage metering: records per project per UTC day (`usage_daily`, migration `0014`), shown on the Pipeline page; an optional daily record quota (`DAILY_RECORD_QUOTA` or per project) writes the over-quota block automatically until UTC midnight.
 - Postgres through Hyperdrive as an optional event store: a `HYPERDRIVE` binding on the consumer and API replaces D1. Queries and migrations are translated from the SQLite dialect (`bun run migrate:postgres`); `bun run e2e:postgres` passes the full e2e on Postgres. Not yet run on a real account.
 - S3-compatible blob store (`S3_*` vars) and a SQL key store (`KEY_STORE=sql`, migration `0016_kv_store`) as alternatives to R2 and KV; `keys ... --postgres <url>` manages SQL keys. `bun run e2e:portable` passes the full e2e with Postgres, S3 (moto) and SQL keys. Not yet run on a real account.
-- Ingest now sends `Retry-After: 5` with the `503` it returns when the queue rejects a batch (agent and browser paths), like the other storage failures.
+- Ingest now sends `Retry-After: 5` with the `503` it returns when the queue rejects a batch , like the other storage failures.
 - Single-process server (`apps/server`, `bun run server`) and a `Dockerfile`: the Worker code runs unchanged in one Bun process on SQLite or Postgres, files or S3, with a durable SQLite queue journal, and serves the dashboard (`VITE_API_URL=/` means same origin). `bun run fresh-laravel:server` passes both fresh-Laravel checks against it.
 - MySQL 8.0.19+ as an event store, through Hyperdrive on Workers (picked by the `mysql://` scheme) or `DATABASE_URL=mysql://...` on `apps/server`. Queries are translated from the SQLite dialect (`toMysql`), migrations by `bun run migrate:mysql`; `setup:cloudflare` takes `EDGEWATCH_MYSQL_URL`. Checked by `bun run test:mysql` and `bun run e2e:mysql` (local only).
 - libSQL / Turso as an event store: `LIBSQL_URL` (+ `LIBSQL_AUTH_TOKEN`) on the consumer and API, or `DATABASE_URL=libsql://...` on `apps/server`. Queries and migrations run untranslated over HTTP (`@libsql/client/web`); `bun run migrate:libsql`, `test:libsql`, `e2e:libsql` (local sqld only).
@@ -136,12 +134,11 @@ Unknown record types with an integer `v` and a string `t` are accepted and kept 
 - Ingest tokens with a non-canonical base64url signature (the last character's 2 unused bits changed) are rejected; before, up to 4 spellings of one token verified.
 - `setup:cloudflare` provisions Hyperdrive when `EDGEWATCH_POSTGRES_URL` is set: finds or creates the configuration, binds it on the consumer and API, and runs the Postgres migrations.
 - Storage interfaces (`SqlDatabase`, `BlobStore`, `KeyStore`, `IngestQueue` in `@edgewatch/shared`): the Workers no longer depend on Cloudflare binding types; D1, R2, KV and Queues satisfy them directly, with no behavior change.
-- Seeded fuzz tests for the ingest/browser parsers, record validation, SQL normalization, PII scrubbing and ingest tokens. They found two bugs, now fixed: an ingest token with extra `.segment`s appended was accepted, and a truncated gzip body left an unhandled promise rejection in the ingest Worker (the request already got a 400).
+- Seeded fuzz tests for the ingest parser, record validation, SQL normalization, PII scrubbing and ingest tokens. They found two bugs, now fixed: an ingest token with extra `.segment`s appended was accepted, and a truncated gzip body left an unhandled promise rejection in the ingest Worker (the request already got a 400).
 - `bun run load-test`: local Miniflare throughput check, with dashboard read latency under load (see `docs/capacity.md`).
 - `bun run bench:consumer`: consumer memory/time benchmark. Ingest parks big traces in parts of at most 1 MB, and the
   consumer holds less in memory per trace (before/after numbers in `docs/capacity.md`).
 - `bun run backup:d1` (gzipped D1 dumps, rotation, optional R2 upload), restore steps, and a record/schema version policy (`docs/record-versions.md`).
-- Browser SDK breadcrumbs (clicks, navigation, console, fetch; PII-scrubbed) and Core Web Vitals (LCP, INP, CLS, FCP, TTFB) with a Web vitals page and `/v1/web-vitals` (migration `0015`).
 - Dashboard sign-in: the read key is entered in the browser and kept there (session or remembered); `VITE_API_KEY` is no longer built into the bundle.
 - Key management CLI (`keys create|list|revoke|rotate|audit`): optional key expiry, rotation with a grace period, revocation and a KV audit log. Expired keys are rejected and agent tokens never outlive their key.
 - Per-project retention: `projects.retention_days` overrides `RETENTION_DAYS`; the hourly job only cleans projects with expired rows.
@@ -160,4 +157,4 @@ Unknown record types with an integer `v` and a string `t` are accepted and kept 
 - Usage is metered per project per UTC day in the consumer, so a daily quota stops ingest within one batch of the limit, not exactly at it. There is no billing (EdgeWatch is single-tenant).
 - Verified locally on the release candidate: typecheck, lint, Vitest + script tests, `e2e` and `nightwatch-agent`
   (see [docs/release-checklist.md](docs/release-checklist.md) for the commit and counts). Pending: hosted CI on the final
-  commit, a deploy to a real Cloudflare account (gates 2-4), the tag and the npm publish decision.
+  commit, a deploy to a real Cloudflare account (gates 2-4), and the tag.

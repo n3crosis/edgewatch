@@ -42,7 +42,6 @@ are below what one consumer batch uses.
 | Cap | Value | Where |
 | --- | --- | --- |
 | Decoded ingest body | 20 MB (`MAX_BODY_BYTES`) | `workers/ingest` |
-| Browser ingest body | 256 KB, 50 events | `workers/ingest` |
 | Inline queue message | 100 KB; larger payloads are parked under `incoming/` in R2 | `workers/ingest` |
 | Ingest rate limit | 600 requests / 60 s per project (`RATE_LIMITER`), then `429` stop | `workers/ingest/wrangler.jsonc` |
 | Daily record quota | Off by default; `DAILY_RECORD_QUOTA` or per project. Checked after each consumer batch, then `429` stop until UTC midnight | `workers/consumer/wrangler.jsonc`, `PUT /v1/projects/:id/settings` |
