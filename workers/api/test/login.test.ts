@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
 import { expect, it } from 'vitest';
 import app, { type Env } from '../src/index';
 

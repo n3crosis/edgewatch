@@ -1,7 +1,10 @@
-declare module 'cloudflare:test' {
-  interface ProvidedEnv {
-    API_KEYS: KVNamespace;
-    TRACES: R2Bucket;
+declare global {
+  namespace Cloudflare {
+    interface Env {
+      API_KEYS: KVNamespace;
+      TRACES: R2Bucket;
+    }
   }
 }
+
 export {};

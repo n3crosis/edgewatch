@@ -1,5 +1,6 @@
 import { shortHash, type IngestMessage } from '@edgewatch/shared';
-import { createExecutionContext, createMessageBatch, createScheduledController, env, getQueueResult } from 'cloudflare:test';
+import { createExecutionContext, createMessageBatch, createScheduledController, getQueueResult } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
 import { describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import { alert, checkPipeline, MAX_REPLAY_ATTEMPTS, replayDeadLetters, retryDelaySeconds, storeDeadLetters } from '../src/pipeline';

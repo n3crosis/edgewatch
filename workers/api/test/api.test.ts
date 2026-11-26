@@ -1,6 +1,7 @@
 import { apiKeyKvKey, type IngestMessage } from '@edgewatch/shared';
-import { env } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { env } from 'cloudflare:workers';
+import { describe, expect, it } from 'vitest';
+import { beforeAll } from './storage';
 import { processMessage } from '../../consumer/src/process';
 import app, { type Env } from '../src/index';
 

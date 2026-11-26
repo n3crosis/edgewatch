@@ -1,5 +1,5 @@
 import { apiKeyKvKey, signIngestToken, type IngestMessage } from '@edgewatch/shared';
-import { env } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import app, { type Env } from '../src/index';
 

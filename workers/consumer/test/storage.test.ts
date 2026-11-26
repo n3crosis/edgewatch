@@ -1,5 +1,5 @@
 import type { BlobStore, IngestMessage, IngestQueue, KeyStore, SqlDatabase } from '@edgewatch/shared';
-import { env } from 'cloudflare:test';
+import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 
 describe('Cloudflare bindings satisfy the storage interfaces', () => {

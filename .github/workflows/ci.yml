@@ -24,7 +24,7 @@ jobs:
         with:
           bun-version: 1.4.5
 
-      # wrangler, vitest-pool-workers and scripts/e2e.sh run on Node.
+      # wrangler, @cloudflare/vitest-plugin and scripts/e2e.sh run on Node.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
