@@ -2,7 +2,7 @@
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "edgewatch-api",
   "main": "src/index.ts",
-  "compatibility_date": "2025-09-01",
+  "compatibility_date": "2026-11-20",
   "compatibility_flags": ["nodejs_compat"],
   // Workers Logs: the JSON log lines (request_id, project_id, event, ...) become queryable fields.
   "observability": { "enabled": true },
