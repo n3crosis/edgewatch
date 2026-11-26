@@ -60,7 +60,7 @@ export default function RequestsPage() {
 
   const overview = useAsync(() => (route === null ? api.overview(range, user) : Promise.resolve(null)), [route, range, user], { keepPreviousData: true });
   const groups = useAsync(() => (route === null ? api.requests(range, q, offset, user) : Promise.resolve(null)), [route, range, q, offset, user], { keepPreviousData: true });
-  const occurrences = useAsync(() => (route !== null ? api.traces({ source: 'request', user, route, route_kind: routeKind, method, range, status, min_duration_ms: minimumDuration || undefined }, cursor) : Promise.resolve(null)), [route, routeKind, method, range, status, minimumDuration, cursor, user], { keepPreviousData: true });
+  const occurrences = useAsync(() => (route !== null ? api.traces({ source: 'request', user, route, route_kind: routeKind, method, range, status, min_duration_ms: minimumDuration || undefined, q: q || undefined }, cursor) : Promise.resolve(null)), [route, routeKind, method, range, status, minimumDuration, q, cursor, user], { keepPreviousData: true });
   const trend = useAsync(() => (route === null ? Promise.resolve(null) : api.requestTrend({ user, route, route_kind: routeKind, method, range, status, min_duration_ms: minimumDuration || undefined })), [route, routeKind, method, range, status, minimumDuration, user], { keepPreviousData: true });
 
   const update = (patch: Record<string, string | null>) => setParams((current) => {
@@ -70,7 +70,11 @@ export default function RequestsPage() {
   });
 
   const hasListFilters = Boolean(q || user);
-  const hasDetailFilters = status !== 'all' || Boolean(minimumDuration) || Boolean(user);
+  const hasDetailFilters = status !== 'all' || Boolean(minimumDuration) || Boolean(user) || Boolean(q);
+  const detailRows = occurrences.data?.data ?? [];
+  const detail5xx = detailRows.filter((t) => Number(t.status_code ?? 0) >= 500).length;
+  const detail4xx = detailRows.filter((t) => Number(t.status_code ?? 0) >= 400 && Number(t.status_code ?? 0) < 500).length;
+  const detailOk = Math.max(0, detailRows.length - detail4xx - detail5xx);
 
   const chartSeries = route === null ? overview.data?.series ?? [] : trend.data?.series ?? [];
   const chartFetching = route === null ? !overview.loading && overview.fetching : !trend.loading && trend.fetching;
@@ -218,7 +222,14 @@ export default function RequestsPage() {
               <SearchBox value={q} onChange={(value) => update({ q: value || null, offset: null })} placeholder="Search routes" className="w-full sm:w-64" />
             ) : (
               <>
+                <SearchBox
+                  value={q}
+                  onChange={(value) => update({ q: value || null, cursor: null })}
+                  placeholder="Search requests"
+                  className="w-full sm:w-52"
+                />
                 <SegmentedToggle
+                  className="max-md:hidden"
                   value={over}
                   onChange={(value) => {
                     const nextMin =
@@ -236,13 +247,14 @@ export default function RequestsPage() {
                   ]}
                 />
                 <SegmentedToggle
+                  className="max-md:hidden"
                   value={status ?? 'all'}
                   onChange={(value) => update({ status: value === 'all' ? null : value, cursor: null })}
                   options={[
                     { value: 'all', label: 'View all' },
-                    { value: '2xx', label: '1/2/3xx' },
-                    { value: '4xx', label: '4xx' },
-                    { value: '5xx', label: '5xx' },
+                    { value: '2xx', label: '1/2/3xx', count: { value: detailOk, tone: 'default' } },
+                    { value: '4xx', label: '4xx', count: { value: detail4xx, tone: 'warning' } },
+                    { value: '5xx', label: '5xx', count: { value: detail5xx, tone: 'error' } },
                   ]}
                 />
               </>
@@ -365,7 +377,7 @@ export default function RequestsPage() {
           <Panel><Loading /></Panel>
         ) : occurrences.data.data.length === 0 ? (
           <Empty
-            action={hasDetailFilters ? <Button variant="secondary" size="sm" onClick={() => update({ status: null, min_duration_ms: null, user: null, cursor: null })}>Clear filters</Button> : undefined}
+            action={hasDetailFilters ? <Button variant="secondary" size="sm" onClick={() => update({ q: null, status: null, min_duration_ms: null, over: null, user: null, cursor: null })}>Clear filters</Button> : undefined}
           >
             No requests found
           </Empty>

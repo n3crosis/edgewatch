@@ -59,6 +59,64 @@ function CronSchedule({ cron, timezone }: { cron: unknown; timezone?: unknown })
   );
 }
 
+/** Computes the next matching minute for a standard 5-field cron expression (within 7 days). */
+function nextCronDate(expr: string, fromMs = Date.now()): Date | null {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const matchField = (field: string, value: number): boolean => {
+    if (field === '*') return true;
+    for (const seg of field.split(',')) {
+      if (seg.startsWith('*/')) {
+        const step = Number(seg.slice(2));
+        if (step > 0 && value % step === 0) return true;
+      } else if (seg.includes('-')) {
+        const [a, b] = seg.split('-').map(Number);
+        if (Number.isFinite(a) && Number.isFinite(b) && value >= a && value <= b) return true;
+      } else if (Number(seg) === value) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const d = new Date(fromMs);
+  d.setUTCSeconds(0, 0);
+  d.setUTCMinutes(d.getUTCMinutes() + 1);
+  for (let i = 0; i < 10_080; i++) {
+    if (
+      matchField(parts[0], d.getUTCMinutes()) &&
+      matchField(parts[1], d.getUTCHours()) &&
+      matchField(parts[2], d.getUTCDate()) &&
+      matchField(parts[3], d.getUTCMonth() + 1) &&
+      matchField(parts[4], d.getUTCDay())
+    ) {
+      return d;
+    }
+    d.setUTCMinutes(d.getUTCMinutes() + 1);
+  }
+  return null;
+}
+
+/** 1:1 Nightwatch `CronCountdown-BIjaPSXJ.js` live countdown cell for Scheduled Tasks. */
+function CronNextRun({ cron }: { cron: unknown }) {
+  const expr = String(cron ?? '').trim();
+  const next = expr ? nextCronDate(expr) : null;
+  if (!next) return <span className="text-neutral-400">—</span>;
+  const diffMin = Math.max(1, Math.round((next.getTime() - Date.now()) / 60_000));
+  const label =
+    diffMin < 60
+      ? `in ${diffMin}m`
+      : diffMin < 1440
+        ? `in ${Math.floor(diffMin / 60)}h ${diffMin % 60}m`
+        : `in ${Math.floor(diffMin / 1440)}d`;
+  return (
+    <Tooltip content={`${next.toISOString().replace('T', ' ').slice(0, 19)} UTC`} asChild>
+      <span className="cursor-default whitespace-nowrap font-mono text-xs text-neutral-500 dark:text-neutral-400">
+        {label}
+      </span>
+    </Tooltip>
+  );
+}
+
 export interface EventChartCardData {
   title: string;
   value: ReactNode;
@@ -583,6 +641,7 @@ export const EVENT_PAGES: EventPage[] = [
     emptyLabel: 'No scheduled tasks found',
     columns: [
       { label: 'Schedule', sortValue: (g) => String(g.cron ?? ''), render: (g) => <CronSchedule cron={g.cron} timezone={g.timezone} /> },
+      { label: 'Next Run', sortValue: (g) => nextCronDate(String(g.cron ?? ''))?.getTime() ?? Number.MAX_SAFE_INTEGER, render: (g) => <CronNextRun cron={g.cron} /> },
       {
         label: 'Processed',
         align: 'right',

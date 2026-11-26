@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import UserFilter from '@/components/UserFilter';
 import { userActivityLinks, withUser } from '@/lib/user-activity';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { Table } from '@cloudflare/kumo/components/table';
 import { GlobeIcon } from '@phosphor-icons/react';
 import { useParams, useSearchParams } from 'react-router-dom';
@@ -22,6 +23,7 @@ import {
   SectionBar,
   SegmentedToggle,
   StatusCodeText,
+  TimeAgo,
   UrlFormatDisplay,
   UtcDate,
   useRowNavigate,
@@ -78,6 +80,29 @@ export default function EventDetailPage({ page }: { page: EventPage }) {
   );
   const avgMs = durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
   const p95Ms = quantile95(durations);
+
+  const userLeaderboards = useMemo(() => {
+    if (!isUserDetail || !data?.length) return null;
+    const byRoute = new Map<string, { method: string; path: string; count: number; durations: number[]; errors: number }>();
+    for (const r of data) {
+      const { method, url } = splitTraceName(String(r.trace_name ?? r.trace_id));
+      const routeKey = `${method} ${url}`;
+      const entry = byRoute.get(routeKey) ?? { method, path: url, count: 0, durations: [], errors: 0 };
+      entry.count++;
+      const d = Number(r.duration_ms ?? 0);
+      if (Number.isFinite(d) && d > 0) entry.durations.push(d);
+      if (Number(r.status_code ?? 0) >= 400) entry.errors++;
+      byRoute.set(routeKey, entry);
+    }
+    const items = [...byRoute.values()].map((item) => ({
+      ...item,
+      p95: quantile95(item.durations),
+    }));
+    const topRoutes = [...items].sort((a, b) => b.count - a.count).slice(0, 5);
+    const slowRoutes = [...items].filter((i) => i.p95 > 0).sort((a, b) => b.p95 - a.p95).slice(0, 5);
+    const errorRoutes = [...items].filter((i) => i.errors > 0).sort((a, b) => b.errors - a.errors).slice(0, 5);
+    return { topRoutes, slowRoutes, errorRoutes };
+  }, [isUserDetail, data]);
 
   const filteredData = useMemo(() => {
     const rows = data ?? [];
@@ -217,7 +242,7 @@ export default function EventDetailPage({ page }: { page: EventPage }) {
               <h3 className="text-base font-semibold text-neutral-900 dark:text-white">Info</h3>
               <DescriptionList>
                 <DescriptionRow label="ID">{key}</DescriptionRow>
-                {lastSeenIso && <DescriptionRow label="Last Seen"><UtcDate iso={lastSeenIso} /></DescriptionRow>}
+                {lastSeenIso && <DescriptionRow label="Last Seen"><TimeAgo iso={lastSeenIso} /></DescriptionRow>}
                 <DescriptionRow label="Requests"><CompactNumber value={data.length} /></DescriptionRow>
                 <DescriptionRow label="Avg Duration">{avgMs > 0 ? ms(avgMs) : '—'}</DescriptionRow>
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -317,6 +342,85 @@ export default function EventDetailPage({ page }: { page: EventPage }) {
             </MetricChartCard>
           </div>
         </CardTray>
+      )}
+
+      {/* 1:1 Nightwatch `Show-DfbmHvZL.js` User Leaderboards (Top Routes, Slowest Routes, Error Routes) */}
+      {isUserDetail && userLeaderboards && (userLeaderboards.topRoutes.length > 0 || userLeaderboards.slowRoutes.length > 0) && (
+        <div
+          className={cn(
+            'grid grid-cols-1 gap-2',
+            userLeaderboards.errorRoutes.length > 0 ? 'md:grid-cols-3' : 'md:grid-cols-2',
+          )}
+        >
+          {userLeaderboards.topRoutes.length > 0 && (
+            <div className="rounded-lg border border-neutral-200 bg-white p-5 shadow-md shadow-black/[0.04] dark:border-white/[0.06] dark:bg-white/[0.02]">
+              <h3 className="pb-3 text-base font-semibold text-neutral-900 dark:text-white">Top Routes</h3>
+              <div>
+                {userLeaderboards.topRoutes.map((item) => (
+                  <Link
+                    key={`${item.method}-${item.path}`}
+                    to={`/requests?${new URLSearchParams({ q: item.path, user: key })}`}
+                    className="group flex items-baseline py-2 font-mono text-xs text-neutral-700 hover:text-neutral-950 dark:text-neutral-400 dark:hover:text-white"
+                  >
+                    <span className="truncate">
+                      <HttpMethodText method={item.method} className="mr-2 text-xs" />
+                      {item.path}
+                    </span>
+                    <span className="mx-2 mb-[3px] h-1 grow border-b-2 border-dotted border-neutral-200 dark:border-neutral-700" />
+                    <CompactNumber value={item.count} className="shrink-0 font-medium text-neutral-900 dark:text-neutral-200" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {userLeaderboards.slowRoutes.length > 0 && (
+            <div className="rounded-lg border border-neutral-200 bg-white p-5 shadow-md shadow-black/[0.04] dark:border-white/[0.06] dark:bg-white/[0.02]">
+              <div className="flex items-center justify-between pb-3">
+                <h3 className="text-base font-semibold text-neutral-900 dark:text-white">Slowest Routes</h3>
+                <Badge variant="secondary">P95</Badge>
+              </div>
+              <div>
+                {userLeaderboards.slowRoutes.map((item) => (
+                  <Link
+                    key={`${item.method}-${item.path}`}
+                    to={`/requests?${new URLSearchParams({ q: item.path, user: key })}`}
+                    className="group flex items-baseline py-2 font-mono text-xs text-neutral-700 hover:text-neutral-950 dark:text-neutral-400 dark:hover:text-white"
+                  >
+                    <span className="truncate">
+                      <HttpMethodText method={item.method} className="mr-2 text-xs" />
+                      {item.path}
+                    </span>
+                    <span className="mx-2 mb-[3px] h-1 grow border-b-2 border-dotted border-neutral-200 dark:border-neutral-700" />
+                    <span className="shrink-0 tabular-nums text-neutral-900 dark:text-neutral-200">{ms(item.p95)}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {userLeaderboards.errorRoutes.length > 0 && (
+            <div className="rounded-lg border border-neutral-200 bg-white p-5 shadow-md shadow-black/[0.04] dark:border-white/[0.06] dark:bg-white/[0.02]">
+              <h3 className="pb-3 text-base font-semibold text-neutral-900 dark:text-white">Failing Routes</h3>
+              <div>
+                {userLeaderboards.errorRoutes.map((item) => (
+                  <Link
+                    key={`${item.method}-${item.path}`}
+                    to={`/requests?${new URLSearchParams({ q: item.path, user: key })}`}
+                    className="group flex items-baseline py-2 font-mono text-xs text-neutral-700 hover:text-neutral-950 dark:text-neutral-400 dark:hover:text-white"
+                  >
+                    <span className="truncate">
+                      <HttpMethodText method={item.method} className="mr-2 text-xs" />
+                      {item.path}
+                    </span>
+                    <span className="mx-2 mb-[3px] h-1 grow border-b-2 border-dotted border-neutral-200 dark:border-neutral-700" />
+                    <CompactNumber value={item.errors} className="shrink-0 font-medium text-rose-600 dark:text-rose-400" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* 1:1 Capture SectionBar + SegmentedToggle filters + FloatingTablePanel */}

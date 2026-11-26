@@ -295,7 +295,64 @@ function createDataset(profile: MockProject) {
       ...(found.exception ? [{ v: 3, t: 'exception', ...base, _group: found.exception.group, class: found.exception.class, message: found.exception.message, file: found.exception.file, line: found.exception.line, handled: found.exception.handled }] : []),
     ];
     if (summary.execution_source === 'request') {
-      records.unshift({ v: 1, t: 'request', ...base, _group: hex(32), method: summary.method, url: summary.url, route_name: summary.route, route_path: summary.name.split(' ')[1], status_code: summary.status_code, duration: Math.round(summary.duration_ms * 1000), queries: summary.query_count, exceptions: summary.exception_count });
+      const durUs = Math.round(summary.duration_ms * 1000);
+      const bootstrapUs = Math.round(durUs * 0.08);
+      const beforeMwUs = Math.round(durUs * 0.09);
+      const renderUs = Math.round(durUs * 0.14);
+      const afterMwUs = Math.round(durUs * 0.05);
+      const sendingUs = Math.round(durUs * 0.04);
+      const terminatingUs = Math.round(durUs * 0.03);
+      const actionUs = Math.max(1000, durUs - bootstrapUs - beforeMwUs - renderUs - afterMwUs - sendingUs - terminatingUs);
+      const sampleHeaders = JSON.stringify({
+        accept: ['text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'],
+        'accept-encoding': ['gzip, deflate, br'],
+        'accept-language': ['en-US,en;q=0.9'],
+        cookie: ['XSRF-TOKEN=[42 bytes redacted]; laravel_session=[64 bytes redacted]'],
+        host: [profile.host],
+        'user-agent': ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'],
+        'x-forwarded-for': ['203.0.113.42'],
+        'x-forwarded-proto': ['https'],
+      });
+      const samplePayload =
+        summary.method === 'POST'
+          ? JSON.stringify({
+              cart_id: `cart_${summary.trace_id.slice(0, 8)}`,
+              currency: 'USD',
+              items: [{ sku: 'ACME-TEE-M', quantity: 2 }],
+            })
+          : '';
+      records.unshift({
+        v: 1,
+        t: 'request',
+        ...base,
+        _group: hex(32),
+        method: summary.method,
+        url: summary.url,
+        route_name: summary.route,
+        route_path: summary.name.split(' ')[1],
+        status_code: summary.status_code,
+        duration: durUs,
+        bootstrap: bootstrapUs,
+        before_middleware: beforeMwUs,
+        action: actionUs,
+        render: renderUs,
+        after_middleware: afterMwUs,
+        sending: sendingUs,
+        terminating: terminatingUs,
+        request_size: summary.method === 'POST' ? 1420 : 486,
+        response_size: 14820,
+        ip: '203.0.113.42',
+        headers: sampleHeaders,
+        payload: samplePayload,
+        context: JSON.stringify({
+          request_id: summary.trace_id,
+          route: summary.route,
+          region: 'us-east-1',
+          feature_flags: { new_checkout: true, instant_search: true },
+        }),
+        queries: summary.query_count,
+        exceptions: summary.exception_count,
+      });
     }
     const counts = new Map<string, { sql_hash: string; sql: string; count: number; total_ms: number }>();
     for (const q of found.queries) {

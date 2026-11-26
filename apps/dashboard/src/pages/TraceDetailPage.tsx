@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
+import ContextDrawer, { parseTraceContext } from '@/components/ContextDrawer';
+import ExceptionCard from '@/components/ExceptionCard';
+import HeadersAndPayloadCard from '@/components/HeadersAndPayloadCard';
 import Link from '@/components/ScopedLink';
+import TraceTimeline from '@/components/TraceTimeline';
+import { SPAN_LABELS } from '@/components/Waterfall';
 import {
   CopyButton,
   DescriptionList,
@@ -13,36 +17,30 @@ import {
   PageHeader,
   Panel,
   SourceBadge,
+  SourceTag,
   Sql,
   StatusBadge,
   UtcDate,
   useRowNavigate,
 } from '@/components/common';
-import Waterfall, { SPAN_COLORS, SPAN_ICONS, SPAN_LABELS } from '@/components/Waterfall';
+import { LogLevelTag } from '@/pages/LogsPage';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Banner } from '@cloudflare/kumo/components/banner';
-import { Button } from '@cloudflare/kumo/components/button';
-import { InputGroup } from '@cloudflare/kumo/components/input-group';
-import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { cn } from '@cloudflare/kumo/utils';
 import {
   ArrowUpRightIcon,
-  CaretLeftIcon,
-  CaretRightIcon,
-  GitBranchIcon,
+  CaretDownIcon,
   GitForkIcon,
   GlobeIcon,
-  MagnifyingGlassIcon,
   WarningIcon,
-  XIcon,
 } from '@phosphor-icons/react';
 import { api, useAsync } from '@/lib/api';
 import { bytes, ms } from '@/lib/format';
 import { traceView, updateTraceView } from '@/lib/trace-view';
-import { filterSpansByQuery, traceTimeBreakdown } from '@/lib/ui-helpers';
-import type { Span, SpanType } from '@/lib/types';
+import { filterSpansByQuery } from '@/lib/ui-helpers';
+import type { ExecutionSource, SpanType } from '@/lib/types';
 
-/** 1:1 Nightwatch `Show-CzNI7yfT.js` (`V`) URL formatter highlighting origin/path/query/hash. */
+/** 1:1 Nightwatch `Show-CWTcwHph.js` (`V`) URL formatter highlighting origin/path/query/hash. */
 function FormattedUrl({ url, className }: { url: string; className?: string }) {
   try {
     const parsed = new URL(url);
@@ -61,197 +59,133 @@ function FormattedUrl({ url, className }: { url: string; className?: string }) {
   }
 }
 
-const SPAN_SHEET_WIDTH_KEY = 'nightwatch:sheet-width-ratio';
-const DEFAULT_SPAN_SHEET_RATIO = 0.36;
-const MIN_SPAN_SHEET_RATIO = 0.22;
-const MAX_SPAN_SHEET_RATIO = 0.58;
-
-function readSpanSheetRatio(): number {
+function extractQueryParams(url: string | null | undefined): [string, string][] {
+  if (!url) return [];
   try {
-    const raw = globalThis.localStorage?.getItem(SPAN_SHEET_WIDTH_KEY);
-    if (!raw) return DEFAULT_SPAN_SHEET_RATIO;
-    const n = Number.parseFloat(raw);
-    if (Number.isFinite(n)) return Math.min(Math.max(n, MIN_SPAN_SHEET_RATIO), MAX_SPAN_SHEET_RATIO);
+    const parsed = new URL(url, 'https://edgewatch.local');
+    return [...parsed.searchParams.entries()];
   } catch {
-    /* Ignore storage errors. */
+    return [];
   }
-  return DEFAULT_SPAN_SHEET_RATIO;
 }
 
-/** 1:1 Nightwatch resizable right-aligned slide-over Sheet with ← / → / Escape keyboard navigation. */
-function SpanSheet({
-  span,
-  spans,
-  onSelect,
-  onClose,
-  fallbackId,
-}: {
-  span: Span | null;
-  spans: Span[];
-  onSelect: (span: Span) => void;
-  onClose: () => void;
-  fallbackId: string;
-}) {
-  const lastSpanId = useRef<string | null>(null);
-  const ratioRef = useRef<number>(readSpanSheetRatio());
-  const [widthRatio, setWidthRatio] = useState<number>(ratioRef.current);
-  const [resizing, setResizing] = useState(false);
+function sourceBackLink(source: ExecutionSource): { to: string; label: string } {
+  switch (source) {
+    case 'job':
+      return { to: '/jobs', label: 'Jobs' };
+    case 'command':
+      return { to: '/commands', label: 'Commands' };
+    case 'schedule':
+      return { to: '/scheduled-tasks', label: 'Scheduled Tasks' };
+    default:
+      return { to: '/requests', label: 'Requests' };
+  }
+}
 
-  if (span) lastSpanId.current = span.id;
-  const index = span ? spans.findIndex((s) => s.id === span.id) : -1;
-  const prevSpan = index > 0 ? spans[index - 1] : null;
-  const nextSpan = index >= 0 && index < spans.length - 1 ? spans[index + 1] : null;
+interface TraceExceptionRecord {
+  group: string;
+  class: string;
+  message: string;
+  file: string;
+  line: number;
+  handled: boolean;
+  stack: { file: string; source: string }[];
+  timestamp: string;
+}
 
-  const closeAndFocus = useCallback(() => {
-    onClose();
-    requestAnimationFrame(() => {
-      (document.getElementById(`span-${lastSpanId.current}`) ?? document.getElementById(fallbackId))?.focus();
-    });
-  }, [fallbackId, onClose]);
+function parseExceptionStack(raw: unknown): { file: string; source: string }[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) =>
+        item && typeof item === 'object'
+          ? { file: String((item as { file?: unknown }).file ?? ''), source: String((item as { source?: unknown }).source ?? '') }
+          : null,
+      )
+      .filter((x): x is { file: string; source: string } => Boolean(x && (x.file || x.source)));
+  }
+  if (typeof raw === 'string') {
+    return raw
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 25)
+      .map((line) => ({ file: line, source: '' }));
+  }
+  return [];
+}
 
-  useEffect(() => {
-    if (!span) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeAndFocus();
-      } else if (e.key === 'ArrowLeft' && prevSpan) {
-        e.preventDefault();
-        onSelect(prevSpan);
-      } else if (e.key === 'ArrowRight' && nextSpan) {
-        e.preventDefault();
-        onSelect(nextSpan);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [span, prevSpan, nextSpan, onSelect, closeAndFocus]);
-
-  useEffect(() => {
-    if (!resizing) return;
-    const onMove = (event: MouseEvent) => {
-      const next = Math.min(Math.max((window.innerWidth - event.clientX) / window.innerWidth, MIN_SPAN_SHEET_RATIO), MAX_SPAN_SHEET_RATIO);
-      ratioRef.current = next;
-      setWidthRatio(next);
-    };
-    const onUp = () => {
-      setResizing(false);
-      try {
-        localStorage.setItem(SPAN_SHEET_WIDTH_KEY, ratioRef.current.toString());
-      } catch {
-        /* Ignore storage errors. */
-      }
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-    document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
-    return () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.userSelect = '';
-      document.body.style.cursor = '';
-    };
-  }, [resizing]);
-
-  if (!span || typeof document === 'undefined') return null;
-
-  const SpanIcon = SPAN_ICONS[span.type];
-
-  return createPortal(
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={`${SPAN_LABELS[span.type]} span details`}>
-      <div className="fixed inset-0 bg-black/70 backdrop-blur-[1px]" onClick={closeAndFocus} aria-hidden />
-      <div
-        style={{ width: `max(360px, ${widthRatio * 100}vw)` }}
-        className="fixed inset-y-0 right-0 z-50 flex max-w-[92vw] flex-col border-l border-neutral-200 bg-neutral-100 shadow-2xl dark:border-white/[0.08] dark:bg-neutral-900"
-      >
-        <div
-          onMouseDown={(event) => {
-            event.preventDefault();
-            setResizing(true);
-          }}
-          aria-hidden
-          className="absolute top-0 -left-2 z-50 hidden h-full w-4 cursor-col-resize md:block"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute top-1/2 -left-1.25 z-50 hidden h-9 w-2.25 -translate-y-1/2 rounded-full border border-neutral-300 bg-white shadow-xs md:block dark:border-neutral-600 dark:bg-neutral-900"
-        />
-
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-neutral-200 bg-white/80 pr-4 dark:border-white/[0.08] dark:bg-neutral-900">
-          <div className="flex h-full min-w-0 items-center gap-3">
-            <button
-              type="button"
-              onClick={closeAndFocus}
-              aria-label="Close span details"
-              className="flex h-full w-12 shrink-0 items-center justify-center border-r border-neutral-200 bg-neutral-100 text-neutral-600 transition-colors hover:bg-neutral-200 hover:text-neutral-900 dark:border-white/[0.08] dark:bg-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-white"
-            >
-              <XIcon size={16} aria-hidden />
-            </button>
-            <span className={cn('size-2.5 shrink-0 rounded-full', SPAN_COLORS[span.type])} />
-            <SpanIcon size={16} className="shrink-0 text-neutral-500 dark:text-neutral-400" />
-            <span className="truncate font-medium text-neutral-900 dark:text-white">{SPAN_LABELS[span.type]}</span>
-          </div>
-          <span className="shrink-0 font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
-            {ms(span.duration_ms)} · +{ms(span.start_ms)}
+/** 1:1 Nightwatch collapsible Exception row (`be` in `pretty-bytes-DviNQNl5.js`). */
+function TraceExceptionRow({ exc }: { exc: TraceExceptionRecord }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className={cn(
+        'flex flex-col rounded-lg border border-neutral-200 transition-colors dark:border-white/[0.06]',
+        expanded
+          ? 'bg-neutral-50 dark:bg-neutral-800/40'
+          : 'bg-white hover:bg-neutral-50/80 dark:bg-white/[0.02] dark:hover:bg-neutral-800/30',
+      )}
+    >
+      <div className="flex items-center justify-between gap-3 p-2.5 pl-3.5">
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          <Badge variant={exc.handled ? 'warning' : 'error'}>
+            {exc.handled ? 'Handled' : 'Unhandled'}
+          </Badge>
+          <span className="truncate font-mono text-xs text-neutral-900 dark:text-neutral-100">
+            {exc.class}
           </span>
-        </div>
-
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6 text-sm">
-          <div className="relative">
-            <pre className="whitespace-pre-wrap break-all rounded-lg border border-neutral-200 bg-white p-4 pr-12 font-mono text-xs leading-6 dark:border-white/[0.08] dark:bg-white/[0.03]">
-              {span.type === 'query' ? <Sql sql={span.label} /> : span.label}
-            </pre>
-            <CopyButton text={span.label} label="Copy span" className="absolute right-2.5 top-2.5" />
-          </div>
-
-          <DescriptionList className="rounded-lg border border-neutral-200 bg-white p-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
-            <DescriptionRow label="Start">+{ms(span.start_ms)}</DescriptionRow>
-            <DescriptionRow label="Duration">{ms(span.duration_ms)}</DescriptionRow>
-            {Object.entries(span.meta ?? {}).map(([k, v]) => (
-              <DescriptionRow key={k} label={k.replace(/_/g, ' ')}>
-                {k === 'sql_hash' ? (
-                  <Link className="text-kumo-link hover:underline" to={`/queries/${v}`}>{String(v)}</Link>
-                ) : (
-                  String(v)
-                )}
-              </DescriptionRow>
-            ))}
-          </DescriptionList>
-        </div>
-
-        {spans.length > 1 && index >= 0 && (
-          <div className="flex shrink-0 items-center justify-between border-t border-neutral-200 bg-white/80 px-5 py-3 dark:border-white/[0.08] dark:bg-neutral-900">
-            <span className="font-mono text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
-              Span {index + 1} / {spans.length}
+          {exc.file && (
+            <span className="hidden truncate font-mono text-xs text-neutral-500 sm:inline dark:text-neutral-400">
+              {exc.file}
+              {exc.line ? `:${exc.line}` : ''}
             </span>
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" icon={CaretLeftIcon} disabled={!prevSpan} onClick={() => prevSpan && onSelect(prevSpan)}>
-                Previous
-              </Button>
-              <Button variant="secondary" size="sm" disabled={!nextSpan} onClick={() => nextSpan && onSelect(nextSpan)}>
-                Next
-                <CaretRightIcon />
-              </Button>
-            </div>
-          </div>
-        )}
+          )}
+        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setExpanded((prev) => !prev)}
+            aria-label={expanded ? 'Collapse exception' : 'Expand exception'}
+            className="grid size-7 place-items-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-white/10 dark:hover:text-white"
+          >
+            <CaretDownIcon size={15} className={cn('transition-transform duration-150', expanded && 'rotate-180')} aria-hidden />
+          </button>
+          {exc.group && (
+            <Link
+              to={`/exceptions/${encodeURIComponent(exc.group)}`}
+              className="inline-flex h-7 items-center rounded-md border border-neutral-200 bg-white px-2.5 text-xs font-medium text-neutral-700 transition-colors hover:border-blue-500 hover:text-neutral-900 dark:border-white/10 dark:bg-white/[0.04] dark:text-neutral-200 dark:hover:border-white/20 dark:hover:text-white"
+            >
+              View
+            </Link>
+          )}
+        </div>
       </div>
-    </div>,
-    document.body,
+      {expanded && (
+        <div className="border-t border-neutral-200 p-4 dark:border-white/[0.06]">
+          <ExceptionCard
+            className={exc.class}
+            message={exc.message}
+            handled={exc.handled}
+            file={exc.file}
+            line={exc.line}
+            stack={exc.stack}
+          />
+        </div>
+      )}
+    </div>
   );
 }
-
-const BREAKDOWN_COLORS: Record<SpanType | 'app', string> = {
-  ...SPAN_COLORS,
-  app: 'bg-indigo-500',
-};
 
 export default function TraceDetailPage() {
   const { traceId = '' } = useParams();
   const rowNav = useRowNavigate();
-  const eventTypeId = useId();
   const [spanQuery, setSpanQuery] = useState('');
+  const [contextOpen, setContextOpen] = useState(false);
   const { data, error, loading } = useAsync(() => api.trace(traceId), [traceId], { keepPreviousData: true });
   const [search, setSearch] = useSearchParams();
   const { eventType, spanId, selected, visibleSpans } = traceView(search, data?.spans ?? []);
@@ -259,23 +193,49 @@ export default function TraceDetailPage() {
     setSearch((previous) => updateTraceView(previous, values), { replace });
   };
 
-  const spanBreakdown = useMemo(() => {
-    const counts = new Map<SpanType, { count: number; totalMs: number }>();
-    for (const span of data?.spans ?? []) {
-      const entry = counts.get(span.type) ?? { count: 0, totalMs: 0 };
-      entry.count++;
-      entry.totalMs += span.duration_ms;
-      counts.set(span.type, entry);
-    }
-    return [...counts.entries()].sort((a, b) => b[1].totalMs - a[1].totalMs || b[1].count - a[1].count);
-  }, [data?.spans]);
-
-  const timeShare = useMemo(
-    () => (data ? traceTimeBreakdown(data.spans, data.trace.duration_ms) : []),
-    [data],
-  );
-
   const filteredSpans = useMemo(() => filterSpansByQuery(visibleSpans, spanQuery), [visibleSpans, spanQuery]);
+
+  // Extract raw Nightwatch root record, exceptions, and logs from `data.records`
+  const rootRecord = useMemo(() => {
+    const records = data?.records ?? [];
+    return records.find((r) => ['request', 'command', 'job-attempt', 'scheduled-task'].includes(String(r.t ?? '')));
+  }, [data?.records]);
+
+  const traceContext = useMemo(() => parseTraceContext(rootRecord?.context), [rootRecord]);
+
+  const exceptionRecords = useMemo<TraceExceptionRecord[]>(() => {
+    const records = data?.records ?? [];
+    return records
+      .filter((r) => r.t === 'exception')
+      .map((r) => ({
+        group: String(r._group ?? r.group_hash ?? ''),
+        class: String(r.class ?? 'Exception'),
+        message: String(r.message ?? ''),
+        file: String(r.file ?? ''),
+        line: Number(r.line ?? 0),
+        handled: Boolean(r.handled),
+        stack: parseExceptionStack(r.trace),
+        timestamp:
+          typeof r.timestamp === 'number'
+            ? new Date(r.timestamp * 1000).toISOString()
+            : data?.trace.timestamp ?? new Date().toISOString(),
+      }));
+  }, [data?.records, data?.trace.timestamp]);
+
+  const logRecords = useMemo(() => {
+    const records = data?.records ?? [];
+    return records
+      .filter((r) => r.t === 'log')
+      .map((r, idx) => ({
+        id: `${traceId}-log-${idx}`,
+        level: String(r.level ?? 'info'),
+        message: String(r.message ?? ''),
+        timestamp:
+          typeof r.timestamp === 'number'
+            ? new Date(r.timestamp * 1000).toISOString()
+            : data?.trace.timestamp ?? new Date().toISOString(),
+      }));
+  }, [data?.records, data?.trace.timestamp, traceId]);
 
   if (error) return <ErrorState error={error} />;
   if (loading) return <Loading />;
@@ -290,7 +250,7 @@ export default function TraceDetailPage() {
 
   const { trace, spans, capture, repeated_queries: repeated = [], user, related = [] } = data;
   const split = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i.exec(trace.name);
-  const method = split ? split[1].toUpperCase() : null;
+  const method = split ? split[1].toUpperCase() : trace.method;
   const routePath = split ? split[2] : trace.name;
   const statusCode = Number(trace.status_code ?? 0);
   const globeTone =
@@ -299,6 +259,18 @@ export default function TraceDetailPage() {
       : statusCode >= 400
         ? 'text-amber-600 dark:text-amber-500'
         : 'text-emerald-600 dark:text-emerald-500';
+
+  const queryParams = extractQueryParams(trace.url);
+  const requestSize = typeof rootRecord?.request_size === 'number' ? rootRecord.request_size : null;
+  const responseSize = typeof rootRecord?.response_size === 'number' ? rootRecord.response_size : null;
+  const ip = typeof rootRecord?.ip === 'string' && rootRecord.ip ? rootRecord.ip : null;
+  const deploy = typeof rootRecord?.deploy === 'string' && rootRecord.deploy ? rootRecord.deploy : null;
+  const rawHeaders = rootRecord?.headers;
+  const rawPayload = rootRecord?.payload;
+  const unhandledHero = exceptionRecords.find((e) => !e.handled);
+  const isRequestTrace = trace.execution_source === 'request';
+  const contextItemCount =
+    traceContext && typeof traceContext === 'object' ? Object.keys(traceContext).length : null;
 
   const spanStats = (type: SpanType) => {
     const list = spans.filter((s) => s.type === type);
@@ -325,10 +297,10 @@ export default function TraceDetailPage() {
   };
 
   return (
-    <div className="space-y-4 md:space-y-6 xl:space-y-10">
+    <div className="space-y-4 md:space-y-6">
       <PageHeader
         hideTelemetryControls
-        back={{ to: '/requests', label: 'Requests' }}
+        back={sourceBackLink(trace.execution_source)}
         documentTitle={trace.name}
         title={
           <span className="inline-flex flex-wrap items-center gap-2">
@@ -338,7 +310,19 @@ export default function TraceDetailPage() {
         }
       />
 
-      {/* 1:1 Capture `Show-CzNI7yfT.js` Direct Card with status-colored Globe + Method + URL + 3-col DescriptionList + Events */}
+      {/* 1:1 Nightwatch `Show-CWTcwHph.js`: Top Unhandled Exception Hero Card */}
+      {unhandledHero && (
+        <ExceptionCard
+          className={unhandledHero.class}
+          message={unhandledHero.message}
+          handled={false}
+          file={unhandledHero.file}
+          line={unhandledHero.line}
+          stack={unhandledHero.stack}
+        />
+      )}
+
+      {/* 1:1 Nightwatch `Show-CWTcwHph.js` Request / Execution Info Card + Events Summary */}
       <div className="grid overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-md shadow-black/[0.04] dark:border-white/[0.06] dark:bg-white/[0.02]">
         <div className="flex items-start justify-between gap-3 border-b border-neutral-200/80 p-5 py-4 dark:border-white/5">
           <div className="min-w-0 flex-1">
@@ -353,34 +337,82 @@ export default function TraceDetailPage() {
 
         <div className="grid gap-10 p-5">
           <div className="grid grid-cols-1 gap-8 md:grid-cols-2 xl:grid-cols-3">
-            <div className="flex-1">
+            <div className="flex-1 space-y-3">
               <DescriptionList>
                 <DescriptionRow label="Date"><UtcDate iso={trace.timestamp} /></DescriptionRow>
-                <DescriptionRow label="Status Code"><StatusBadge status={trace.status_code} source={trace.execution_source} /></DescriptionRow>
+                <DescriptionRow label={trace.execution_source === 'command' ? 'Exit Code' : 'Status Code'}>
+                  <StatusBadge status={trace.status_code} source={trace.execution_source} />
+                </DescriptionRow>
                 <DescriptionRow label="Duration">{ms(trace.duration_ms)}</DescriptionRow>
+                {trace.route && <DescriptionRow label="Route">{trace.route}</DescriptionRow>}
+                {typeof rootRecord?.queue === 'string' && rootRecord.queue && (
+                  <DescriptionRow label="Queue">{rootRecord.queue}</DescriptionRow>
+                )}
+                {typeof rootRecord?.connection === 'string' && rootRecord.connection && (
+                  <DescriptionRow label="Connection">{rootRecord.connection}</DescriptionRow>
+                )}
               </DescriptionList>
+              {queryParams.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1 font-mono text-xs">
+                  {queryParams.map(([k, v], idx) => (
+                    <div
+                      key={`${k}-${idx}`}
+                      className="flex max-w-full items-center rounded-sm border border-neutral-200 dark:border-white/10"
+                    >
+                      <span className="shrink-0 border-r border-neutral-200 px-1.5 py-0.5 font-medium text-neutral-600 dark:border-white/10 dark:text-neutral-400">
+                        {k}
+                      </span>
+                      <span className="break-all px-2 py-0.5 text-neutral-800 dark:text-neutral-200">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+
             <div className="flex-1">
               <DescriptionList>
+                {traceContext && (
+                  <DescriptionRow label="Context">
+                    <button
+                      type="button"
+                      onClick={() => setContextOpen(true)}
+                      className="inline-flex items-center gap-1.5 text-blue-600 hover:underline dark:text-emerald-400"
+                    >
+                      <span>
+                        {contextItemCount !== null
+                          ? `${contextItemCount} ${contextItemCount === 1 ? 'item' : 'items'}`
+                          : 'View context'}
+                      </span>
+                      <ArrowUpRightIcon size={12} aria-hidden />
+                    </button>
+                  </DescriptionRow>
+                )}
                 <DescriptionRow label="Server">{trace.server || '—'}</DescriptionRow>
+                {requestSize !== null && <DescriptionRow label="Request Size">{bytes(requestSize)}</DescriptionRow>}
+                {responseSize !== null && <DescriptionRow label="Response Size">{bytes(responseSize)}</DescriptionRow>}
                 <DescriptionRow label="Peak Memory">{trace.peak_memory_usage ? bytes(trace.peak_memory_usage) : '—'}</DescriptionRow>
+                {deploy && <DescriptionRow label="Deployment">{deploy}</DescriptionRow>}
                 <DescriptionRow label="Environment">{trace.environment || '—'}</DescriptionRow>
               </DescriptionList>
             </div>
-            {(user || trace.user) && (
+
+            {(user || trace.user || ip) && (
               <div className="flex-1 space-y-2">
                 <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">User</h3>
                 <DescriptionList>
                   {user?.name && <DescriptionRow label="Name">{user.name}</DescriptionRow>}
-                  <DescriptionRow label="Username">
-                    <Link
-                      to={`/users/${encodeURIComponent(user?.id ?? trace.user ?? '')}`}
-                      className="group inline-flex items-center gap-1.5 hover:underline"
-                    >
-                      <span>{user?.username ?? `#${user?.id ?? trace.user}`}</span>
-                      <ArrowUpRightIcon size={12} className="text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white" aria-hidden />
-                    </Link>
-                  </DescriptionRow>
+                  {(user || trace.user) && (
+                    <DescriptionRow label="Username">
+                      <Link
+                        to={`/users/${encodeURIComponent(user?.id ?? trace.user ?? '')}`}
+                        className="group inline-flex items-center gap-1.5 hover:underline"
+                      >
+                        <span>{user?.username ?? `#${user?.id ?? trace.user}`}</span>
+                        <ArrowUpRightIcon size={12} className="text-neutral-500 group-hover:text-neutral-900 dark:group-hover:text-white" aria-hidden />
+                      </Link>
+                    </DescriptionRow>
+                  )}
+                  {ip && <DescriptionRow label="IP">{ip}</DescriptionRow>}
                 </DescriptionList>
               </div>
             )}
@@ -414,14 +446,62 @@ export default function TraceDetailPage() {
         </div>
       </div>
 
+      {/* 1:1 Nightwatch `HeadersAndPayloadCard-JfysE1P8.js` collapsible Headers / Payload section */}
+      {(isRequestTrace || rawHeaders !== undefined || rawPayload !== undefined) && (
+        <HeadersAndPayloadCard
+          headers={rawHeaders}
+          payload={rawPayload}
+          statusCode={trace.status_code}
+          method={method}
+        />
+      )}
+
+      {/* 1:1 Nightwatch Exceptions list card */}
+      {exceptionRecords.length > 0 && (
+        <section className="space-y-2.5">
+          <h3 className="font-mono text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-400">
+            {exceptionRecords.length} {exceptionRecords.length === 1 ? 'Exception' : 'Exceptions'}
+          </h3>
+          <div className="space-y-1.5">
+            {exceptionRecords.map((exc, idx) => (
+              <TraceExceptionRow key={`${exc.group}-${idx}`} exc={exc} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 1:1 Nightwatch Logs section */}
+      {logRecords.length > 0 && (
+        <section className="space-y-2.5">
+          <h3 className="font-mono text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-400">
+            {logRecords.length} {logRecords.length === 1 ? 'Log' : 'Logs'}
+          </h3>
+          <div className="grid grid-cols-[auto_auto_auto_1fr] gap-x-4 gap-y-1">
+            {logRecords.map((row) => (
+              <div
+                key={row.id}
+                className="col-span-full grid grid-cols-subgrid items-start rounded-md border border-neutral-200 bg-white px-3 py-1.5 font-mono text-xs leading-loose shadow-2xs dark:border-neutral-700/30 dark:bg-neutral-800/30"
+              >
+                <UtcDate iso={row.timestamp} />
+                <SourceTag source={trace.execution_source.toUpperCase()} />
+                <LogLevelTag level={row.level} />
+                <span className="min-w-0 break-all text-neutral-900 dark:text-neutral-100">{row.message}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {capture && (!capture.records_available || capture.dropped_records > 0) && (
         <Banner
           variant="alert"
           icon={<WarningIcon />}
           title="Incomplete trace details"
-          description={!capture.records_available
-            ? 'Stored trace events are unavailable for this trace. Summary metadata may still be available; an empty timeline does not mean no events occurred.'
-            : `Storage limits reported ${capture.dropped_records} dropped events. The timeline shows only retained events.`}
+          description={
+            !capture.records_available
+              ? 'Stored trace events are unavailable for this trace. Summary metadata may still be available; an empty timeline does not mean no events occurred.'
+              : `Storage limits reported ${capture.dropped_records} dropped events. The timeline shows only retained events.`
+          }
         />
       )}
 
@@ -490,143 +570,23 @@ export default function TraceDetailPage() {
         </Panel>
       )}
 
-      <Panel
-        title={
-          <span className="flex items-center gap-2.5">
-            <span>Timeline</span>
-            <span className="font-mono text-xs font-normal text-kumo-subtle">
-              {filteredSpans.length === spans.length ? `${spans.length} spans` : `${filteredSpans.length} of ${spans.length} spans`}
-            </span>
-          </span>
-        }
-        actions={
-          <InputGroup className="h-8 w-52 bg-white sm:w-64 dark:bg-white/[0.03]">
-            <InputGroup.Addon align="start"><MagnifyingGlassIcon size={14} className="text-kumo-subtle" /></InputGroup.Addon>
-            <InputGroup.Input
-              value={spanQuery}
-              onChange={(e) => setSpanQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Escape' && spanQuery) setSpanQuery(''); }}
-              placeholder="Filter spans…"
-              aria-label="Filter spans"
-              className="h-8 text-sm"
-            />
-            {spanQuery && (
-              <InputGroup.Addon align="end">
-                <button
-                  type="button"
-                  onClick={() => setSpanQuery('')}
-                  aria-label="Clear span search"
-                  className="grid size-4 place-items-center rounded text-kumo-subtle hover:text-kumo-strong"
-                >
-                  <XIcon size={12} />
-                </button>
-              </InputGroup.Addon>
-            )}
-          </InputGroup>
-        }
-      >
-        {timeShare.length > 0 && (
-          <div className="border-b border-kumo-hairline px-5 py-4">
-            <div className="flex h-2 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-white/10">
-              {timeShare.map((segment) => (
-                <Tooltip key={segment.key} asChild content={`${segment.label}: ${ms(segment.ms)} (${segment.percent.toFixed(1)}%)`}>
-                  <div
-                    className={cn('h-full transition-opacity hover:opacity-85', BREAKDOWN_COLORS[segment.key])}
-                    style={{ width: `${Math.max(1.5, segment.percent)}%` }}
-                  />
-                </Tooltip>
-              ))}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-kumo-subtle">
-              {timeShare.map((segment) => (
-                <span key={segment.key} className="inline-flex items-center gap-2">
-                  <span className={cn('size-2 rounded-full', BREAKDOWN_COLORS[segment.key])} />
-                  <span>{segment.label}</span>
-                  <span className="font-mono tabular-nums text-kumo-default">{ms(segment.ms)}</span>
-                  <span className="tabular-nums">({segment.percent.toFixed(0)}%)</span>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-        {spanBreakdown.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 border-b border-kumo-hairline bg-neutral-50/60 px-5 py-3 dark:bg-white/[0.02]" role="group" aria-label="Filter spans by type">
-            <button
-              id={eventTypeId}
-              type="button"
-              aria-pressed={!eventType}
-              onClick={() => updateView({ type: null, span: null })}
-              className={cn(
-                'inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs transition-colors',
-                !eventType
-                  ? 'border-neutral-200 bg-white font-medium text-neutral-900 shadow-2xs dark:border-white/15 dark:bg-white/[0.06] dark:text-white'
-                  : 'border-transparent text-kumo-subtle hover:bg-white/60 hover:text-kumo-default dark:hover:bg-white/[0.04]',
-              )}
-            >
-              <span>All</span>
-              <span className="font-mono text-[11px] text-kumo-subtle">{spans.length}</span>
-            </button>
-            {spanBreakdown.map(([type, stats]) => {
-              const active = eventType === type;
-              const SpanIcon = SPAN_ICONS[type];
-              return (
-                <button
-                  key={type}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => updateView({ type: active ? null : type, span: null })}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors',
-                    active
-                      ? 'border-neutral-200 bg-white font-medium text-neutral-900 shadow-2xs dark:border-white/15 dark:bg-white/[0.06] dark:text-white'
-                      : 'border-transparent text-kumo-subtle hover:bg-white/60 hover:text-kumo-default dark:hover:bg-white/[0.04]',
-                  )}
-                >
-                  <span className={cn('size-2 rounded-full', SPAN_COLORS[type])} />
-                  <SpanIcon size={13} className="shrink-0" />
-                  <span>{SPAN_LABELS[type]}</span>
-                  <span className="font-mono text-[11px] text-kumo-subtle">
-                    {stats.count}{stats.totalMs > 0 ? ` · ${ms(stats.totalMs)}` : ''}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <div className="p-5">
-          {spanId && !selected && (
-            <div role="status" className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-kumo-hairline bg-kumo-elevated px-4 py-2.5 text-xs text-kumo-subtle">
-              <span>This event is no longer available in the stored trace.</span>
-              <Button variant="ghost" size="xs" onClick={() => updateView({ span: null }, true)}>Dismiss</Button>
-            </div>
-          )}
-          {filteredSpans.length ? (
-            <Waterfall spans={filteredSpans} total={trace.duration_ms} onSelect={(span) => updateView({ tab: 'timeline', span: span.id })} selected={selected?.id} />
-          ) : (
-            <Empty
-              variant="clean"
-              icon={<GitBranchIcon size={28} className="text-kumo-subtle" />}
-              action={
-                eventType || spanQuery ? (
-                  <Button variant="secondary" size="sm" onClick={() => { setSpanQuery(''); updateView({ type: null, span: null }); }}>
-                    Reset span filters
-                  </Button>
-                ) : undefined
-              }
-            >
-              {eventType || spanQuery ? 'No spans match these filters.' : 'No spans recorded for this trace.'}
-            </Empty>
-          )}
-        </div>
-      </Panel>
-
-      <SpanSheet
-        fallbackId={eventTypeId}
-        span={selected}
-        spans={filteredSpans}
-        onSelect={(span) => updateView({ tab: 'timeline', span: span.id }, true)}
-        onClose={() => updateView({ span: null }, true)}
+      {/* 1:1 Nightwatch Interactive Zoomable & Pannable Timeline (`St` in `pretty-bytes-DviNQNl5.js`) */}
+      <TraceTimeline
+        trace={trace}
+        rootRecord={rootRecord}
+        allSpans={spans}
+        visibleSpans={filteredSpans}
+        eventType={eventType ? (eventType as SpanType) : null}
+        spanQuery={spanQuery}
+        onSpanQueryChange={setSpanQuery}
+        onEventTypeChange={(next) => updateView({ type: next, span: null })}
+        selected={selected}
+        onSelect={(span) => updateView({ tab: 'timeline', span: span.id })}
+        onClearSelection={() => updateView({ span: null }, true)}
+        missingSpanNotice={Boolean(spanId && !selected)}
       />
+
+      <ContextDrawer open={contextOpen} context={traceContext} onClose={() => setContextOpen(false)} />
     </div>
   );
 }
