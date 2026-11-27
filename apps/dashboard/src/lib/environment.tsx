@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { selectEnvironment, setActiveEnvironment } from './environment-scope';
 import type { EnvironmentColor } from './types';
@@ -32,7 +32,7 @@ export function envDotClass(name: string, color?: string | null, index = 0): str
 
 const EnvironmentContext = createContext<{
   environment: string | undefined;
-  setEnvironment: (value: string | undefined) => void;
+  setEnvironment: (value: string | undefined, options?: { replace?: boolean }) => void;
   envRevision: number;
   refreshEnvironments: () => void;
 }>({
@@ -47,7 +47,11 @@ export function EnvironmentProvider({ children }: { children: ReactNode }) {
   const [envRevision, setEnvRevision] = useState(0);
   const environment = params.get('environment') || undefined;
   setActiveEnvironment(environment);
-  const setEnvironment = (value: string | undefined) => setParams((current) => selectEnvironment(current, value));
+  const setEnvironment = useCallback(
+    (value: string | undefined, options?: { replace?: boolean }) =>
+      setParams((current) => selectEnvironment(current, value), options),
+    [setParams],
+  );
   const refreshEnvironments = () => setEnvRevision((n) => n + 1);
   return (
     <EnvironmentContext.Provider value={{ environment, setEnvironment, envRevision, refreshEnvironments }}>

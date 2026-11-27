@@ -494,7 +494,7 @@ export function IssueDetailPage() {
                 </span>
                 <span className="inline-flex h-7 items-center gap-1.5 rounded-md border border-neutral-200 bg-neutral-50 px-2.5 text-xs font-medium text-neutral-800 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-neutral-200">
                   <span className="size-2 rounded-full bg-blue-600 dark:bg-emerald-500" aria-hidden />
-                  <span>{environment || 'All environments'}</span>
+                  <span>{environment || 'production'}</span>
                 </span>
                 <Link
                   to={excUrl}
@@ -603,7 +603,7 @@ export function IssueDetailPage() {
                   <div className="flex items-center justify-between gap-2">
                     <dt className="flex items-center gap-2 text-neutral-700 dark:text-neutral-300">
                       <span className={cn('size-2 rounded-full bg-blue-600 dark:bg-emerald-500')} aria-hidden />
-                      <span>{environment || 'All environments'}</span>
+                      <span>{environment || 'production'}</span>
                     </dt>
                     <dd>
                       <Link

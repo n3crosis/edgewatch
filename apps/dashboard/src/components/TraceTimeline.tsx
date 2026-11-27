@@ -656,8 +656,8 @@ export default function TraceTimeline({
         </div>
 
         {/* Sticky Timeline Header: Left ("Timeline" + Zoom Slider) | Right (Time Ruler) */}
-        <header className="sticky top-0 z-20 flex divide-x divide-neutral-200 border-b border-neutral-200 bg-white/95 backdrop-blur-sm dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/95">
-          <div className="flex w-1/4 min-w-[200px] max-w-[260px] shrink-0 items-center justify-between gap-3 px-4 py-3">
+        <header className="sticky top-0 z-20 flex h-11 divide-x divide-neutral-200 border-b border-neutral-200 bg-white/95 backdrop-blur-sm dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-900/95">
+          <div className="flex h-full w-1/4 min-w-[200px] max-w-[260px] shrink-0 items-center justify-between gap-3 px-4">
             <span className="text-sm font-semibold text-neutral-900 dark:text-white">Timeline</span>
             <label className="flex items-center gap-2" title={`Zoom ${zoom.toFixed(1)}× (Ctrl/Cmd + scroll)`}>
               <span className="sr-only">Timeline zoom</span>
@@ -672,9 +672,9 @@ export default function TraceTimeline({
               />
             </label>
           </div>
-          <div className="relative flex flex-1 items-center overflow-hidden pl-4 [mask-image:linear-gradient(to_right,transparent,black_0%,black_92%,transparent)]">
+          <div className="relative flex h-full flex-1 items-center overflow-hidden pl-2 [mask-image:linear-gradient(to_right,transparent,black_0%,black_92%,transparent)]">
             <div
-              className="relative flex h-10 w-full items-center font-mono text-xs/none"
+              className="relative flex h-full w-full items-center font-mono text-xs/none"
               style={{ transform: `translateX(-${scrollLeft}px)` }}
             >
               {rulerTicks.map((tick) => (
@@ -793,9 +793,9 @@ export default function TraceTimeline({
             style={{ cursor: dragging ? 'grabbing' : 'grab' }}
             className="relative flex-1 overflow-x-auto bg-neutral-50/70 dark:bg-transparent"
           >
-            <div className="relative min-h-full py-1" style={{ width: contentWidth }}>
-              {/* Vertical ruler gridlines */}
-              <div className="pointer-events-none absolute inset-0" aria-hidden>
+            <div className="relative min-h-full py-1" style={{ width: contentWidth + 16 }}>
+              {/* Vertical ruler gridlines aligned with px-2 bar origin */}
+              <div className="pointer-events-none absolute inset-y-0 right-2 left-2" aria-hidden>
                 {rulerTicks.map((tick) => (
                   <div
                     key={tick.ms}
@@ -853,14 +853,16 @@ export default function TraceTimeline({
                         return (
                           <div key={span.id} className="group/bar relative flex h-9 items-center px-2">
                             {isOffLeft && (
-                              <button
-                                type="button"
-                                onClick={() => scrollToOffset(span.start_ms)}
-                                aria-label={`Jump to ${span.label}`}
-                                className="sticky left-2 z-30 flex size-6 items-center justify-center rounded-md border border-neutral-300 bg-white/80 text-neutral-700 shadow-xs backdrop-blur-xs hover:bg-neutral-200 dark:border-white/15 dark:bg-neutral-800/80 dark:text-white"
-                              >
-                                <ArrowLeftIcon size={13} />
-                              </button>
+                              <div className="sticky left-2 z-30 w-0 overflow-visible">
+                                <button
+                                  type="button"
+                                  onClick={() => scrollToOffset(span.start_ms)}
+                                  aria-label={`Jump to ${span.label}`}
+                                  className="absolute top-1/2 -translate-y-1/2 flex size-6 items-center justify-center rounded-md border border-neutral-300 bg-white/80 text-neutral-700 shadow-xs backdrop-blur-xs hover:bg-neutral-200 dark:border-white/15 dark:bg-neutral-800/80 dark:text-white"
+                                >
+                                  <ArrowLeftIcon size={13} />
+                                </button>
+                              </div>
                             )}
 
                             <button

@@ -32,6 +32,7 @@ import {
   CaretDownIcon,
   GitForkIcon,
   GlobeIcon,
+  SidebarSimpleIcon,
   WarningIcon,
 } from '@phosphor-icons/react';
 import { api, useAsync } from '@/lib/api';
@@ -186,6 +187,7 @@ export default function TraceDetailPage() {
   const rowNav = useRowNavigate();
   const [spanQuery, setSpanQuery] = useState('');
   const [contextOpen, setContextOpen] = useState(false);
+  const [selectedLogContext, setSelectedLogContext] = useState<Record<string, unknown> | string | null>(null);
   const { data, error, loading } = useAsync(() => api.trace(traceId), [traceId], { keepPreviousData: true });
   const [search, setSearch] = useSearchParams();
   const { eventType, spanId, selected, visibleSpans } = traceView(search, data?.spans ?? []);
@@ -230,6 +232,7 @@ export default function TraceDetailPage() {
         id: `${traceId}-log-${idx}`,
         level: String(r.level ?? 'info'),
         message: String(r.message ?? ''),
+        context: parseTraceContext(r.context),
         timestamp:
           typeof r.timestamp === 'number'
             ? new Date(r.timestamp * 1000).toISOString()
@@ -470,24 +473,73 @@ export default function TraceDetailPage() {
         </section>
       )}
 
-      {/* 1:1 Nightwatch Logs section */}
+      {/* 1:1 Nightwatch Logs section (`Logs-CkjZtI46.js`) with aligned 24px grid cells and context drawer */}
       {logRecords.length > 0 && (
         <section className="space-y-2.5">
           <h3 className="font-mono text-xs font-semibold uppercase tracking-wide text-neutral-600 dark:text-neutral-400">
             {logRecords.length} {logRecords.length === 1 ? 'Log' : 'Logs'}
           </h3>
-          <div className="grid grid-cols-[auto_auto_auto_1fr] gap-x-4 gap-y-1">
-            {logRecords.map((row) => (
-              <div
-                key={row.id}
-                className="col-span-full grid grid-cols-subgrid items-start rounded-md border border-neutral-200 bg-white px-3 py-1.5 font-mono text-xs leading-loose shadow-2xs dark:border-neutral-700/30 dark:bg-neutral-800/30"
-              >
-                <UtcDate iso={row.timestamp} />
-                <SourceTag source={trace.execution_source.toUpperCase()} />
-                <LogLevelTag level={row.level} />
-                <span className="min-w-0 break-all text-neutral-900 dark:text-neutral-100">{row.message}</span>
-              </div>
-            ))}
+          <div className="grid grid-cols-[auto_auto_auto_1fr_auto] gap-x-4 gap-y-1">
+            {logRecords.map((row) => {
+              const isEmergency = row.level.toLowerCase() === 'emergency';
+              const hasContext = row.context !== null;
+              const openLog = () => {
+                setSelectedLogContext(
+                  row.context ?? {
+                    level: row.level,
+                    timestamp: row.timestamp,
+                    message: row.message,
+                  },
+                );
+              };
+              return (
+                <div
+                  key={row.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-haspopup="dialog"
+                  onClick={openLog}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openLog();
+                    }
+                  }}
+                  className={cn(
+                    'group/log col-span-full grid cursor-pointer grid-cols-subgrid items-start rounded-md border py-1.5 pr-2 pl-3 font-mono text-xs leading-6 shadow-2xs transition-colors',
+                    isEmergency
+                      ? 'border-rose-200 bg-rose-100 hover:bg-rose-200 dark:border-rose-900 dark:bg-[#4C0519]/80 dark:hover:bg-rose-800'
+                      : 'border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-700/30 dark:bg-neutral-800/30 dark:hover:bg-neutral-800',
+                  )}
+                >
+                  <span className="flex h-6 items-center">
+                    <UtcDate iso={row.timestamp} />
+                  </span>
+                  <span className="flex h-6 items-center">
+                    <SourceTag source={trace.execution_source.toUpperCase()} />
+                  </span>
+                  <span className="flex h-6 items-center whitespace-nowrap">
+                    <LogLevelTag level={row.level} />
+                  </span>
+                  <span className="min-w-0 break-all leading-6 text-neutral-900 dark:text-neutral-100">
+                    {row.message}
+                  </span>
+                  <span className="relative flex size-6 items-center justify-center">
+                    <SidebarSimpleIcon
+                      size={13}
+                      className="hidden text-neutral-500 group-hover/log:block dark:text-neutral-400"
+                      aria-hidden
+                    />
+                    {hasContext && (
+                      <span
+                        className="size-[5px] rounded-full bg-neutral-400 group-hover/log:hidden dark:bg-neutral-700"
+                        aria-hidden
+                      />
+                    )}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}
@@ -587,6 +639,7 @@ export default function TraceDetailPage() {
       />
 
       <ContextDrawer open={contextOpen} context={traceContext} onClose={() => setContextOpen(false)} />
+      <ContextDrawer open={selectedLogContext !== null} context={selectedLogContext} onClose={() => setSelectedLogContext(null)} />
     </div>
   );
 }

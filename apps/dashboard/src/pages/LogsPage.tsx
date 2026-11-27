@@ -292,7 +292,7 @@ export default function LogsPage() {
                       }
                     }}
                     className={cn(
-                      'group/log col-span-full grid cursor-pointer grid-cols-subgrid items-start rounded-md border py-1.5 pr-2 pl-3 text-left font-mono text-xs leading-loose shadow-2xs transition-colors',
+                      'group/log col-span-full grid cursor-pointer grid-cols-subgrid items-start rounded-md border py-1.5 pr-2 pl-3 text-left font-mono text-xs leading-6 shadow-2xs transition-colors',
                       isEmergency
                         ? 'border-rose-200 bg-rose-100 hover:bg-rose-200 dark:border-rose-900 dark:bg-[#4C0519]/80 dark:hover:bg-rose-800'
                         : isSelected
@@ -300,8 +300,10 @@ export default function LogsPage() {
                           : 'border-neutral-200 bg-white hover:bg-neutral-50 dark:border-neutral-700/20 dark:bg-neutral-800/25 dark:hover:bg-neutral-800',
                     )}
                   >
-                    <UtcDate iso={row.timestamp} />
-                    <span className="flex min-w-0 items-center gap-2">
+                    <span className="flex h-6 items-center">
+                      <UtcDate iso={row.timestamp} />
+                    </span>
+                    <span className="flex h-6 min-w-0 items-center gap-2">
                       <SourceTag source={row.server ? 'REQUEST' : 'LOG'} />
                       <Link
                         to={`/traces/${row.trace_id}`}
@@ -312,10 +314,10 @@ export default function LogsPage() {
                         {row.server || row.trace_id.slice(0, 12)}
                       </Link>
                     </span>
-                    <span className="whitespace-nowrap">
+                    <span className="flex h-6 items-center whitespace-nowrap">
                       <LogLevelTag level={row.level} />
                     </span>
-                    <span className="min-w-0 break-all text-neutral-900 dark:text-neutral-100">
+                    <span className="min-w-0 break-all leading-6 text-neutral-900 dark:text-neutral-100">
                       {row.message}
                     </span>
                     <span className="relative flex size-6 items-center justify-center">

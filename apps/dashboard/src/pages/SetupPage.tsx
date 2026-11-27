@@ -363,7 +363,11 @@ export default function SetupPage() {
       const targetName = deleteEnvTarget.name;
       await api.deleteEnvironment(targetName);
       setDeleteEnvTarget(null);
-      if (environment === targetName) setEnvironment(undefined);
+      if (environment === targetName) {
+        const remaining = (environments.data ?? []).filter((e) => e.name !== targetName);
+        const nextEnv = remaining.find((e) => e.name === 'production')?.name ?? remaining[0]?.name;
+        setEnvironment(nextEnv);
+      }
       refreshEnvironments();
       toasts.add({ variant: 'success', title: `Environment "${targetName}" deleted.` });
     } catch (err) {
@@ -640,15 +644,20 @@ NIGHTWATCH_BASE_URL=https://ingest.edgewatch.dev`;
                       </div>
 
                       <div className="flex shrink-0 items-center gap-1.5">
-                        <Button
-                          type="button"
-                          variant={isActive ? 'primary' : 'secondary'}
-                          size="sm"
-                          icon={isActive ? CheckIcon : undefined}
-                          onClick={() => setEnvironment(isActive ? undefined : item.name)}
-                        >
-                          {isActive ? 'Selected' : 'Filter'}
-                        </Button>
+                        {envList.length > 1 && (
+                          <Button
+                            type="button"
+                            variant={isActive ? 'primary' : 'secondary'}
+                            size="sm"
+                            icon={isActive ? CheckIcon : undefined}
+                            disabled={isActive}
+                            onClick={() => {
+                              if (!isActive) setEnvironment(item.name);
+                            }}
+                          >
+                            {isActive ? 'Active' : 'Switch'}
+                          </Button>
+                        )}
 
                         {canManage && (
                           <EnvironmentActionsMenu
@@ -882,7 +891,7 @@ NIGHTWATCH_BASE_URL=https://ingest.edgewatch.dev`;
               </Dialog.Title>
               <Dialog.Description className="text-sm leading-relaxed text-neutral-600 dark:text-neutral-400">
                 Remove <strong className="font-medium text-neutral-900 dark:text-white">{deleteEnvTarget?.name}</strong> from{' '}
-                {projectName}? Existing traces remain available under All environments unless new telemetry arrives with this environment name.
+                {projectName}? Existing telemetry records remain retained unless purged by retention settings.
               </Dialog.Description>
             </div>
           </div>

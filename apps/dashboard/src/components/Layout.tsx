@@ -186,28 +186,62 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
   }, [projectId, open]);
 
   const targetProjectId = hoveredProjectId || projectId;
-  const envs = useAsync(
-    () => (open ? api.environments(targetProjectId).catch(() => []) : Promise.resolve([])),
-    [open, targetProjectId, envRevision],
+  const activeEnvs = useAsync(
+    () => api.environments(projectId).catch(() => []),
+    [projectId, envRevision],
+  );
+  const hoveredEnvs = useAsync(
+    () => (open && targetProjectId !== projectId ? api.environments(targetProjectId).catch(() => []) : Promise.resolve(null)),
+    [open, targetProjectId, projectId, envRevision],
   );
 
   useEffect(() => {
-    if (!open || !envs.data) return;
+    if (!activeEnvs.data) return;
     setEnvCache((prev) => ({
       ...prev,
-      [targetProjectId]: envs.data!.map((row) => ({ name: row.name, color: row.color })),
+      [projectId]: activeEnvs.data!.map((row) => ({ name: row.name, color: row.color })),
     }));
-  }, [open, envs.data, targetProjectId]);
+  }, [activeEnvs.data, projectId]);
 
-  const envItems = useMemo(() => {
-    const source = envs.data ?? envCache[targetProjectId] ?? [];
+  useEffect(() => {
+    if (!open || !hoveredEnvs.data) return;
+    setEnvCache((prev) => ({
+      ...prev,
+      [targetProjectId]: hoveredEnvs.data!.map((row) => ({ name: row.name, color: row.color })),
+    }));
+  }, [open, hoveredEnvs.data, targetProjectId]);
+
+  const activeEnvItems = useMemo(() => {
+    const source = activeEnvs.data ?? envCache[projectId] ?? [];
     const map = new Map<string, { name: string; color?: string | null }>();
     for (const row of source) map.set(row.name, { name: row.name, color: row.color });
-    if (targetProjectId === projectId && environment !== undefined && !map.has(environment)) {
+    if (environment !== undefined && !map.has(environment)) {
       map.set(environment, { name: environment, color: null });
     }
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [envs.data, envCache, targetProjectId, projectId, environment]);
+  }, [activeEnvs.data, envCache, projectId, environment]);
+
+  const envItems = useMemo(() => {
+    if (targetProjectId === projectId) return activeEnvItems;
+    const source = hoveredEnvs.data ?? envCache[targetProjectId] ?? [];
+    const map = new Map<string, { name: string; color?: string | null }>();
+    for (const row of source) map.set(row.name, { name: row.name, color: row.color });
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [targetProjectId, projectId, activeEnvItems, hoveredEnvs.data, envCache]);
+
+  const primaryEnvName = useMemo(() => {
+    if (activeEnvItems.length === 0) return undefined;
+    return activeEnvItems.find((e) => e.name === 'production')?.name ?? activeEnvItems[0].name;
+  }, [activeEnvItems]);
+
+  useEffect(() => {
+    if (environment === undefined && primaryEnvName) {
+      setEnvironment(primaryEnvName, { replace: true });
+    }
+  }, [environment, primaryEnvName, setEnvironment]);
+
+  const displayedEnvName = environment ?? primaryEnvName ?? 'production';
+  const showEnvironmentsPane = envItems.length > 1;
 
   const list = projects.length ? projects : [{ id: projectId, name: projectId, host: undefined }];
   const filteredApps = useMemo(() => {
@@ -261,7 +295,7 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
                     {active.name}
                   </span>
                   <span className="mt-0.5 truncate text-xs text-neutral-500 dark:text-neutral-400">
-                    {environment || 'All environments'}
+                    {displayedEnvName}
                   </span>
                 </span>
               </span>
@@ -315,6 +349,7 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
                         {filteredApps.map((project) => {
                           const selected = project.id === projectId;
                           const previewed = project.id === targetProjectId;
+                          const cachedCount = envCache[project.id]?.length ?? 0;
                           const letter = (project.name || project.id).trim().charAt(0).toUpperCase();
                           return (
                             <button
@@ -322,7 +357,16 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
                               type="button"
                               onMouseEnter={() => setHoveredProjectId(project.id)}
                               onFocus={() => setHoveredProjectId(project.id)}
-                              onClick={() => onChangeProject(project.id)}
+                              onClick={() => {
+                                if (project.id === projectId) {
+                                  onChangeProject(project.id, undefined);
+                                  return;
+                                }
+                                const cached = envCache[project.id] ?? [];
+                                const targetPrimary =
+                                  cached.find((e) => e.name === 'production')?.name ?? cached[0]?.name ?? null;
+                                onChangeProject(project.id, targetPrimary);
+                              }}
                               className={`group/app flex h-9 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm transition-colors ${
                                 previewed
                                   ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'
@@ -337,7 +381,9 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
                               </span>
                               <span className="flex shrink-0 items-center gap-1">
                                 {selected && <CheckIcon size={14} className="text-emerald-400" />}
-                                <CaretRightIcon size={12} className="text-neutral-500 group-hover/app:text-white" aria-hidden />
+                                {cachedCount > 1 && (
+                                  <CaretRightIcon size={12} className="text-neutral-500 group-hover/app:text-white" aria-hidden />
+                                )}
                               </span>
                             </button>
                           );
@@ -359,52 +405,41 @@ function ProjectHeaderSwitcher({ onClose, compactRail = false }: { onClose?: () 
                   </button>
                 </div>
 
-                {/* Environments column (exact Nightwatch 2-pane switcher) */}
-                <div className="w-[230px] shrink-0 overflow-y-auto border-t border-neutral-800 p-2 sm:border-l sm:border-t-0 dark:border-neutral-700/50">
-                  <div className="px-2 pb-1.5 pt-1 text-xs font-medium text-neutral-400 dark:text-neutral-500">
-                    Environments
+                {/* Environments column: exact Nightwatch `x.app.environments.length > 1` rule */}
+                {showEnvironmentsPane && (
+                  <div className="w-[230px] shrink-0 overflow-y-auto border-t border-neutral-800 p-2 sm:border-l sm:border-t-0 dark:border-neutral-700/50">
+                    <div className="px-2 pb-1.5 pt-1 text-xs font-medium text-neutral-400 dark:text-neutral-500">
+                      Environments
+                    </div>
+                    <div className="space-y-0.5">
+                      {envItems.map((envItem, idx) => {
+                        const selected =
+                          targetProjectId === projectId &&
+                          (environment === envItem.name || (environment === undefined && envItem.name === primaryEnvName));
+                        const dotColor = envDotClass(envItem.name, envItem.color, idx);
+                        return (
+                          <button
+                            key={`${targetProjectId}-${envItem.name}`}
+                            type="button"
+                            style={{ animationDelay: `${Math.min(idx + 1, 6) * 40}ms` }}
+                            onClick={() => onChangeProject(targetProjectId, envItem.name)}
+                            className={`ew-fade-in-up flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
+                              selected
+                                ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'
+                                : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white dark:hover:bg-neutral-700/50'
+                            }`}
+                          >
+                            <span className="flex items-center gap-2.5 truncate">
+                              <span className={`size-2 shrink-0 rounded-full ${dotColor}`} aria-hidden />
+                              <span className="truncate">{envItem.name}</span>
+                            </span>
+                            {selected && <CheckIcon size={14} className="shrink-0 text-emerald-400" />}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="space-y-0.5">
-                    <button
-                      type="button"
-                      onClick={() => onChangeProject(targetProjectId, null)}
-                      className={`ew-fade-in-up flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
-                        targetProjectId === projectId && environment === undefined
-                          ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'
-                          : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white dark:hover:bg-neutral-700/50'
-                      }`}
-                    >
-                      <span className="flex items-center gap-2.5 truncate">
-                        <span className="size-2 shrink-0 rounded-full bg-blue-500 dark:bg-emerald-500" aria-hidden />
-                        <span className="truncate">All environments</span>
-                      </span>
-                      {targetProjectId === projectId && environment === undefined && <CheckIcon size={14} className="shrink-0 text-emerald-400" />}
-                    </button>
-                    {envItems.map((envItem, idx) => {
-                      const selected = targetProjectId === projectId && environment === envItem.name;
-                      const dotColor = envDotClass(envItem.name, envItem.color, idx);
-                      return (
-                        <button
-                          key={`${targetProjectId}-${envItem.name}`}
-                          type="button"
-                          style={{ animationDelay: `${Math.min(idx + 1, 6) * 40}ms` }}
-                          onClick={() => onChangeProject(targetProjectId, envItem.name)}
-                          className={`ew-fade-in-up flex h-9 w-full items-center justify-between gap-2 rounded-md px-2.5 text-left text-sm transition-colors ${
-                            selected
-                              ? 'bg-neutral-800 font-medium text-white dark:bg-neutral-700/80'
-                              : 'text-neutral-300 hover:bg-neutral-800/80 hover:text-white dark:hover:bg-neutral-700/50'
-                          }`}
-                        >
-                          <span className="flex items-center gap-2.5 truncate">
-                            <span className={`size-2 shrink-0 rounded-full ${dotColor}`} aria-hidden />
-                            <span className="truncate">{envItem.name}</span>
-                          </span>
-                          {selected && <CheckIcon size={14} className="shrink-0 text-emerald-400" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                )}
               </div>
             </Popover.Popup>
           </Popover.Positioner>

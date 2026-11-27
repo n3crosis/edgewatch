@@ -89,15 +89,14 @@ export function PageHeader({
   return (
     <>
       {back && (
-        <nav aria-label="Breadcrumb" className="!mb-1 flex items-center gap-1.5 text-sm text-neutral-600 dark:text-neutral-400">
+        <nav aria-label="Breadcrumb" className="!mb-0.5 flex items-center gap-1.5 text-sm text-neutral-600 dark:text-neutral-400">
           <Link
             to={back.to}
-            className="transition-colors hover:text-blue-600 dark:hover:text-emerald-500"
+            className="inline-flex items-center gap-1 transition-colors hover:text-blue-600 dark:hover:text-emerald-500"
           >
-            {back.label}
+            <CaretLeftIcon size={13} className="shrink-0 opacity-70" aria-hidden />
+            <span>{back.label}</span>
           </Link>
-          <CaretRightIcon size={13} className="shrink-0 text-neutral-500 dark:text-neutral-500" aria-hidden />
-          {pageTitle && <span className="truncate font-mono text-xs text-neutral-700 dark:text-neutral-300">{pageTitle}</span>}
         </nav>
       )}
       {/* 1:1 Nightwatch `AuthenticatedLayout-CCFtg7gs.js` sticky frosted header with shrinking title on scroll */}
@@ -223,9 +222,9 @@ export function SortableLabel({
         active && 'text-neutral-900 dark:text-white',
       )}
     >
-      <span className="relative flex items-center pr-3">
+      <span className="relative flex items-center">
         {children}
-        <span className="absolute right-0 flex flex-col gap-[2px]" aria-hidden>
+        <span className="absolute -right-3 flex flex-col gap-[2px]" aria-hidden>
           <span
             className={cn(
               'inline-block h-0 w-0 border-x-[3.5px] border-b-[4px] border-x-transparent',
@@ -262,7 +261,7 @@ export function SectionBar({
 }) {
   return (
     <div className={cn('mb-4 flex flex-col items-start justify-between gap-2 md:flex-row md:items-center md:gap-12', className)}>
-      <h2 className="flex shrink-0 items-center gap-2 text-lg font-medium text-neutral-900 dark:text-white [&_svg]:size-4 [&_svg]:text-blue-600 dark:[&_svg]:text-emerald-500">
+      <h2 className="flex shrink-0 items-center gap-2 text-lg font-medium text-neutral-900 dark:text-white [&_svg]:size-4 [&_svg]:text-blue-600 dark:[&_svg]:text-neutral-400">
         {icon}
         <span>{title}</span>
       </h2>
@@ -894,7 +893,7 @@ export function UtcDate({ iso, className }: { iso: string; className?: string })
       trigger={
         <time
           dateTime={iso}
-          className={cn('cursor-default whitespace-nowrap font-mono text-xs tabular-nums text-neutral-900 dark:text-neutral-200', className)}
+          className={cn('cursor-default whitespace-nowrap font-mono tabular-nums text-neutral-900 dark:text-neutral-200', className)}
         >
           {display}
           <span className="ml-1 text-neutral-400 dark:text-neutral-500">{tz}</span>
@@ -905,19 +904,19 @@ export function UtcDate({ iso, className }: { iso: string; className?: string })
   );
 }
 
-/** 1:1 Capture dotted-leader key-value description list (`DescriptionList-jv5GUTHT.js`). */
+/** 1:1 Capture dotted-leader key-value description list (`DescriptionList-DYTL3ZGZ.js`). */
 export function DescriptionList({ children, className }: { children: ReactNode; className?: string }) {
   return <dl className={cn('flex max-w-full flex-col gap-3 text-sm', className)}>{children}</dl>;
 }
 
 export function DescriptionRow({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <div className={cn('flex max-w-full items-baseline gap-1', className)}>
-      <dt className="shrink-0 font-mono text-xs font-medium uppercase text-neutral-600 md:h-6 dark:text-neutral-400">
+    <div className={cn('flex max-w-full items-baseline gap-1.5 leading-6', className)}>
+      <dt className="shrink-0 font-mono font-medium uppercase text-neutral-600 dark:text-neutral-400">
         {label}
       </dt>
       <div className="relative -bottom-px min-w-6 grow border-b-2 border-dotted border-neutral-300 dark:border-white/20" aria-hidden />
-      <dd className="min-w-0 truncate text-right font-mono text-sm text-neutral-900 dark:text-white">{children}</dd>
+      <dd className="min-w-0 truncate text-right font-mono text-neutral-900 dark:text-white">{children}</dd>
     </div>
   );
 }
